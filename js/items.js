@@ -112,12 +112,12 @@ export class ItemManager {
         const before = player.getWeapon().reserve;
         player.addAmmo(15);
         const added = player.getWeapon().reserve - before;
-        msg = added > 0 ? `+${added} AMMO` : 'RESERVE FULL';
+        msg = added > 0 ? `+${added} ammo` : 'Reserve full';
         if (added > 0) game.audio.pickup();
         break;
       }
       case 'bandage':
-        msg = player.heal(30) ? '+30 HP' : 'HP FULL';
+        msg = player.heal(30) ? '+30 HP' : 'HP full';
         if (msg === '+30 HP') game.audio.pickup();
         break;
       case 'mystery_power':

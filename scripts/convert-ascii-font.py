@@ -13,9 +13,10 @@ from fontTools.ttLib import TTFont
 
 CELL = 8
 COLS = 16
-UNITS_PER_PX = 64
-EM = CELL * UNITS_PER_PX
+EM = 128
+UNITS_PER_PX = EM // CELL
 SPACE_ADVANCE = 3 * UNITS_PER_PX
+TRAIL_PAD_PX = 1
 
 
 def is_ink(pixel: tuple[int, int, int, int]) -> bool:
@@ -49,9 +50,10 @@ def measure_advance(pixels: list[tuple[int, int]], code: int) -> int:
     if code == 32:
         return SPACE_ADVANCE
     if not pixels:
-        return UNITS_PER_PX
+        return 4 * UNITS_PER_PX
     max_x = max(p[0] for p in pixels)
-    return (max_x + 2) * UNITS_PER_PX
+    ink_px = max_x + 1
+    return (ink_px + TRAIL_PAD_PX) * UNITS_PER_PX
 
 
 def build_glyph(pixels: list[tuple[int, int]]):

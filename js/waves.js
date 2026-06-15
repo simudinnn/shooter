@@ -42,7 +42,7 @@ export class WaveManager {
     if (this.state === 'fighting' && this._aliveThisWave() === 0) {
       this.state = 'between';
       this.betweenTimer = Math.max(1.8, 3.5 - this.wave * 0.12);
-      this.game.showWaveBanner('WAVE CLEARED', 1.6);
+      this.game.showWaveBanner('Wave cleared', 1.6);
     }
   }
 
@@ -57,7 +57,7 @@ export class WaveManager {
   _beginWave() {
     this.wave += 1;
     this.state = 'spawning';
-    this.game.showWaveBanner(`WAVE ${this.wave}`, 2.2);
+    this.game.showWaveBanner(`Wave ${this.wave}`, 2.2);
     this.game.items?.spawnWaveItems(this.wave);
     const count = 4 + this.wave * 2;
     const interval = Math.max(0.28, 0.62 - this.wave * 0.025);

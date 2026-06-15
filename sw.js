@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v37';
+const CACHE = 'robot-ruins-v42';
 
 function playerSprites() {
   const paths = [
@@ -37,6 +37,7 @@ const SHELL = [
   './index.html',
   './style.css',
   './manifest.webmanifest',
+  './js/font-load.js',
   './js/main.js',
   './js/player.js',
   './js/enemies.js',

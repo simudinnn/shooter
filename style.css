@@ -23,19 +23,18 @@ canvas {
   font-family: 'GamePixel';
   src:
     url('assets/fonts/game-pixel.woff2') format('woff2'),
-    url('assets/fonts/game-pixel.woff') format('woff'),
     url('assets/fonts/game-pixel.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
-  font-display: swap;
+  font-display: block;
 }
 
 :root {
-  --pixel-font: 'GamePixel', monospace;
+  --pixel-font: 'GamePixel';
   --hud-xs: 16px;
-  --hud-sm: 20px;
+  --hud-sm: 16px;
   --hud-md: 24px;
-  --hud-lg: 40px;
+  --hud-lg: 32px;
   --hud-xl: 32px;
 }
 
@@ -47,7 +46,10 @@ body {
   touch-action: none;
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none;
   text-rendering: geometricPrecision;
+  letter-spacing: 0;
+  line-height: 1.25;
 }
 
 body.game-active,
@@ -120,8 +122,8 @@ canvas {
 
 #start-screen h1,
 #game-over h1 {
-  font-size: clamp(1.4rem, 5vw, 2.4rem);
-  letter-spacing: 0.01em;
+  font-size: clamp(16px, 5vw, 32px);
+  letter-spacing: 0;
   color: #f0a030;
   text-shadow: 0 2px 0 #8a5010, 0 0 24px rgba(240, 160, 48, 0.35);
   margin-bottom: 2rem;
@@ -133,8 +135,8 @@ canvas {
   color: #a8b8a0;
   margin-bottom: 2rem;
   font-size: var(--hud-sm);
-  letter-spacing: 0.02em;
-  line-height: 1.7;
+  letter-spacing: 0;
+  line-height: 1.5;
 }
 
 button {
@@ -144,7 +146,7 @@ button {
   font-family: var(--pixel-font);
   font-size: var(--hud-sm);
   font-weight: 400;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   padding: 14px 44px;
   border-radius: 2px;
   cursor: pointer;
@@ -214,7 +216,7 @@ button:active {
 
 #pickup-status {
   font-size: var(--hud-xs);
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   color: #8899aa;
   min-height: 20px;
   margin-top: 4px;
@@ -228,7 +230,7 @@ button:active {
 
 #powerup-status {
   font-size: var(--hud-xs);
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   color: #667788;
   min-height: 18px;
   line-height: 1.5;
@@ -250,7 +252,7 @@ button:active {
   border-radius: 4px;
   color: #f0a030;
   font-size: var(--hud-sm);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   z-index: 55;
   pointer-events: none;
 }
@@ -262,6 +264,7 @@ button:active {
   font-family: var(--pixel-font);
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0;
 }
 
 #health-text {
@@ -315,7 +318,7 @@ button:active {
 
 #weapon-name {
   font-size: var(--hud-sm);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: #f0a030;
   margin-bottom: 6px;
 }
@@ -340,7 +343,7 @@ button:active {
 #reload-indicator {
   color: #f05030;
   font-size: var(--hud-xs);
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   margin-top: 6px;
 }
 
@@ -427,7 +430,7 @@ button:active {
 .inv-heading {
   margin: 0;
   font-size: var(--hud-xs);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: #c8a860;
   font-weight: 400;
 }
@@ -474,8 +477,8 @@ button:active {
   cursor: pointer;
   color: #8899aa;
   font-family: var(--pixel-font);
-  font-size: 14px;
-  letter-spacing: 0.01em;
+  font-size: 16px;
+  letter-spacing: 0;
 }
 
 .inv-item-slot {
@@ -496,8 +499,8 @@ button:active {
   cursor: pointer;
   color: #8899aa;
   font-family: var(--pixel-font);
-  font-size: 14px;
-  letter-spacing: 0.01em;
+  font-size: 16px;
+  letter-spacing: 0;
 }
 
 .inv-weapon-slot:hover:not(:disabled),
@@ -564,7 +567,7 @@ button:active {
 
 .inv-weapon-slot.inv-empty-slot {
   color: #556066;
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .inv-equip-slot.inv-locked,
@@ -587,15 +590,15 @@ button:active {
 }
 
 .inv-slot-tag {
-  font-size: 12px;
+  font-size: 16px;
   color: #f0a030;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 
 .inv-item-name {
-  font-size: 11px;
+  font-size: 16px;
   color: #a8b8c8;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   text-align: center;
   line-height: 1.1;
   max-width: 100%;
@@ -606,13 +609,13 @@ button:active {
 }
 
 .inv-lock-label {
-  font-size: 11px;
+  font-size: 16px;
   color: #667;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 
 .inv-lock-icon {
-  font-size: 14px;
+  font-size: 16px;
   opacity: 0.7;
   line-height: 1;
 }
@@ -628,7 +631,7 @@ button:active {
   right: 32px;
   color: #aab8c8;
   font-size: var(--hud-sm);
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   line-height: 1.6;
 }
 
@@ -644,7 +647,7 @@ button:active {
   transform: translate(-50%, -50%) scale(0.92);
   font-size: clamp(1.25rem, 4vw, var(--hud-xl));
   font-weight: 400;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: #f0a030;
   text-shadow:
     0 0 20px rgba(240, 160, 48, 0.45),
@@ -766,14 +769,14 @@ button:active {
   background: rgba(50, 44, 72, 0.85);
   border-color: rgba(180, 160, 240, 0.55);
   color: #d8c8ff;
-  font-size: 11px;
-  letter-spacing: 0.02em;
+  font-size: 16px;
+  letter-spacing: 0;
 }
 
 .mb-small {
   width: 44px;
   height: 44px;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .mb-fire {
@@ -781,7 +784,7 @@ button:active {
   height: 88px;
   font-size: var(--hud-xs);
   font-weight: 400;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   background: rgba(180, 50, 30, 0.8);
   border-color: #ff8060;
   color: #fff;
@@ -808,7 +811,7 @@ body.game-active.mobile-ui .inv-right {
 }
 
 body.game-active.mobile-ui .inv-heading {
-  font-size: 10px;
+  font-size: 8px;
 }
 
 body.game-active.mobile-ui .inv-weapons-grid,
@@ -821,7 +824,7 @@ body.game-active.mobile-ui .inv-weapon-slot,
 body.game-active.mobile-ui .inv-equip-slot,
 body.game-active.mobile-ui .inv-item-slot {
   padding: 2px;
-  font-size: 10px;
+  font-size: 8px;
 }
 
 body.game-active.mobile-ui .inv-slot-tag,
@@ -834,7 +837,7 @@ body.game-active.mobile-ui .inv-lock-label {
 }
 
 body.game-active.mobile-ui .inv-lock-icon {
-  font-size: 11px;
+  font-size: 16px;
 }
 
 body.game-active.mobile-ui .inv-drag-ghost .inv-icon {

@@ -29,7 +29,7 @@ export const EQUIPMENT_SLOT_COUNT = 4;
 
 export const WEAPONS = {
   glock: {
-    name: 'GLOCK',
+    name: 'Glock',
     magSize: 12,
     reserve: 36,
     maxReserve: 60,
@@ -100,7 +100,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   uzi: {
-    name: 'UZI',
+    name: 'Uzi',
     magSize: 32,
     reserve: 64,
     maxReserve: 128,
@@ -118,7 +118,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   revolver: {
-    name: 'REVOLVER',
+    name: 'Revolver',
     magSize: 6,
     reserve: 24,
     maxReserve: 48,
@@ -134,7 +134,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   famas: {
-    name: 'FAMAS',
+    name: 'Famas',
     magSize: 25,
     reserve: 50,
     maxReserve: 100,
@@ -175,7 +175,7 @@ export const WEAPON_KEYS = Object.keys(WEAPONS);
 
 export const MELEE_WEAPONS = {
   knife: {
-    name: 'KNIFE',
+    name: 'Knife',
     damage: 35,
     range: 3,
     arc: Math.PI * 0.65,
@@ -189,7 +189,7 @@ export const MELEE_WEAPONS = {
     sprite: 'knife',
   },
   fire_axe: {
-    name: 'FIRE AXE',
+    name: 'Fire axe',
     damage: 55,
     range: 5,
     arc: Math.PI * 0.72,
@@ -203,7 +203,7 @@ export const MELEE_WEAPONS = {
     sprite: 'fire_axe',
   },
   wooden_bat: {
-    name: 'BAT',
+    name: 'Bat',
     damage: 25,
     range: 4,
     arc: Math.PI * 0.78,
@@ -217,7 +217,7 @@ export const MELEE_WEAPONS = {
     sprite: 'wooden_bat',
   },
   crowbar: {
-    name: 'CROWBAR',
+    name: 'Crowbar',
     damage: 32,
     range: 3.1,
     arc: Math.PI * 0.68,
@@ -573,9 +573,6 @@ export class Player {
   }
 
   getStealthMult() {
-    if (this.isSneaking) return 0.38;
-    if (this.isCrouching) return 0.62;
-    if (this.roll?.active) return 0.45;
     return 1;
   }
 
@@ -916,7 +913,7 @@ export class Player {
       Math.max(this.weapon.reserve, this.weapon.magSize * 3),
     );
     this._saveWeaponState();
-    return 'FULL RESUPPLY';
+    return 'Full resupply';
   }
 
   getSpeedMult(time) {
@@ -929,8 +926,8 @@ export class Player {
 
   getActivePowerUpLabel(time) {
     const labels = [];
-    if (time < this.powerUps.speed.until) labels.push('SPEED');
-    if (time < this.powerUps.damage.until) labels.push('DAMAGE');
+    if (time < this.powerUps.speed.until) labels.push('Speed');
+    if (time < this.powerUps.damage.until) labels.push('Damage');
     if (this.shield > 0) labels.push(`SHIELD ${Math.ceil(this.shield)}`);
     return labels.join(' · ');
   }
@@ -951,7 +948,7 @@ export class Player {
   }
 
   canShoot(time) {
-    if (this.isMobilityLocked(time) || this.isCrouching) return false;
+    if (!this.weapon) return false;
     const w = this.weapon;
     if (w.reloading && !this.isIncrementalReloadWeapon()) return false;
     if (w.ammo <= 0) return false;
@@ -961,7 +958,6 @@ export class Player {
 
   wantsAutoReload(time) {
     if (this.isMeleeActive() || !this.weaponKey) return false;
-    if (this.isMobilityLocked(time) || this.isCrouching) return false;
     const w = this.weapon;
     if (!w || w.reloading) return false;
     return w.ammo <= 0 && w.reserve > 0;
@@ -995,7 +991,7 @@ export class Player {
   }
 
   startReload(time) {
-    if (this.isMobilityLocked(time) || this.isCrouching) return false;
+    if (!this.weapon) return false;
     const w = this.weapon;
     if (w.reloading) {
       if (this.isIncrementalReloadWeapon()) {

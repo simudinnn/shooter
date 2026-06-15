@@ -1,5 +1,5 @@
 import { World, MAP_SIZE, TILE } from './world.js';
-import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, ROLL_SPEED, JUMP_SPEED, STAMINA_SPRINT_MIN } from './player.js';
+import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, STAMINA_SPRINT_MIN } from './player.js';
 import { createExplosion, createGroundSpew, updateParticles } from './enemies.js';
 import { WaveManager } from './waves.js';
 import { SoundManager } from './audio.js';
@@ -44,13 +44,9 @@ class Game {
     this._lastBounceLand = -1;
     this.mouseDown = false;
     this.prevMouseDown = false;
-    this.prevCrouchDown = false;
-    this.prevJumpDown = false;
-    this.prevMoveIntent = false;
     this._lastMoveDirX = 0;
     this._lastMoveDirZ = 0;
     this._lastMoveTime = 0;
-    this.mobileCrouch = false;
     this.keys = {};
     this.modifiers = { ctrl: false, shift: false };
     this.audio = new SoundManager();
@@ -127,7 +123,7 @@ class Game {
     if (!this.el.waveBanner) return;
     const banner = this.el.waveBanner;
     banner.textContent = text;
-    banner.classList.toggle('cleared', text.includes('CLEARED'));
+    banner.classList.toggle('cleared', text.toLowerCase().includes('cleared'));
     banner.classList.remove('hidden');
     requestAnimationFrame(() => banner.classList.add('show'));
     clearTimeout(this._waveBannerTimer);
@@ -143,13 +139,6 @@ class Game {
   _syncKeyboardModifiers(e) {
     this.modifiers.ctrl = e.ctrlKey;
     this.modifiers.shift = e.shiftKey;
-  }
-
-  _isCrouchHeld() {
-    return this.mobileCrouch
-      || this.keys['ControlLeft']
-      || this.keys['ControlRight']
-      || this.modifiers.ctrl;
   }
 
   _isShiftHeld() {
@@ -181,18 +170,10 @@ class Game {
       return;
     }
     if (!e.repeat) this.keys[e.code] = true;
-    const ctrlPress = e.code === 'ControlLeft' || e.code === 'ControlRight';
-    if (ctrlPress && this.running && !e.repeat) {
-      e.preventDefault();
-      if (!this.inventoryUI?.isOpen()) {
-        this._tryRollFromInput(performance.now() / 1000);
-      }
-    }
     if (!this.running) return;
     if (e.repeat) return;
     if (this.inventoryUI?.isOpen()) return;
     if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
-    if (e.code === 'Space') e.preventDefault();
     if (e.code === 'KeyE') this.items?.tryInteract(this.player, this);
     if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
     if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
@@ -211,7 +192,6 @@ class Game {
     this.keys = {};
     this.modifiers = { ctrl: false, shift: false };
     this.mouseDown = false;
-    this.mobileCrouch = false;
   }
 
   _bindEvents() {
@@ -296,25 +276,6 @@ class Game {
       if (this.running) this.inventoryUI.toggle();
     }, () => {});
 
-    bindBtn('mb-crouch', () => {
-      this.mobileCrouch = true;
-      if (this.running && Math.hypot(this.touchMove.x, this.touchMove.z) > 0.12) {
-        this._tryRollFromInput(performance.now() / 1000);
-      }
-    }, () => { this.mobileCrouch = false; });
-
-    bindBtn('mb-jump', () => {
-      if (!this.running) return;
-      const mag = Math.hypot(this.touchMove.x, this.touchMove.z);
-      const hasMove = mag > 0.12;
-      this.player?.startJump(
-        performance.now() / 1000,
-        hasMove,
-        hasMove ? this.touchMove.x : 0,
-        hasMove ? this.touchMove.z : 0,
-      );
-    }, () => {});
-
     if (this.mobile) {
       this.el.mobileControls.classList.remove('hidden');
       document.body.classList.add('mobile-ui');
@@ -334,33 +295,6 @@ class Game {
       moveZ += this.touchMove.z;
     }
     return { moveX, moveZ };
-  }
-
-  _resolveRollDirection(time, moveX, moveZ) {
-    if (Math.hypot(moveX, moveZ) > 0.12) return { x: moveX, z: moveZ };
-    const mx = this.player?.moveDirX ?? 0;
-    const mz = this.player?.moveDirZ ?? 0;
-    if (Math.hypot(mx, mz) > 0.01) return { x: mx, z: mz };
-    if (this._lastMoveTime && time - this._lastMoveTime < 0.5) {
-      if (Math.hypot(this._lastMoveDirX, this._lastMoveDirZ) > 0.01) {
-        return { x: this._lastMoveDirX, z: this._lastMoveDirZ };
-      }
-    }
-    const ax = Math.sin(this.player?.angle ?? 0);
-    const az = Math.cos(this.player?.angle ?? 0);
-    if (Math.hypot(ax, az) > 0.01) return { x: ax, z: az };
-    return null;
-  }
-
-  _tryRollFromInput(time) {
-    if (!this.player || this.inventoryUI?.isOpen()) return false;
-    const mobileRoll = this.mobile && Math.hypot(this.touchMove.x, this.touchMove.z) > 0.12;
-    if (!this._isShiftHeld() && !mobileRoll) return false;
-    if (!this.player.canRoll(time)) return false;
-    const { moveX, moveZ } = this._getMoveInput();
-    const dir = this._resolveRollDirection(time, moveX, moveZ);
-    if (!dir) return false;
-    return this.player.startRoll(time, dir.x, dir.z);
   }
 
   _onMouseMove(e) {
@@ -543,80 +477,6 @@ class Game {
       const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
       const usingStick = stickMag > 0.12;
 
-      const hasMoveIntent = Math.hypot(moveX, moveZ) > 0.12;
-      const moveLen = Math.hypot(moveX, moveZ);
-      if (hasMoveIntent) {
-        this.player.moveDirX = moveX / moveLen;
-        this.player.moveDirZ = moveZ / moveLen;
-        this._lastMoveDirX = this.player.moveDirX;
-        this._lastMoveDirZ = this.player.moveDirZ;
-        this._lastMoveTime = time;
-      }
-
-      const crouchDown = this._isCrouchHeld();
-      this.prevCrouchDown = crouchDown;
-
-      this.prevMoveIntent = hasMoveIntent;
-
-      const jumpEdge = this.keys['Space'] && !this.prevJumpDown;
-      this.prevJumpDown = this.keys['Space'];
-      if (jumpEdge) {
-        this.player.startJump(time, hasMoveIntent, moveX, moveZ);
-      }
-
-      const rolling = this.player.isRolling(time);
-      const jumping = this.player.isJumping(time);
-
-      this.player.isCrouching = crouchDown
-        && !hasMoveIntent
-        && !rolling
-        && !jumping;
-      this.player.isSneaking = crouchDown
-        && hasMoveIntent
-        && !rolling
-        && !jumping;
-
-      if (rolling) {
-        moveX = this.player.roll.dirX * ROLL_SPEED * dt;
-        moveZ = this.player.roll.dirZ * ROLL_SPEED * dt;
-        this.player.isMoving = true;
-        this.player.isSprinting = false;
-        const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
-        const r = moveWithEntityCollision(
-          this.world,
-          this.player.x,
-          this.player.z,
-          moveX,
-          moveZ,
-          this.player.radius,
-          this.player.radius,
-          targets,
-          this.player,
-        );
-        this.player.x = r.x;
-        this.player.z = r.z;
-      } else if (jumping) {
-        if (!this.player.jump.inPlace) {
-          moveX = this.player.jump.dirX * JUMP_SPEED * dt;
-          moveZ = this.player.jump.dirZ * JUMP_SPEED * dt;
-          const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
-          const r = moveWithEntityCollision(
-            this.world,
-            this.player.x,
-            this.player.z,
-            moveX,
-            moveZ,
-            this.player.radius,
-            this.player.radius,
-            targets,
-            this.player,
-          );
-          this.player.x = r.x;
-          this.player.z = r.z;
-        }
-        this.player.isMoving = !this.player.jump.inPlace;
-        this.player.isSprinting = false;
-      } else {
       const sprintInput = this._isShiftHeld();
       this.player.isMoving = moveX !== 0 || moveZ !== 0;
 
@@ -627,15 +487,12 @@ class Game {
           this.player.moveDirZ = moveZ / len;
         }
         let sprint;
-        if (this.player.isSneaking) {
-          sprint = false;
-        } else if (this.mobile && usingStick) {
+        if (this.mobile && usingStick) {
           sprint = stickMag > 0.9 && isMovingForward(this.player) && this.player.canSprint();
         } else {
           sprint = sprintInput && isMovingForward(this.player) && this.player.canSprint();
         }
-        const sneakMult = this.player.isSneaking ? this.player.sneakMult : 1;
-        const speed = this.player.speed * sneakMult * (sprint ? this.player.sprintMult : 1) * this.player.getSpeedMult(time);
+        const speed = this.player.speed * (sprint ? this.player.sprintMult : 1) * this.player.getSpeedMult(time);
         this.player.isSprinting = sprint;
         const analog = Math.min(1, len);
         moveX = (moveX / len) * speed * dt * analog;
@@ -654,7 +511,7 @@ class Game {
         );
         this.player.x = r.x;
         this.player.z = r.z;
-        const walkRate = this.player.isSneaking ? 4.2 : (this.player.isSprinting ? 9 : 6);
+        const walkRate = this.player.isSprinting ? 9 : 6;
         this.player.walkPhase += dt * walkRate;
 
         const bounceLand = Math.floor(this.player.walkPhase / 2);
@@ -673,7 +530,6 @@ class Game {
         this.player.isSprinting = false;
         this._lastWalkStep = -1;
         this._lastBounceLand = -1;
-      }
       }
 
       this._syncAim(dt);
@@ -1141,13 +997,7 @@ class Game {
     }
     const drawTime = performance.now() / 1000;
     const playerSheet = getPlayerSheet(this.player, drawTime);
-    const rolling = this.player.isRolling(drawTime);
-    const jumping = this.player.isJumping(drawTime);
-    const playerFlip = rolling
-      ? getFlipXFromAngle(Math.atan2(this.player.roll.dirX, this.player.roll.dirZ))
-      : jumping && !this.player.jump.inPlace
-        ? getFlipXFromAngle(Math.atan2(this.player.jump.dirX, this.player.jump.dirZ))
-        : getPlayerFlipX(this.player);
+    const playerFlip = getPlayerFlipX(this.player);
     const playerBounce = getPlayerBounceY(this.player, drawTime);
     const idleBreath = this._weaponBreathY ?? 0;
     const playerAnim = getPlayerAnim(this.player, drawTime);
@@ -1170,8 +1020,6 @@ class Game {
           ? { elapsed: weaponDraw.elapsed }
           : null;
       const reloadPose = getReloadPoseBlend(this.player, drawTime);
-
-      if (rolling || jumping || this.player.isCrouching || this.player.isSneaking) return;
 
       if (this.player.isMeleeActive()) {
         const drop = this.player.getMeleeSwingDrop(drawTime);
@@ -1327,7 +1175,7 @@ class Game {
     const interact = this.items.getNearbyInteractable(this.player);
     this.el.interactPrompt.classList.toggle('hidden', !interact);
     if (interact) {
-      this.el.interactPrompt.textContent = interact.type === 'mystery_weapon' ? '[E] OPEN WEAPON CRATE' : '[E] OPEN MYSTERY BOX';
+      this.el.interactPrompt.textContent = interact.type === 'mystery_weapon' ? '[E] Open weapon crate' : '[E] Open mystery box';
     }
 
     this.minimap.render(this.player, this.robots, this.world);
@@ -1341,7 +1189,7 @@ class Game {
     this.running = false;
     const elapsed = ((performance.now() - this.startTime) / 1000).toFixed(1);
     this.audio.lose();
-    this.el.gameOverTitle.textContent = 'MISSION FAILED';
+    this.el.gameOverTitle.textContent = 'Mission failed';
     this.el.gameOverTitle.style.color = '#f05030';
     const wave = this.waves?.wave || 0;
     this.el.gameOverStats.textContent = `Wave ${wave} · Kills: ${this.kills} · Time: ${elapsed}s · HP: ${Math.ceil(this.player.health)}`;
@@ -1350,13 +1198,6 @@ class Game {
     document.body.classList.remove('game-active');
     this._clearKeyboardInput();
     this.prevMouseDown = false;
-    this.prevCrouchDown = false;
-    this.prevJumpDown = false;
-    this.prevMoveIntent = false;
-    this._lastMoveDirX = 0;
-    this._lastMoveDirZ = 0;
-    this._lastMoveTime = 0;
-    this.mobileCrouch = false;
     this.touchMove = { x: 0, z: 0 };
     this.moveJoystick?.reset();
     this.inventoryUI?.forceClose();

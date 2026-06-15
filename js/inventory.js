@@ -1,7 +1,7 @@
 import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS, EQUIPMENT_SLOT_COUNT } from './player.js';
 import { weaponSpritePath } from './sprites.js';
 
-const EQUIPMENT_LABELS = ['HEAD', 'BODY', 'LEGS', 'GEAR'];
+const EQUIPMENT_LABELS = ['Head', 'Body', 'Legs', 'Gear'];
 const ANIM_MS = 240;
 
 export class InventoryUI {
@@ -361,12 +361,12 @@ export class InventoryUI {
       primary.appendChild(this._weaponIcon(cfg.sprite));
       const tag = document.createElement('span');
       tag.className = 'inv-slot-tag';
-      tag.textContent = 'MAIN';
+      tag.textContent = 'Main';
       primary.appendChild(tag);
       primary.appendChild(this._itemNameLabel(cfg.name));
     } else {
       primary.classList.add('inv-empty-slot');
-      primary.textContent = 'MAIN';
+      primary.textContent = 'Main';
     }
     primary.title = 'Main weapon — drop a gun here to equip';
     primary.addEventListener('click', () => {
@@ -384,7 +384,7 @@ export class InventoryUI {
     secondary.appendChild(this._weaponIcon(player.getActiveMelee().sprite));
     const secTag = document.createElement('span');
     secTag.className = 'inv-slot-tag';
-    secTag.textContent = 'MELEE';
+    secTag.textContent = 'Melee';
     secondary.appendChild(secTag);
     secondary.appendChild(this._itemNameLabel(player.getActiveMelee().name));
     secondary.title = 'Melee weapon — drop a melee here to equip';
