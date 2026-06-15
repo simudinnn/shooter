@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1a2820" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Robot Ruins" />
+  <title>Robot Ruins — 2.5D FPS</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <div id="overlay">
+    <div id="start-screen">
+      <div class="menu-frame">
+        <h1>ROBOT RUINS</h1>
+        <button id="start-btn">DEPLOY</button>
+      </div>
+    </div>
+    <div id="game-over" class="hidden">
+      <div class="menu-frame">
+        <h1 id="game-over-title">MISSION FAILED</h1>
+        <p id="game-over-stats"></p>
+        <button id="restart-btn">TRY AGAIN</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="hud" class="hidden">
+    <div id="hud-bottom-left">
+      <canvas id="minimap"></canvas>
+      <div id="health-panel">
+        <div id="health-bar-wrap">
+          <div id="health-bar"></div>
+          <span id="health-text">100</span>
+        </div>
+        <div id="pickup-status"></div>
+        <div id="powerup-status"></div>
+      </div>
+    </div>
+    <div id="interact-prompt" class="hidden">[E] OPEN</div>
+    <div id="weapon-panel">
+      <div id="weapon-name">PISTOL</div>
+      <div id="ammo-display">
+        <span id="ammo-current">12</span>
+        <span class="ammo-sep">/</span>
+        <span id="ammo-reserve">36</span>
+      </div>
+      <div id="reload-indicator" class="hidden">RELOADING...</div>
+    </div>
+    <div id="kill-counter">WAVE <span id="wave-num">0</span> · <span id="robots-left">0</span> LEFT</div>
+    <div id="wave-banner" class="hidden"></div>
+    <div id="damage-flash"></div>
+  </div>
+
+  <div id="inventory" class="hidden">
+    <div class="inv-backdrop"></div>
+    <div id="inventory-panel">
+      <img id="inventory-bg" src="assets/ui/inventory.png" alt="" draggable="false" />
+      <div id="inventory-layout">
+        <aside class="inv-left">
+          <h2 class="inv-heading">WEAPONS</h2>
+          <div id="inv-weapons-grid" class="inv-weapons-grid"></div>
+          <h2 class="inv-heading">EQUIPMENT</h2>
+          <div id="inv-equipment-grid" class="inv-equipment-grid"></div>
+        </aside>
+        <aside class="inv-right">
+          <h2 class="inv-heading">ITEMS</h2>
+          <div id="inv-items-grid" class="inv-items-grid"></div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <div id="mobile-controls" class="hidden">
+    <div id="mobile-move" class="joystick-wrap">
+      <div class="joystick-base" id="move-joystick-base">
+        <div class="joystick-knob" id="move-joystick-knob"></div>
+      </div>
+    </div>
+    <div id="mobile-actions">
+      <button type="button" class="mb-btn mb-small" id="mb-gun">1</button>
+      <button type="button" class="mb-btn mb-small" id="mb-knife">2</button>
+      <button type="button" class="mb-btn mb-small" id="mb-reload">R</button>
+      <button type="button" class="mb-btn mb-small" id="mb-interact">E</button>
+      <button type="button" class="mb-btn mb-small" id="mb-inventory">INV</button>
+      <button type="button" class="mb-btn mb-fire" id="mb-fire">FIRE</button>
+    </div>
+  </div>
+
+  <script src="js/register-sw.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
