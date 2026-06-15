@@ -1,7 +1,15 @@
-const CACHE = 'robot-ruins-v17';
+const CACHE = 'robot-ruins-v37';
 
 function playerSprites() {
-  const paths = ['./assets/player/idle.png'];
+  const paths = [
+    './assets/player/idle.png',
+    './assets/player/roll.png',
+    './assets/player/crouch.png',
+    './assets/player/sneak.png',
+    './assets/player/jump.png',
+    './assets/player/walk.png',
+    './assets/player/run.png',
+  ];
   for (let i = 1; i <= 4; i++) {
     paths.push(`./assets/player/walk_${i}.png`);
     paths.push(`./assets/player/run_${i}.png`);

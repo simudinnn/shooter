@@ -1,11 +1,11 @@
 import { World, MAP_SIZE, TILE } from './world.js';
-import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET } from './player.js';
+import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, ROLL_SPEED, JUMP_SPEED, STAMINA_SPRINT_MIN } from './player.js';
 import { createExplosion, createGroundSpew, updateParticles } from './enemies.js';
 import { WaveManager } from './waves.js';
 import { SoundManager } from './audio.js';
 import { Minimap } from './minimap.js';
 import { ItemManager, ITEM_DRAW_SCALE } from './items.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getWalkSheet, getWalkAnim, getFloorVariant, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getFloorVariant, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
@@ -15,7 +15,7 @@ const INTERNAL_W = 480;
 const INTERNAL_H = 270;
 /** Supersample the internal buffer for sharper fullscreen upscale. */
 const RENDER_SCALE = 2;
-const PPU = 5.5;
+const PPU = 7.5;
 const SPRITE_PLAYER = 1.50;
 const SPRITE_ENEMY = 1.45;
 const SPRITE_ITEM = ITEM_DRAW_SCALE;
@@ -44,7 +44,15 @@ class Game {
     this._lastBounceLand = -1;
     this.mouseDown = false;
     this.prevMouseDown = false;
+    this.prevCrouchDown = false;
+    this.prevJumpDown = false;
+    this.prevMoveIntent = false;
+    this._lastMoveDirX = 0;
+    this._lastMoveDirZ = 0;
+    this._lastMoveTime = 0;
+    this.mobileCrouch = false;
     this.keys = {};
+    this.modifiers = { ctrl: false, shift: false };
     this.audio = new SoundManager();
     this.sprites = new SpriteBank();
     this.mouse = { sx: INTERNAL_W / 2, sy: INTERNAL_H / 2, wx: 0, wz: 0 };
@@ -60,6 +68,8 @@ class Game {
 
   _initCanvas() {
     this.canvas = document.getElementById('game-canvas');
+    this.canvas.setAttribute('tabindex', '0');
+    this.canvas.style.outline = 'none';
     this.ctx = this.canvas.getContext('2d');
     this.renderScale = RENDER_SCALE;
     this.canvas.width = INTERNAL_W * RENDER_SCALE;
@@ -89,6 +99,8 @@ class Game {
       hud: document.getElementById('hud'),
       healthBar: document.getElementById('health-bar'),
       healthText: document.getElementById('health-text'),
+      staminaBar: document.getElementById('stamina-bar'),
+      staminaBarWrap: document.getElementById('stamina-bar-wrap'),
       pickupStatus: document.getElementById('pickup-status'),
       powerupStatus: document.getElementById('powerup-status'),
       interactPrompt: document.getElementById('interact-prompt'),
@@ -128,39 +140,105 @@ class Game {
     }, duration * 1000);
   }
 
+  _syncKeyboardModifiers(e) {
+    this.modifiers.ctrl = e.ctrlKey;
+    this.modifiers.shift = e.shiftKey;
+  }
+
+  _isCrouchHeld() {
+    return this.mobileCrouch
+      || this.keys['ControlLeft']
+      || this.keys['ControlRight']
+      || this.modifiers.ctrl;
+  }
+
+  _isShiftHeld() {
+    return this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.modifiers.shift;
+  }
+
+  _blockGameShortcuts(e) {
+    if (!this.running) return false;
+    if (e.code === 'F5') return false;
+    if (e.ctrlKey || e.metaKey) return true;
+    if (e.altKey && (e.code.startsWith('Key') || e.code.startsWith('Digit'))) return true;
+    return false;
+  }
+
+  _onGameKeyDown(e) {
+    if (this.running && e.ctrlKey && (e.code === 'KeyW' || e.key?.toLowerCase() === 'w')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    this._syncKeyboardModifiers(e);
+    if (this._blockGameShortcuts(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (e.code === 'Tab') {
+      e.preventDefault();
+      if (this.running && !e.repeat) this.inventoryUI.toggle();
+      return;
+    }
+    if (!e.repeat) this.keys[e.code] = true;
+    const ctrlPress = e.code === 'ControlLeft' || e.code === 'ControlRight';
+    if (ctrlPress && this.running && !e.repeat) {
+      e.preventDefault();
+      if (!this.inventoryUI?.isOpen()) {
+        this._tryRollFromInput(performance.now() / 1000);
+      }
+    }
+    if (!this.running) return;
+    if (e.repeat) return;
+    if (this.inventoryUI?.isOpen()) return;
+    if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
+    if (e.code === 'Space') e.preventDefault();
+    if (e.code === 'KeyE') this.items?.tryInteract(this.player, this);
+    if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
+    if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
+  }
+
+  _onGameKeyUp(e) {
+    this.keys[e.code] = false;
+    this._syncKeyboardModifiers(e);
+    if (this._blockGameShortcuts(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  _clearKeyboardInput() {
+    this.keys = {};
+    this.modifiers = { ctrl: false, shift: false };
+    this.mouseDown = false;
+    this.mobileCrouch = false;
+  }
+
   _bindEvents() {
     this.el.startBtn.addEventListener('click', () => this.start());
     this.el.restartBtn.addEventListener('click', () => this.start());
     window.addEventListener('resize', () => this._resizeCanvas());
 
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Tab') {
-        e.preventDefault();
-        if (this.running && !e.repeat) this.inventoryUI.toggle();
-        return;
+    window.addEventListener('keydown', (e) => this._onGameKeyDown(e), true);
+    window.addEventListener('keyup', (e) => this._onGameKeyUp(e), true);
+    window.addEventListener('blur', () => this._clearKeyboardInput());
+
+    this.canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        this.canvas.focus();
+        this.audio.resume();
+        this.mouseDown = true;
       }
-      this.keys[e.code] = true;
-      if (!this.running) return;
-      if (e.repeat) return;
-      if (this.inventoryUI.isOpen()) return;
-      if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
-      if (e.code === 'Space') this.player.startRoll(performance.now() / 1000);
-      if (e.code === 'KeyE') this.items?.tryInteract(this.player, this);
-      if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
-      if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
     });
-    window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
 
     this.canvas.addEventListener('mousemove', (e) => this._onMouseMove(e));
     document.addEventListener('mousemove', (e) => this._onMouseMove(e));
-    this.canvas.addEventListener('mousedown', (e) => {
-      this.audio.resume();
-      if (e.button === 0) this.mouseDown = true;
-    });
     document.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.mouseDown = false;
     });
     document.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('selectstart', (e) => e.preventDefault());
+    document.addEventListener('dragstart', (e) => e.preventDefault());
 
     this.canvas.addEventListener('wheel', (e) => {
       if (!this.running || this.inventoryUI?.isOpen()) return;
@@ -218,10 +296,71 @@ class Game {
       if (this.running) this.inventoryUI.toggle();
     }, () => {});
 
+    bindBtn('mb-crouch', () => {
+      this.mobileCrouch = true;
+      if (this.running && Math.hypot(this.touchMove.x, this.touchMove.z) > 0.12) {
+        this._tryRollFromInput(performance.now() / 1000);
+      }
+    }, () => { this.mobileCrouch = false; });
+
+    bindBtn('mb-jump', () => {
+      if (!this.running) return;
+      const mag = Math.hypot(this.touchMove.x, this.touchMove.z);
+      const hasMove = mag > 0.12;
+      this.player?.startJump(
+        performance.now() / 1000,
+        hasMove,
+        hasMove ? this.touchMove.x : 0,
+        hasMove ? this.touchMove.z : 0,
+      );
+    }, () => {});
+
     if (this.mobile) {
       this.el.mobileControls.classList.remove('hidden');
       document.body.classList.add('mobile-ui');
     }
+  }
+
+  _getMoveInput() {
+    let moveX = 0;
+    let moveZ = 0;
+    if (this.keys['KeyD'] || this.keys['ArrowRight']) moveX += 1;
+    if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveX -= 1;
+    if (this.keys['KeyS'] || this.keys['ArrowDown']) moveZ += 1;
+    if (this.keys['KeyW'] || this.keys['ArrowUp']) moveZ -= 1;
+    const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
+    if (stickMag > 0.12) {
+      moveX += this.touchMove.x;
+      moveZ += this.touchMove.z;
+    }
+    return { moveX, moveZ };
+  }
+
+  _resolveRollDirection(time, moveX, moveZ) {
+    if (Math.hypot(moveX, moveZ) > 0.12) return { x: moveX, z: moveZ };
+    const mx = this.player?.moveDirX ?? 0;
+    const mz = this.player?.moveDirZ ?? 0;
+    if (Math.hypot(mx, mz) > 0.01) return { x: mx, z: mz };
+    if (this._lastMoveTime && time - this._lastMoveTime < 0.5) {
+      if (Math.hypot(this._lastMoveDirX, this._lastMoveDirZ) > 0.01) {
+        return { x: this._lastMoveDirX, z: this._lastMoveDirZ };
+      }
+    }
+    const ax = Math.sin(this.player?.angle ?? 0);
+    const az = Math.cos(this.player?.angle ?? 0);
+    if (Math.hypot(ax, az) > 0.01) return { x: ax, z: az };
+    return null;
+  }
+
+  _tryRollFromInput(time) {
+    if (!this.player || this.inventoryUI?.isOpen()) return false;
+    const mobileRoll = this.mobile && Math.hypot(this.touchMove.x, this.touchMove.z) > 0.12;
+    if (!this._isShiftHeld() && !mobileRoll) return false;
+    if (!this.player.canRoll(time)) return false;
+    const { moveX, moveZ } = this._getMoveInput();
+    const dir = this._resolveRollDirection(time, moveX, moveZ);
+    if (!dir) return false;
+    return this.player.startRoll(time, dir.x, dir.z);
   }
 
   _onMouseMove(e) {
@@ -377,6 +516,8 @@ class Game {
     this.startTime = performance.now();
     this.running = true;
 
+    this.canvas.focus();
+
     this.el.startScreen.classList.add('hidden');
     this.el.gameOver.classList.add('hidden');
     this.el.hud.classList.remove('hidden');
@@ -392,29 +533,52 @@ class Game {
     const inventoryOpen = this.inventoryUI?.isOpen();
 
     if (!inventoryOpen) {
-      this.player.updateRoll(time);
+      this.player.updateMobility(time);
+      this.player.updateStamina(dt, time);
 
-      let moveX = 0;
-      let moveZ = 0;
-
-      if (this.keys['KeyW'] || this.keys['ArrowUp']) moveZ -= 1;
-      if (this.keys['KeyS'] || this.keys['ArrowDown']) moveZ += 1;
-      if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveX -= 1;
-      if (this.keys['KeyD'] || this.keys['ArrowRight']) moveX += 1;
+      const { moveX: rawMoveX, moveZ: rawMoveZ } = this._getMoveInput();
+      let moveX = rawMoveX;
+      let moveZ = rawMoveZ;
 
       const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
       const usingStick = stickMag > 0.12;
-      if (usingStick) {
-        moveX += this.touchMove.x;
-        moveZ += this.touchMove.z;
+
+      const hasMoveIntent = Math.hypot(moveX, moveZ) > 0.12;
+      const moveLen = Math.hypot(moveX, moveZ);
+      if (hasMoveIntent) {
+        this.player.moveDirX = moveX / moveLen;
+        this.player.moveDirZ = moveZ / moveLen;
+        this._lastMoveDirX = this.player.moveDirX;
+        this._lastMoveDirZ = this.player.moveDirZ;
+        this._lastMoveTime = time;
+      }
+
+      const crouchDown = this._isCrouchHeld();
+      this.prevCrouchDown = crouchDown;
+
+      this.prevMoveIntent = hasMoveIntent;
+
+      const jumpEdge = this.keys['Space'] && !this.prevJumpDown;
+      this.prevJumpDown = this.keys['Space'];
+      if (jumpEdge) {
+        this.player.startJump(time, hasMoveIntent, moveX, moveZ);
       }
 
       const rolling = this.player.isRolling(time);
+      const jumping = this.player.isJumping(time);
+
+      this.player.isCrouching = crouchDown
+        && !hasMoveIntent
+        && !rolling
+        && !jumping;
+      this.player.isSneaking = crouchDown
+        && hasMoveIntent
+        && !rolling
+        && !jumping;
 
       if (rolling) {
-        const rollSpeed = 19;
-        moveX = this.player.roll.dirX * rollSpeed * dt;
-        moveZ = this.player.roll.dirZ * rollSpeed * dt;
+        moveX = this.player.roll.dirX * ROLL_SPEED * dt;
+        moveZ = this.player.roll.dirZ * ROLL_SPEED * dt;
         this.player.isMoving = true;
         this.player.isSprinting = false;
         const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
@@ -431,8 +595,29 @@ class Game {
         );
         this.player.x = r.x;
         this.player.z = r.z;
+      } else if (jumping) {
+        if (!this.player.jump.inPlace) {
+          moveX = this.player.jump.dirX * JUMP_SPEED * dt;
+          moveZ = this.player.jump.dirZ * JUMP_SPEED * dt;
+          const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
+          const r = moveWithEntityCollision(
+            this.world,
+            this.player.x,
+            this.player.z,
+            moveX,
+            moveZ,
+            this.player.radius,
+            this.player.radius,
+            targets,
+            this.player,
+          );
+          this.player.x = r.x;
+          this.player.z = r.z;
+        }
+        this.player.isMoving = !this.player.jump.inPlace;
+        this.player.isSprinting = false;
       } else {
-      const sprintInput = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+      const sprintInput = this._isShiftHeld();
       this.player.isMoving = moveX !== 0 || moveZ !== 0;
 
       if (this.player.isMoving) {
@@ -442,12 +627,15 @@ class Game {
           this.player.moveDirZ = moveZ / len;
         }
         let sprint;
-        if (this.mobile && usingStick) {
-          sprint = stickMag > 0.9 && isMovingForward(this.player);
+        if (this.player.isSneaking) {
+          sprint = false;
+        } else if (this.mobile && usingStick) {
+          sprint = stickMag > 0.9 && isMovingForward(this.player) && this.player.canSprint();
         } else {
-          sprint = sprintInput && isMovingForward(this.player);
+          sprint = sprintInput && isMovingForward(this.player) && this.player.canSprint();
         }
-        const speed = this.player.speed * (sprint ? this.player.sprintMult : 1) * this.player.getSpeedMult(time);
+        const sneakMult = this.player.isSneaking ? this.player.sneakMult : 1;
+        const speed = this.player.speed * sneakMult * (sprint ? this.player.sprintMult : 1) * this.player.getSpeedMult(time);
         this.player.isSprinting = sprint;
         const analog = Math.min(1, len);
         moveX = (moveX / len) * speed * dt * analog;
@@ -466,7 +654,8 @@ class Game {
         );
         this.player.x = r.x;
         this.player.z = r.z;
-        this.player.walkPhase += dt * (this.player.isSprinting ? 9 : 6);
+        const walkRate = this.player.isSneaking ? 4.2 : (this.player.isSprinting ? 9 : 6);
+        this.player.walkPhase += dt * walkRate;
 
         const bounceLand = Math.floor(this.player.walkPhase / 2);
         if (bounceLand !== this._lastBounceLand) {
@@ -503,8 +692,12 @@ class Game {
           this.player.releaseMeleeCharge(time);
         }
         this._updateMeleeStrike(time);
-      } else if (wantsShoot && this.player.canShoot(time)) {
-        this._fireGun(time);
+      } else if (wantsShoot) {
+        if (this.player.canShoot(time)) {
+          this._fireGun(time);
+        } else if (this.player.wantsAutoReload(time)) {
+          this._tryStartReload(time);
+        }
       }
 
       this.prevMouseDown = this.mouseDown;
@@ -519,7 +712,11 @@ class Game {
     }
 
     this._updateCameraFollow(dt);
-    this.player.updateReload(time);
+    const reloadResult = this.player.updateReload(time);
+    if (reloadResult?.ejectCasings > 0) {
+      const cfg = WEAPONS[this.player.weaponKey];
+      this._emitCasings(reloadResult.ejectCasings, cfg?.casingColor || 'yellow');
+    }
     this._updateMidCooldownCasings(time);
     this.player.updateGunKick(dt);
 
@@ -587,6 +784,7 @@ class Game {
   _tryStartReload(time) {
     const result = this.player.startReload(time);
     if (!result) return;
+    if (result.cancelled) return;
     this.audio.reload();
     if (result.casingReload) {
       const cfg = WEAPONS[this.player.weaponKey];
@@ -900,11 +1098,16 @@ class Game {
         const s = this._worldToScreen(robot.x, robot.z);
         const bury = (1 - emerge) * 32;
         const scale = SPRITE_ENEMY * (0.15 + emerge * 0.85);
-        const drawX = Math.round(s.x + shake.x);
+        const chargeShake = robot.jump?.charging
+          ? Math.sin(performance.now() * 0.028) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
+          : 0;
+        const drawX = Math.round(s.x + shake.x + chargeShake);
         const robotFlip = getFlipXFromAngle(robot.angle);
-        const robotBounce = getWalkBounceY(robot.walkPhase, robot.moving && !robot.emerging);
+        const robotBounce = getWalkBounceY(robot.walkPhase, robot.moving && !robot.emerging && !robot.jump?.active && !robot.jump?.charging);
+        const jumpBob = robot.jump?.active ? -(robot.bob || 0) * 16 : 0;
+        const chargeBob = robot.jump?.charging ? (robot.bob || 0) * 14 : 0;
         const emergeBob = robot.emerging ? (robot.bob || 0) * 3 : 0;
-        const drawY = Math.round(s.y - bury + shake.y + emergeBob + robotBounce);
+        const drawY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob + robotBounce);
         if (robot.emerging) {
           const hole = 1 - emerge;
           ctx.fillStyle = `rgba(18, 14, 10, ${0.55 * hole})`;
@@ -937,9 +1140,15 @@ class Game {
       }});
     }
     const drawTime = performance.now() / 1000;
-    const playerSheet = getPlayerSheet(this.player);
-    const playerFlip = getPlayerFlipX(this.player);
-    const playerBounce = getPlayerBounceY(this.player);
+    const playerSheet = getPlayerSheet(this.player, drawTime);
+    const rolling = this.player.isRolling(drawTime);
+    const jumping = this.player.isJumping(drawTime);
+    const playerFlip = rolling
+      ? getFlipXFromAngle(Math.atan2(this.player.roll.dirX, this.player.roll.dirZ))
+      : jumping && !this.player.jump.inPlace
+        ? getFlipXFromAngle(Math.atan2(this.player.jump.dirX, this.player.jump.dirZ))
+        : getPlayerFlipX(this.player);
+    const playerBounce = getPlayerBounceY(this.player, drawTime);
     const idleBreath = this._weaponBreathY ?? 0;
     const playerAnim = getPlayerAnim(this.player, drawTime);
     drawList.push({ z: this.player.z - 0.01, draw: () => {
@@ -953,32 +1162,40 @@ class Game {
     }});
     drawList.push({ z: this.player.z + 0.01, draw: () => {
       const lunge = this.player.getMeleeSwingLunge(drawTime);
-      const gunAim = gunAimTransform(this.player.angle);
-      const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
       const playerGs = this._worldToScreen(this.player.x, this.player.z);
-      const gunWorldX = this.player.x + Math.sin(this.player.angle) * holdDist;
-      const gunWorldZ = this.player.z + Math.cos(this.player.angle) * holdDist;
-      const normalGs = this._worldToScreen(gunWorldX, gunWorldZ);
       const weaponDraw = this.player.getWeaponDraw(drawTime);
-      const weaponAnim = weaponDraw.elapsed != null ? { elapsed: weaponDraw.elapsed } : null;
+      const weaponAnim = weaponDraw.frame != null
+        ? { frame: weaponDraw.frame }
+        : weaponDraw.elapsed != null
+          ? { elapsed: weaponDraw.elapsed }
+          : null;
       const reloadPose = getReloadPoseBlend(this.player, drawTime);
+
+      if (rolling || jumping || this.player.isCrouching || this.player.isSneaking) return;
 
       if (this.player.isMeleeActive()) {
         const drop = this.player.getMeleeSwingDrop(drawTime);
         const bladeTilt = this.player.getMeleeBladeTilt(drawTime);
+        const meleePose = getMeleeHoldPose(this.player, lunge);
+        const meleeGs = this._worldToScreen(meleePose.worldX, meleePose.worldZ);
         this.sprites.draw(
           ctx,
           weaponDraw.sheet,
-          normalGs.x,
-          normalGs.y + drop + playerBounce + idleBreath,
+          meleeGs.x,
+          meleeGs.y + drop + playerBounce + idleBreath,
           SPRITE_GUN,
-          gunAim.angle,
-          gunAim.flipX,
+          meleePose.angle,
+          meleePose.flipX,
           'shoulder',
           bladeTilt,
           weaponAnim,
         );
       } else {
+        const gunAim = gunAimTransform(this.player.angle);
+        const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
+        const gunWorldX = this.player.x + Math.sin(this.player.angle) * holdDist;
+        const gunWorldZ = this.player.z + Math.cos(this.player.angle) * holdDist;
+        const normalGs = this._worldToScreen(gunWorldX, gunWorldZ);
         let sx;
         let sy;
         let aimAngle;
@@ -1066,6 +1283,14 @@ class Game {
     const hpPct = (this.player.health / this.player.maxHealth) * 100;
     this.el.healthBar.style.width = `${hpPct}%`;
     this.el.healthText.textContent = Math.ceil(this.player.health) + (this.player.shield > 0 ? ` (+${Math.ceil(this.player.shield)})` : '');
+    const stPct = (this.player.stamina / this.player.maxStamina) * 100;
+    if (this.el.staminaBar) this.el.staminaBar.style.width = `${stPct}%`;
+    if (this.el.staminaBarWrap) {
+      const low = this.player.stamina < STAMINA_SPRINT_MIN;
+      const regenLocked = time < this.player.staminaRegenDelayUntil;
+      this.el.staminaBarWrap.classList.toggle('low', low);
+      this.el.staminaBarWrap.classList.toggle('regen-locked', regenLocked);
+    }
     this.el.weaponName.textContent = w.name;
     if (this.player.isMeleeActive()) {
       this.el.ammoCurrent.textContent = '—';
@@ -1123,8 +1348,15 @@ class Game {
     this.el.gameOver.classList.remove('hidden');
     this.el.hud.classList.add('hidden');
     document.body.classList.remove('game-active');
-    this.mouseDown = false;
+    this._clearKeyboardInput();
     this.prevMouseDown = false;
+    this.prevCrouchDown = false;
+    this.prevJumpDown = false;
+    this.prevMoveIntent = false;
+    this._lastMoveDirX = 0;
+    this._lastMoveDirZ = 0;
+    this._lastMoveTime = 0;
+    this.mobileCrouch = false;
     this.touchMove = { x: 0, z: 0 };
     this.moveJoystick?.reset();
     this.inventoryUI?.forceClose();

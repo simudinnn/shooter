@@ -1,7 +1,7 @@
 import { ITEM_NATIVE_PX } from './sprites.js';
 import { MELEE_WEAPONS } from './player.js';
 
-export const ITEM_DRAW_SCALE = 1.35;
+export const ITEM_DRAW_SCALE = 1.2;
 export const PPU = 5.5;
 
 export function itemWorldHalfSize() {

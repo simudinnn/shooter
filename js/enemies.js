@@ -16,8 +16,8 @@ export class Robot {
     this.speed = this.baseSpeed;
     this.radius = 1.45;
     this.moveRadius = 0.62;
-    this.meleeDamage = Math.floor((10 + Math.random() * 8) * (1 + (wave - 1) * 0.07));
-    this.meleeRange = 1.55;
+    this.meleeDamage = Math.floor((12 + Math.random() * 10) * (1 + (wave - 1) * 0.07));
+    this.meleeRange = 1.9;
     this.attackRate = Math.max(0.45, 0.75 + Math.random() * 0.35 - (wave - 1) * 0.03);
     this.meleeCooldown = 0.3 + Math.random() * 0.5;
     this.walkPhase = Math.random() * Math.PI * 2;
@@ -34,6 +34,19 @@ export class Robot {
     this.groundSpewAcc = 0;
     this.emergeSeed = Math.random() * 1000;
     this.statusFxAcc = 0;
+    this.jump = {
+      active: false,
+      charging: false,
+      chargeLeft: 0,
+      dirX: 0,
+      dirZ: 0,
+      vx: 0,
+      vz: 0,
+      until: 0,
+      duration: 0,
+    };
+    this.jumpCooldown = 0;
+    this.jumpTryTimer = 0;
   }
 
   get healthRatio() {
@@ -86,11 +99,18 @@ export class Robot {
     this.z = push.z;
 
     const force = damage * 0.22 * knockMult;
-    this.knockVX = nx * force;
-    this.knockVZ = nz * force;
-    this.stagger = Math.min(0.22, (0.06 + damage * 0.004) * knockMult);
+    const jumpCommit = this.jump.charging || this.jump.active;
+    if (!jumpCommit) {
+      this.knockVX = nx * force;
+      this.knockVZ = nz * force;
+      this.stagger = Math.min(0.22, (0.06 + damage * 0.004) * knockMult);
+    }
 
-    if (this.health <= 0) this.alive = false;
+    if (this.health <= 0) {
+      this.alive = false;
+      this.jump.active = false;
+      this.jump.charging = false;
+    }
     return true;
   }
 
@@ -147,9 +167,100 @@ export class Robot {
     this.z = r.z;
   }
 
+  _endJump() {
+    this.jump.active = false;
+    this.jump.charging = false;
+    this.jump.vx = 0;
+    this.jump.vz = 0;
+    this.jump.until = 0;
+    this.bob = 0;
+  }
+
+  _beginJumpCharge(dx, dz, dist) {
+    const nx = dx / dist;
+    const nz = dz / dist;
+    this.jump.charging = true;
+    this.jump.chargeLeft = 0.5;
+    this.jump.dirX = nx;
+    this.jump.dirZ = nz;
+    this.jump.active = false;
+    this.angle = Math.atan2(dx, dz);
+  }
+
+  _launchJump() {
+    const speed = 21 + Math.random() * 7;
+    const duration = 0.48 + Math.random() * 0.2;
+    this.jump.charging = false;
+    this.jump.active = true;
+    this.jump.vx = this.jump.dirX * speed;
+    this.jump.vz = this.jump.dirZ * speed;
+    this.jump.duration = duration;
+    this.jump.until = duration;
+    this.jumpCooldown = 1.2 + Math.random() * 1.5;
+  }
+
+  _updateJumpCharge(dt) {
+    this.jump.chargeLeft -= dt;
+    const chargeT = 1 - this.jump.chargeLeft / 0.5;
+    this.bob = -0.12 - chargeT * 0.28;
+    this.moving = false;
+    if (this.jump.chargeLeft <= 0) this._launchJump();
+  }
+
+  _updateJump(dt, world, player, robots) {
+    const prevX = this.x;
+    const prevZ = this.z;
+    const stepX = this.jump.vx * dt;
+    const stepZ = this.jump.vz * dt;
+    const nextX = prevX + stepX;
+    const nextZ = prevZ + stepZ;
+
+    if (world.segmentBlocked(prevX, prevZ, nextX, nextZ, this.moveRadius)) {
+      const wallStop = world.moveAxis(prevX, prevZ, stepX, stepZ, this.moveRadius);
+      this.x = wallStop.x;
+      this.z = wallStop.z;
+      this._endJump();
+      return;
+    }
+
+    const targets = collectCollisionTargets({ player, robots, exclude: this });
+    const r = moveWithEntityCollision(
+      world,
+      prevX,
+      prevZ,
+      stepX,
+      stepZ,
+      this.radius,
+      this.moveRadius,
+      targets,
+      this,
+    );
+    this.x = r.x;
+    this.z = r.z;
+
+    const moved = Math.hypot(r.x - prevX, r.z - prevZ);
+    const intended = Math.hypot(stepX, stepZ);
+    if (intended > 0.008 && moved < intended * 0.25) {
+      this._endJump();
+      return;
+    }
+
+    this.jump.until -= dt;
+    if (this.jump.until <= 0) {
+      this._endJump();
+      return;
+    }
+    const dur = this.jump.duration || 0.5;
+    const t = 1 - this.jump.until / dur;
+    this.bob = Math.sin(t * Math.PI) * 0.72;
+    this.moving = true;
+    this.walkPhase += dt * 14;
+  }
+
   update(dt, player, world, robots, onMeleeHit) {
     if (!this.alive) return;
     this.meleeCooldown -= dt;
+    this.jumpCooldown -= dt;
 
     if (this.emerging) {
       this.emergeTime += dt;
@@ -157,6 +268,17 @@ export class Robot {
       this.moving = false;
       const shakeAmt = (1 - this.getEmergeT()) * 0.22;
       this.bob = Math.sin(this.emergeTime * 18) * shakeAmt;
+      return;
+    }
+
+    if (this.jump.charging) {
+      this._updateJumpCharge(dt);
+      this.moving = false;
+      return;
+    }
+
+    if (this.jump.active) {
+      this._updateJump(dt, world, player, robots);
       return;
     }
 
@@ -180,12 +302,30 @@ export class Robot {
     const dx = player.x - this.x;
     const dz = player.z - this.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-    const detectRange = 48;
+    const stealth = player.getStealthMult?.() ?? 1;
+    const detectRange = 48 * stealth;
+    const chaseRange = 58 * stealth;
     const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
 
-    if (hasLOS || (this.chasing && dist < 58)) {
+    if (hasLOS || (this.chasing && dist < chaseRange)) {
       this.chasing = true;
       this.angle = Math.atan2(dx, dz);
+
+      const jumpMin = 2.6;
+      const jumpMax = 7.2;
+      if (this.type === 'spider' && dist < jumpMax && dist > jumpMin && this.jumpCooldown <= 0 && !this.jump.charging && !this.jump.active) {
+        this.jumpTryTimer -= dt;
+        if (this.jumpTryTimer <= 0) {
+          this.jumpTryTimer = 0.38 + Math.random() * 0.32;
+          if (Math.random() < 0.62) {
+            this._beginJumpCharge(dx, dz, dist);
+            return;
+          }
+        }
+      } else if (dist >= jumpMax) {
+        this.jumpTryTimer = 0;
+      }
+
       const steer = this.angle + (Math.random() - 0.5) * 0.08;
       this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
       moving = true;

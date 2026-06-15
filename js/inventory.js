@@ -1,4 +1,4 @@
-import { WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS, EQUIPMENT_SLOT_COUNT } from './player.js';
+import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS, EQUIPMENT_SLOT_COUNT } from './player.js';
 import { weaponSpritePath } from './sprites.js';
 
 const EQUIPMENT_LABELS = ['HEAD', 'BODY', 'LEGS', 'GEAR'];
@@ -157,6 +157,13 @@ export class InventoryUI {
     return !!(data?.kind === 'weapon' && WEAPONS[data.key]);
   }
 
+  _canDropOnMelee() {
+    const player = this.drag?.player;
+    if (!player || this.drag?.fromType !== 'item') return false;
+    const data = this._dragItemData();
+    return !!(data?.kind === 'melee' && MELEE_WEAPONS[data.key]);
+  }
+
   _dragItemData() {
     if (this.drag?.stashedItem) return this.drag.stashedItem;
     return this.drag?.player?.itemSlots[this.drag?.fromIndex ?? -1] ?? null;
@@ -236,6 +243,9 @@ export class InventoryUI {
     if (data?.kind === 'weapon') {
       const cfg = WEAPONS[data.key];
       ghost.appendChild(this._weaponIcon(cfg.sprite));
+    } else if (data?.kind === 'melee') {
+      const cfg = MELEE_WEAPONS[data.key];
+      ghost.appendChild(this._weaponIcon(cfg.sprite));
     } else {
       ghost.textContent = '—';
     }
@@ -249,9 +259,11 @@ export class InventoryUI {
     const el = document.elementFromPoint(e.clientX, e.clientY);
     let next = null;
     const main = el?.closest('.inv-weapon-slot.inv-primary[data-drop-zone="main"]');
+    const melee = el?.closest('.inv-weapon-slot.inv-secondary[data-drop-zone="melee"]');
     const item = el?.closest('.inv-item-slot[data-slot-index]:not(.inv-locked)');
 
     if (main && this._canDropOnMain()) next = main;
+    else if (melee && this._canDropOnMelee()) next = melee;
     else if (item) next = item;
 
     if (this.drag.dropTarget === next) return;
@@ -278,7 +290,19 @@ export class InventoryUI {
           this._skipClick = true;
           placed = true;
         } else {
-          player.itemSlots[fromIndex] = null;
+          player.itemSlots[fromIndex] = stashedItem;
+        }
+      } else if (dropTarget.dataset.dropZone === 'melee') {
+        if (stashedItem.kind === 'melee' && MELEE_WEAPONS[stashedItem.key]) {
+          if (player.equipMeleeFromSlot(fromIndex, stashedItem.key)) {
+            this.selectedSlot = null;
+            this._skipClick = true;
+            placed = true;
+          } else {
+            player.itemSlots[fromIndex] = stashedItem;
+          }
+        } else {
+          player.itemSlots[fromIndex] = stashedItem;
         }
       } else if (dropTarget.dataset.slotIndex !== undefined) {
         const toIndex = Number(dropTarget.dataset.slotIndex);
@@ -355,13 +379,15 @@ export class InventoryUI {
 
     const secondary = this._makeSlot('inv-weapon-slot');
     secondary.classList.add('inv-secondary');
+    secondary.dataset.dropZone = 'melee';
     if (player.isMeleeActive()) secondary.classList.add('inv-active');
     secondary.appendChild(this._weaponIcon(player.getActiveMelee().sprite));
     const secTag = document.createElement('span');
     secTag.className = 'inv-slot-tag';
-    secTag.textContent = player.getActiveMelee().name;
+    secTag.textContent = 'MELEE';
     secondary.appendChild(secTag);
-    secondary.title = 'Melee weapon';
+    secondary.appendChild(this._itemNameLabel(player.getActiveMelee().name));
+    secondary.title = 'Melee weapon — drop a melee here to equip';
     secondary.addEventListener('click', () => {
       player.equipMelee(player.meleeKey);
       this.render();
@@ -407,7 +433,21 @@ export class InventoryUI {
             this._onItemSlotClick(i, player);
             return;
           }
-          player.equipStoredWeapon(data.key);
+          player.swapItemSlotWithMain(i);
+          this.render();
+        });
+      } else if (data?.kind === 'melee') {
+        const cfg = MELEE_WEAPONS[data.key];
+        slot.appendChild(this._weaponIcon(cfg.sprite));
+        slot.appendChild(this._itemNameLabel(cfg.name));
+        this._bindItemSlotDrag(slot, i, player);
+        slot.addEventListener('click', (e) => {
+          if (this._skipClick) { this._skipClick = false; return; }
+          if (this.selectedSlot !== null || e.shiftKey) {
+            this._onItemSlotClick(i, player);
+            return;
+          }
+          player.swapItemSlotWithMelee(i);
           this.render();
         });
       } else if (unlocked) {

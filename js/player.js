@@ -1,6 +1,20 @@
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
-import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset } from './sprites.js';
+import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME } from './sprites.js';
 
+export const ROLL_DURATION = 0.46;
+export const ROLL_SPEED = 24;
+export const JUMP_DURATION = 0.42;
+export const JUMP_SPEED = 10;
+export const SNEAK_MULT = 0.52;
+export const STAMINA_MAX = 200;
+export const STAMINA_REGEN = 26;
+export const STAMINA_SPRINT_DRAIN = 22;
+export const STAMINA_ROLL_COST = 20;
+export const STAMINA_JUMP_COST = 14;
+export const STAMINA_ROLL_MIN = 20;
+export const STAMINA_JUMP_MIN = 14;
+export const STAMINA_SPRINT_MIN = 10;
+export const STAMINA_REGEN_DELAY = 2;
 export const GUN_HOLD_OFFSET = 1.1;
 /** Extra distance from gun hold point to barrel tip (world units). */
 export const BARREL_TIP_OFFSET = 0.55;
@@ -10,7 +24,7 @@ export const BARREL_SCREEN_RAISE = 8;
 const SCREEN_PPU = 5.5;
 
 export const ITEM_STORAGE_SIZE = 20;
-export const UNLOCKED_ITEM_SLOTS = 10;
+export const UNLOCKED_ITEM_SLOTS = 14;
 export const EQUIPMENT_SLOT_COUNT = 4;
 
 export const WEAPONS = {
@@ -57,6 +71,7 @@ export const WEAPONS = {
     damage: 14,
     fireRate: 0.9,
     reloadTime: 2.6,
+    reloadStyle: 'incremental',
     bulletSpeed: 100,
     spread: 0.5,
     pellets: 8,
@@ -74,6 +89,7 @@ export const WEAPONS = {
     damage: 95,
     fireRate: 1.15,
     reloadTime: 2.8,
+    reloadStyle: 'incremental',
     bulletSpeed: 150,
     spread: 0.005,
     pellets: 1,
@@ -108,16 +124,14 @@ export const WEAPONS = {
     maxReserve: 48,
     damage: 32,
     fireRate: 0.48,
-    reloadTime: 2.4,
+    reloadTime: 2,
     bulletSpeed: 150,
     spread: 0.03,
     pellets: 1,
     sprite: 'revolver',
     shotSprite: 'revolver_shot',
     sound: 'pistol',
-    casingMode: 'on_reload',
     casingColor: 'yellow',
-    casingCount: 6,
   },
   famas: {
     name: 'FAMAS',
@@ -267,11 +281,18 @@ export class Player {
       hitApplied: false,
     };
     this.meleeKey = 'knife';
-    this.meleeInventory = new Set(['knife']);
+    this.meleeInventory = new Set(MELEE_KEYS);
     this.shotFlashUntil = 0;
     this.casingMidEmitted = false;
     this.casingCooldownWeaponKey = null;
-    this.roll = { active: false, until: 0, cooldownUntil: 0, dirX: 0, dirZ: 0 };
+    this.isCrouching = false;
+    this.isSneaking = false;
+    this.sneakMult = SNEAK_MULT;
+    this.stamina = STAMINA_MAX;
+    this.maxStamina = STAMINA_MAX;
+    this.staminaRegenDelayUntil = 0;
+    this.roll = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: ROLL_DURATION };
+    this.jump = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: JUMP_DURATION, inPlace: false };
     this.reloadAim = {
       phase: 'idle',
       fromAngle: 0,
@@ -309,7 +330,14 @@ export class Player {
       lastShot: this.weapon?.lastShot ?? 0,
       reloading: false,
       reloadStart: 0,
+      reloadIncremental: null,
+      casingsToEject: 0,
+      casingsEjected: false,
     };
+  }
+
+  isIncrementalReloadWeapon(key = this.weaponKey) {
+    return WEAPONS[key]?.reloadStyle === 'incremental';
   }
 
   addWeaponToInventory(key) {
@@ -356,7 +384,14 @@ export class Player {
   syncWeaponStorage() {
     for (let i = 0; i < this.itemSlots.length; i++) {
       const s = this.itemSlots[i];
-      if (s?.kind === 'weapon') this.itemSlots[i] = null;
+      if (s?.kind === 'weapon' || s?.kind === 'melee') this.itemSlots[i] = null;
+    }
+    for (const key of MELEE_KEYS) {
+      if (!this.meleeInventory.has(key)) continue;
+      if (key === this.meleeKey) continue;
+      const idx = this.itemSlots.findIndex((s, i) => s === null && this.isItemSlotUnlocked(i));
+      if (idx < 0) break;
+      this.itemSlots[idx] = { kind: 'melee', key };
     }
     for (const key of this.getOwnedWeaponKeys()) {
       if (key === this.weaponKey) continue;
@@ -366,9 +401,25 @@ export class Player {
     }
   }
 
+  /** Equip melee from an inventory slot (click or drag onto melee slot). */
+  equipMeleeFromSlot(_slotIndex, incomingKey) {
+    if (!this.meleeInventory.has(incomingKey)) return false;
+    if (incomingKey === this.meleeKey && this.weaponSlot === 'melee') return false;
+    this.meleeKey = incomingKey;
+    this.weaponSlot = 'melee';
+    this.melee.charging = false;
+    this.syncWeaponStorage();
+    return true;
+  }
+
   equipStoredWeapon(key) {
     if (!this.weaponInventory.has(key)) return false;
     return this.equipWeapon(key);
+  }
+
+  equipStoredMelee(key) {
+    if (!this.meleeInventory.has(key)) return false;
+    return this.equipMelee(key);
   }
 
   getOwnedWeaponKeys() {
@@ -413,6 +464,8 @@ export class Player {
     if (!this.meleeInventory.has(key)) return false;
     this.meleeKey = key;
     this.weaponSlot = 'melee';
+    this.melee.charging = false;
+    this.syncWeaponStorage();
     return true;
   }
 
@@ -422,8 +475,15 @@ export class Player {
     if (!cfg) return { sheet: 'm16' };
 
     if (this.weapon?.reloading) {
+      const sprite = cfg.sprite;
+      if (this.isIncrementalReloadWeapon()) {
+        return {
+          sheet: `${sprite}_reload`,
+          frame: getIncrementalReloadFrame(sprite, this.weapon.reloadIncremental, time),
+        };
+      }
       return {
-        sheet: `${cfg.sprite}_reload`,
+        sheet: `${sprite}_reload`,
         elapsed: time - this.weapon.reloadStart,
       };
     }
@@ -486,37 +546,134 @@ export class Player {
     return true;
   }
 
+  /** Swap a stored melee with the currently equipped melee weapon. */
+  swapItemSlotWithMelee(slotIndex) {
+    if (!this.isItemSlotUnlocked(slotIndex)) return false;
+    const slot = this.itemSlots[slotIndex];
+    if (!slot || slot.kind !== 'melee' || !MELEE_WEAPONS[slot.key]) return false;
+    return this.equipMeleeFromSlot(slotIndex, slot.key);
+  }
+
   isRolling(time) {
     return this.roll.active && time < this.roll.until;
   }
 
+  isJumping(time) {
+    return this.jump.active && time < this.jump.until;
+  }
+
+  getJumpT(time) {
+    if (!this.isJumping(time)) return 0;
+    const dur = this.jump.duration || JUMP_DURATION;
+    return Math.min(1, (time - this.jump.startTime) / dur);
+  }
+
+  isMobilityLocked(time) {
+    return this.isRolling(time) || this.isJumping(time);
+  }
+
+  getStealthMult() {
+    if (this.isSneaking) return 0.38;
+    if (this.isCrouching) return 0.62;
+    if (this.roll?.active) return 0.45;
+    return 1;
+  }
+
   canRoll(time) {
-    if (!this.alive || this.roll.active || time < this.roll.cooldownUntil) return false;
+    if (!this.alive || this.isMobilityLocked(time)) return false;
+    if (this.stamina < STAMINA_ROLL_MIN) return false;
+    return true;
+  }
+
+  canJump(time) {
+    if (!this.alive || this.isMobilityLocked(time)) return false;
     if (this.weapon?.reloading) return false;
+    if (this.stamina < STAMINA_JUMP_MIN) return false;
     return true;
   }
 
-  startRoll(time) {
-    if (!this.canRoll(time)) return false;
-    let dx = this.moveDirX;
-    let dz = this.moveDirZ;
-    if (!dx && !dz) {
-      dx = Math.sin(this.angle);
-      dz = Math.cos(this.angle);
+  canSprint() {
+    return this.stamina >= STAMINA_SPRINT_MIN;
+  }
+
+  markStaminaUsed(time) {
+    this.staminaRegenDelayUntil = time + STAMINA_REGEN_DELAY;
+  }
+
+  updateStamina(dt, time) {
+    if (!this.alive) return;
+    if (this.isMobilityLocked(time)) return;
+    if (this.isSprinting && this.isMoving) {
+      const drain = STAMINA_SPRINT_DRAIN * dt;
+      if (drain > 0) {
+        this.stamina = Math.max(0, this.stamina - drain);
+        this.markStaminaUsed(time);
+      }
+      return;
     }
-    const len = Math.hypot(dx, dz) || 1;
+    if (time < this.staminaRegenDelayUntil) return;
+    this.stamina = Math.min(this.maxStamina, this.stamina + STAMINA_REGEN * dt);
+  }
+
+  startRoll(time, dirX, dirZ) {
+    if (!this.canRoll(time)) return false;
+    const len = Math.hypot(dirX, dirZ);
+    if (len < 0.01) return false;
+    this.stamina = Math.max(0, this.stamina - STAMINA_ROLL_COST);
+    this.markStaminaUsed(time);
     this.roll.active = true;
-    this.roll.until = time + 0.32;
-    this.roll.cooldownUntil = time + 0.9;
-    this.roll.dirX = dx / len;
-    this.roll.dirZ = dz / len;
-    this.invulnTimer = Math.max(this.invulnTimer, time + 0.32);
+    this.roll.duration = ROLL_DURATION;
+    this.roll.until = time + ROLL_DURATION;
+    this.roll.startTime = time;
+    this.roll.dirX = dirX / len;
+    this.roll.dirZ = dirZ / len;
+    this.moveDirX = this.roll.dirX;
+    this.moveDirZ = this.roll.dirZ;
+    this.invulnTimer = Math.max(this.invulnTimer, time + ROLL_DURATION);
     this.melee.charging = false;
+    this.isCrouching = false;
+    this.isSneaking = false;
     return true;
   }
 
-  updateRoll(time) {
+  startJump(time, hasMoveIntent = false, dirX = 0, dirZ = 0) {
+    if (!this.canJump(time)) return false;
+    this.stamina = Math.max(0, this.stamina - STAMINA_JUMP_COST);
+    this.markStaminaUsed(time);
+    this.jump.inPlace = !hasMoveIntent;
+    if (hasMoveIntent) {
+      let dx = dirX;
+      let dz = dirZ;
+      const inLen = Math.hypot(dx, dz);
+      if (inLen < 0.01) {
+        dx = this.moveDirX;
+        dz = this.moveDirZ;
+      }
+      if (Math.hypot(dx, dz) < 0.01) {
+        dx = Math.sin(this.angle);
+        dz = Math.cos(this.angle);
+      }
+      const len = Math.hypot(dx, dz) || 1;
+      this.jump.dirX = dx / len;
+      this.jump.dirZ = dz / len;
+    } else {
+      this.jump.dirX = 0;
+      this.jump.dirZ = 0;
+    }
+    this.jump.active = true;
+    this.jump.duration = JUMP_DURATION;
+    this.jump.until = time + JUMP_DURATION;
+    this.jump.startTime = time;
+    this.invulnTimer = Math.max(this.invulnTimer, time + JUMP_DURATION * 0.65);
+    this.melee.charging = false;
+    this.isCrouching = false;
+    this.isSneaking = false;
+    return true;
+  }
+
+  updateMobility(time) {
     if (this.roll.active && time >= this.roll.until) this.roll.active = false;
+    if (this.jump.active && time >= this.jump.until) this.jump.active = false;
   }
 
   setWeaponSlot(slot) {
@@ -581,7 +738,8 @@ export class Player {
   }
 
   canMeleeCharge(time) {
-    if (this.isRolling(time)) return false;
+    if (this.isMobilityLocked(time)) return false;
+    if (this.isJumping(time)) return false;
     if (this.isMeleeSwinging(time)) return false;
     if (this.melee.charging) return false;
     return true;
@@ -793,15 +951,27 @@ export class Player {
   }
 
   canShoot(time) {
-    if (this.isRolling(time)) return false;
+    if (this.isMobilityLocked(time) || this.isCrouching) return false;
     const w = this.weapon;
-    if (w.reloading || w.ammo <= 0) return false;
+    if (w.reloading && !this.isIncrementalReloadWeapon()) return false;
+    if (w.ammo <= 0) return false;
     if (w.fireRate <= 0) return true;
     return time - w.lastShot >= w.fireRate;
   }
 
+  wantsAutoReload(time) {
+    if (this.isMeleeActive() || !this.weaponKey) return false;
+    if (this.isMobilityLocked(time) || this.isCrouching) return false;
+    const w = this.weapon;
+    if (!w || w.reloading) return false;
+    return w.ammo <= 0 && w.reserve > 0;
+  }
+
   shoot(time) {
     const w = this.weapon;
+    if (w.reloading && this.isIncrementalReloadWeapon()) {
+      this.cancelReload(time);
+    }
     w.lastShot = time;
     w.ammo--;
     this.shotFlashUntil = time + SHOT_FLASH_DURATION;
@@ -811,34 +981,174 @@ export class Player {
     return w;
   }
 
-  startReload(time) {
-    if (this.isRolling(time)) return false;
+  cancelReload(time) {
     const w = this.weapon;
-    if (w.reloading || w.ammo === w.magSize || w.reserve <= 0) return false;
+    if (!w?.reloading) return false;
+    w.reloading = false;
+    w.reloadIncremental = null;
+    w.casingsToEject = 0;
+    w.casingsEjected = false;
+    this.reloadAim.phase = 'lower';
+    this.reloadAim.lowerStart = time;
+    this._saveWeaponState();
+    return true;
+  }
+
+  startReload(time) {
+    if (this.isMobilityLocked(time) || this.isCrouching) return false;
+    const w = this.weapon;
+    if (w.reloading) {
+      if (this.isIncrementalReloadWeapon()) {
+        this.cancelReload(time);
+        return { ok: true, cancelled: true };
+      }
+      return false;
+    }
+    if (w.ammo === w.magSize || w.reserve <= 0) return false;
     const aim = gunAimTransform(this.angle);
     w.reloading = true;
     w.reloadStart = time;
     this.reloadAim.fromAngle = aim.angle;
     this.reloadAim.phase = 'raise';
+
+    if (this.weaponKey === 'revolver') {
+      w.casingsToEject = w.magSize - w.ammo;
+      w.casingsEjected = false;
+    } else {
+      w.casingsToEject = 0;
+      w.casingsEjected = false;
+    }
+
+    if (this.isIncrementalReloadWeapon()) {
+      w.reloadIncremental = {
+        phase: 'intro',
+        phaseStart: time,
+        shellStart: time,
+        shellsLoaded: 0,
+      };
+      return { ok: true, incremental: true };
+    }
+
     const casingReload = WEAPONS[this.weaponKey]?.casingMode === 'on_reload';
     return { ok: true, casingReload };
+  }
+
+  _finishIncrementalReload(time) {
+    const w = this.weapon;
+    w.reloading = false;
+    w.reloadIncremental = null;
+    this.reloadAim.phase = 'lower';
+    this.reloadAim.lowerStart = time;
+    this._saveWeaponState();
+  }
+
+  _updateIncrementalReload(time) {
+    const w = this.weapon;
+    const inc = w.reloadIncremental;
+    if (!inc) return null;
+
+    const sprite = WEAPONS[this.weaponKey]?.sprite;
+    const spec = getIncrementalReloadSpec(sprite);
+    if (!spec) {
+      this._finishIncrementalReload(time);
+      return { finished: true };
+    }
+
+    if (inc.phase === 'intro') {
+      if (!spec.hasIntro) {
+        inc.phase = 'loop';
+        inc.phaseStart = time;
+        inc.shellStart = time;
+        return null;
+      }
+      const introDur = (spec.introEnd + 1) / spec.fps;
+      if (time - inc.phaseStart >= introDur) {
+        inc.phase = 'loop';
+        inc.phaseStart = time;
+        inc.shellStart = time;
+      }
+      return null;
+    }
+
+    if (inc.phase === 'loop') {
+      if (time - inc.shellStart < spec.shellSec) return null;
+
+      const needed = w.magSize - w.ammo;
+      if (needed <= 0 || w.reserve <= 0) {
+        this._finishIncrementalReload(time);
+        return { finished: true };
+      }
+
+      w.ammo += 1;
+      w.reserve -= 1;
+      inc.shellsLoaded += 1;
+      inc.shellStart = time;
+      this._saveWeaponState();
+
+      const magFull = w.ammo >= w.magSize;
+      const noReserve = w.reserve <= 0;
+
+      if (magFull && spec.hasOutro) {
+        inc.phase = 'outro';
+        inc.phaseStart = time;
+        return { shellLoaded: true };
+      }
+
+      if (magFull || noReserve) {
+        this._finishIncrementalReload(time);
+        return { finished: true, shellLoaded: true };
+      }
+
+      return { shellLoaded: true };
+    }
+
+    if (inc.phase === 'outro') {
+      const outroFrames = spec.outroEnd - spec.outroStart + 1;
+      const outroDur = outroFrames / spec.fps;
+      if (time - inc.phaseStart >= outroDur) {
+        this._finishIncrementalReload(time);
+        return { finished: true };
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  _checkRevolverReloadCasingEject(time) {
+    if (this.weaponKey !== 'revolver' || !this.weapon?.reloading) return null;
+    const w = this.weapon;
+    if (w.casingsEjected || w.casingsToEject <= 0) return null;
+    const frame = getReloadAnimFrame('revolver', time - w.reloadStart);
+    if (frame < REVOLVER_RELOAD_CASING_EJECT_FRAME) return null;
+    w.casingsEjected = true;
+    return { ejectCasings: w.casingsToEject };
   }
 
   updateReload(time) {
     const w = this.weapon;
     if (!w.reloading) return null;
+
+    if (this.isIncrementalReloadWeapon()) {
+      return this._updateIncrementalReload(time);
+    }
+
+    const casingResult = this._checkRevolverReloadCasingEject(time);
+
     if (time - w.reloadStart >= w.reloadTime) {
       const needed = w.magSize - w.ammo;
       const taken = Math.min(needed, w.reserve);
       w.ammo += taken;
       w.reserve -= taken;
       w.reloading = false;
+      w.casingsToEject = 0;
+      w.casingsEjected = false;
       this.reloadAim.phase = 'lower';
       this.reloadAim.lowerStart = time;
       this._saveWeaponState();
-      return { finished: true };
+      return { finished: true, ...casingResult };
     }
-    return null;
+    return casingResult;
   }
 
   getFireCooldownT(time) {
@@ -854,6 +1164,22 @@ export class Player {
 
   getReloadProgress(time) {
     if (!this.weapon?.reloading) return 0;
+    if (this.isIncrementalReloadWeapon()) {
+      const inc = this.weapon.reloadIncremental;
+      const sprite = WEAPONS[this.weaponKey]?.sprite;
+      const spec = getIncrementalReloadSpec(sprite);
+      if (!inc || !spec) return 0;
+      if (inc.phase === 'intro' && spec.hasIntro) {
+        const introDur = (spec.introEnd + 1) / spec.fps;
+        return Math.min(1, (time - inc.phaseStart) / introDur);
+      }
+      if (inc.phase === 'outro' && spec.hasOutro) {
+        const outroFrames = spec.outroEnd - spec.outroStart + 1;
+        const outroDur = outroFrames / spec.fps;
+        return Math.min(1, (time - inc.phaseStart) / outroDur);
+      }
+      return Math.min(1, (time - inc.shellStart) / spec.shellSec);
+    }
     return Math.min(1, (time - this.weapon.reloadStart) / this.weapon.reloadTime);
   }
 

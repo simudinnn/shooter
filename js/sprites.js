@@ -6,6 +6,10 @@ const PLAYER_ASSET_PATHS = {
   player_idle: 'assets/player/idle.png',
   player_walk: 'assets/player/walk.png',
   player_run: 'assets/player/run.png',
+  player_roll: 'assets/player/roll.png',
+  player_crouch: 'assets/player/crouch.png',
+  player_sneak: 'assets/player/sneak.png',
+  player_jump: 'assets/player/jump.png',
 };
 
 const GUN_SPRITES = ['glock', 'm16', 'm870', 'm24', 'uzi', 'revolver', 'famas', 'fal'];
@@ -75,6 +79,10 @@ export const SPRITE_ANIM = {
     player_idle: { fps: 3, loop: true },
     player_walk: { fps: 10, loop: true },
     player_run: { fps: 14, loop: true },
+    player_roll: { fps: 14, loop: true },
+    player_crouch: { fps: 4, loop: true },
+    player_sneak: { fps: 7, loop: true },
+    player_jump: { fps: 12, loop: false },
     spider_walk: { fps: 10, loop: true },
     glock_reload: { fps: 10, loop: false, frameW: 24, frameH: 24 },
     m16_reload: { fps: 10, loop: false, frameW: 24, frameH: 24 },
@@ -145,6 +153,13 @@ const RUN_LEGS = [
   [{ x: 8, y: 10, w: 5, h: 7 }, { x: 12, y: 12, w: 5, h: 7 }],
 ];
 
+const SNEAK_LEGS = [
+  [{ x: 6, y: 16, w: 4, h: 4 }, { x: 14, y: 16, w: 4, h: 4 }],
+  [{ x: 5, y: 17, w: 4, h: 3 }, { x: 15, y: 15, w: 4, h: 5 }],
+  [{ x: 8, y: 16, w: 4, h: 4 }, { x: 12, y: 16, w: 4, h: 4 }],
+  [{ x: 15, y: 15, w: 4, h: 5 }, { x: 5, y: 17, w: 4, h: 3 }],
+];
+
 const PLAYER_ANIM_RE = /^player_(walk|run)_(\d+)$/;
 
 function getAnimSpec(name) {
@@ -159,6 +174,83 @@ function defaultFrameSize(name) {
     return WEAPON_NATIVE_PX;
   }
   return SPRITE_ANIM.frameH;
+}
+
+/** 0-based frame index (4th frame on the revolver reload strip). */
+export const REVOLVER_RELOAD_CASING_EJECT_FRAME = 3;
+
+/** Current flipbook frame for a one-shot reload sheet from elapsed seconds. */
+export function getReloadAnimFrame(sprite, elapsed) {
+  const sheetName = `${sprite}_reload`;
+  const meta = loadedSheetMeta[sheetName];
+  const fps = meta?.fps ?? getAnimSpec(sheetName).fps ?? SPRITE_ANIM.defaultFps;
+  const frameCount = meta?.frameCount ?? 12;
+  const idx = Math.floor(Math.max(0, elapsed) * fps);
+  return Math.min(idx, frameCount - 1);
+}
+
+/** Per-shell reload loop frames (1-based frame numbers from art sheets). */
+export const INCREMENTAL_RELOAD_LOOP = {
+  m870: { loop: [9, 10, 11, 12], shellSec: 0.5 },
+  m24: { loop: [8, 9, 10], shellSec: 0.45 },
+};
+
+export function isIncrementalReloadSprite(sprite) {
+  return sprite in INCREMENTAL_RELOAD_LOOP;
+}
+
+export function getIncrementalReloadSpec(sprite) {
+  const cfg = INCREMENTAL_RELOAD_LOOP[sprite];
+  if (!cfg) return null;
+  const sheetName = `${sprite}_reload`;
+  const meta = loadedSheetMeta[sheetName];
+  const fps = meta?.fps ?? getAnimSpec(sheetName).fps ?? SPRITE_ANIM.defaultFps;
+  const frameCount = meta?.frameCount ?? 12;
+  const loop = cfg.loop.map((f) => Math.min(frameCount - 1, Math.max(0, f)));
+  const loopStart = loop[0];
+  const loopEnd = loop[loop.length - 1];
+  return {
+    loop,
+    shellSec: cfg.shellSec,
+    fps,
+    frameCount,
+    introEnd: Math.min(loopStart - 1, frameCount - 1),
+    outroStart: Math.min(loopEnd + 1, frameCount - 1),
+    outroEnd: frameCount - 1,
+    hasIntro: loopStart > 0,
+    hasOutro: loopEnd + 1 < frameCount,
+  };
+}
+
+/** Resolve reload strip frame for incremental weapons. */
+export function getIncrementalReloadFrame(sprite, inc, time) {
+  if (!inc) return 0;
+  const spec = getIncrementalReloadSpec(sprite);
+  if (!spec) return 0;
+
+  if (inc.phase === 'intro') {
+    if (!spec.hasIntro) return 0;
+    const introFrames = spec.introEnd + 1;
+    const introDur = introFrames / spec.fps;
+    const t = introDur > 0 ? Math.min(1, (time - inc.phaseStart) / introDur) : 1;
+    return Math.min(spec.introEnd, Math.floor(t * introFrames));
+  }
+
+  if (inc.phase === 'loop') {
+    const shellT = Math.max(0, Math.min(0.999, (time - inc.shellStart) / spec.shellSec));
+    const idx = Math.min(spec.loop.length - 1, Math.floor(shellT * spec.loop.length));
+    return spec.loop[idx];
+  }
+
+  if (inc.phase === 'outro') {
+    if (!spec.hasOutro) return spec.loop[spec.loop.length - 1];
+    const outroFrames = spec.outroEnd - spec.outroStart + 1;
+    const outroDur = outroFrames / spec.fps;
+    const t = outroDur > 0 ? Math.min(1, (time - inc.phaseStart) / outroDur) : 1;
+    return spec.outroStart + Math.min(outroFrames - 1, Math.floor(t * outroFrames));
+  }
+
+  return 0;
 }
 
 /** Seconds to play a one-shot sheet (reload / cycle). */
@@ -202,10 +294,60 @@ function drawSpiderFrame(g, leftLeg, rightLeg, leftArm, rightArm) {
   px(g, rightArm.x, rightArm.y, rightArm.w, rightArm.h, '#505860');
 }
 
+function drawPlayerRollFrame(g, frame = 1) {
+  const skid = frame > 1 ? 2 : 0;
+  px(g, 2 + skid, 12, 5, 4, '#d4a878');
+  px(g, 6 + skid, 11, 14, 6, '#3a6070');
+  px(g, 5 + skid, 12, 12, 5, '#4a8090');
+  px(g, 18 + skid, 13, 5, 3, '#2a5060');
+  px(g, 1, 14, 5 + skid, 2, '#2a5060');
+}
+
+function drawPlayerCrouchFrame(g) {
+  px(g, 9, 9, 6, 3, '#d4a878');
+  px(g, 7, 12, 10, 7, '#3a6070');
+  px(g, 8, 13, 8, 5, '#4a8090');
+  px(g, 6, 18, 4, 2, '#2a5060');
+  px(g, 14, 18, 4, 2, '#2a5060');
+}
+
+function drawPlayerSneakFrame(g, frame = 1) {
+  const legs = SNEAK_LEGS[(frame - 1) % 4];
+  px(g, 9, 10, 6, 3, '#d4a878');
+  px(g, 7, 13, 10, 6, '#3a6070');
+  px(g, 8, 14, 8, 4, '#4a8090');
+  px(g, legs[0].x, legs[0].y, legs[0].w, legs[0].h, '#2a5060');
+  px(g, legs[1].x, legs[1].y, legs[1].w, legs[1].h, '#2a5060');
+}
+
+function drawPlayerJumpFrame(g, frame = 1) {
+  const tuck = frame > 1 ? 1 : 0;
+  px(g, 9, 4 + tuck, 6, 3, '#d4a878');
+  px(g, 8, 7 + tuck, 8, 7, '#4a8090');
+  px(g, 7, 11 + tuck, 4, 5, '#2a5060');
+  px(g, 13, 10 + tuck, 4, 5, '#2a5060');
+}
+
 function buildPlayerFallback(kind, frame) {
   const c = makeCanvas(CHAR_SIZE, CHAR_SIZE);
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
+  if (kind === 'roll') {
+    drawPlayerRollFrame(g, frame);
+    return c;
+  }
+  if (kind === 'crouch') {
+    drawPlayerCrouchFrame(g);
+    return c;
+  }
+  if (kind === 'sneak') {
+    drawPlayerSneakFrame(g, frame);
+    return c;
+  }
+  if (kind === 'jump') {
+    drawPlayerJumpFrame(g, frame);
+    return c;
+  }
   let legs = WALK_LEGS[0];
   if (kind === 'walk') legs = WALK_LEGS[(frame - 1) % 4];
   else if (kind === 'run') legs = RUN_LEGS[(frame - 1) % 4];
@@ -215,7 +357,7 @@ function buildPlayerFallback(kind, frame) {
 }
 
 function buildPlayerStripFallback(kind) {
-  const frames = 4;
+  const frames = (kind === 'roll' || kind === 'jump') ? 2 : (kind === 'crouch' ? 1 : 4);
   const c = makeCanvas(CHAR_SIZE, CHAR_SIZE * frames);
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
@@ -263,6 +405,10 @@ function buildCharFallback(name) {
   if (name === 'player_idle') return buildPlayerFallback('idle', 1);
   if (name === 'player_walk') return buildPlayerStripFallback('walk');
   if (name === 'player_run') return buildPlayerStripFallback('run');
+  if (name === 'player_roll') return buildPlayerStripFallback('roll');
+  if (name === 'player_crouch') return buildPlayerStripFallback('crouch');
+  if (name === 'player_sneak') return buildPlayerStripFallback('sneak');
+  if (name === 'player_jump') return buildPlayerStripFallback('jump');
   if (name === 'spider_walk') return buildSpiderWalkStripFallback();
 
   const animMatch = name.match(PLAYER_ANIM_RE);
@@ -361,7 +507,8 @@ function buildWeaponAnimStripFallback(name) {
   const reloadMatch = name.match(/^(.+)_reload$/);
   const cycleMatch = name.match(/^(.+)_cycle$/);
   const base = reloadMatch?.[1] || cycleMatch?.[1] || 'm16';
-  const frames = 3;
+  const inc = reloadMatch && INCREMENTAL_RELOAD_LOOP[base];
+  const frames = inc ? Math.max(14, inc.loop[inc.loop.length - 1] + 2) : 3;
   const c = makeCanvas(CHAR_SIZE, CHAR_SIZE * frames);
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
@@ -605,6 +752,15 @@ export function isMovingForward(player) {
   return (lookRight && moveSide === 'r') || (!lookRight && moveSide === 'l');
 }
 
+/** Roll direction opposite to where the player is aiming. */
+export function isRollingBackward(player) {
+  if (!player?.roll?.active) return false;
+  const fx = Math.sin(player.angle ?? 0);
+  const fz = Math.cos(player.angle ?? 0);
+  const dot = (player.roll.dirX ?? 0) * fx + (player.roll.dirZ ?? 0) * fz;
+  return dot < -0.12;
+}
+
 export function getFlipXFromAngle(angle) {
   return !isLookingRight(angle);
 }
@@ -613,18 +769,46 @@ export function getPlayerFlipX(player) {
   return getFlipXFromAngle(player.angle);
 }
 
-export function getPlayerSheet(player) {
+/** Melee held horizontal — east when facing right, west when flipped left; ignores aim pitch. */
+export const MELEE_HOLD_ANGLE = Math.PI / 2;
+export const MELEE_SIDE_HOLD_DIST = 0.64;
+
+export function getMeleeHoldPose(player, lunge = 0) {
+  const flipX = getPlayerFlipX(player);
+  const sideAngle = flipX ? -Math.PI / 2 : Math.PI / 2;
+  const dist = MELEE_SIDE_HOLD_DIST + lunge;
+  return {
+    angle: MELEE_HOLD_ANGLE,
+    flipX,
+    worldX: player.x + Math.sin(sideAngle) * dist,
+    worldZ: player.z + Math.cos(sideAngle) * dist,
+  };
+}
+
+export function getPlayerSheet(player, time = 0) {
+  if (player.isRolling?.(time)) return 'player_roll';
+  if (player.isJumping?.(time)) return 'player_jump';
+  if (player.isSneaking) return 'player_sneak';
+  if (player.isCrouching) return 'player_crouch';
   if (!player.isMoving) return 'player_idle';
   return player.isSprinting ? 'player_run' : 'player_walk';
 }
 
-/** @deprecated use getPlayerSheet + getPlayerAnim */
-export function getPlayerSprite(player) {
-  return getPlayerSheet(player);
-}
-
 /** Animation state for flipbook player sheets. */
 export function getPlayerAnim(player, time = 0) {
+  if (player.isRolling?.(time)) {
+    return {
+      elapsed: Math.max(0, time - (player.roll.startTime ?? 0)),
+      reverse: isRollingBackward(player),
+    };
+  }
+  if (player.isJumping?.(time)) {
+    return { elapsed: Math.max(0, time - (player.jump.startTime ?? 0)) };
+  }
+  if (player.isSneaking) {
+    return { phase: player.walkPhase, reverse: !isMovingForward(player) };
+  }
+  if (player.isCrouching) return { time };
   if (!player.isMoving) return { time };
   return {
     phase: player.walkPhase,
@@ -643,7 +827,12 @@ export function getWalkBounceY(walkPhase, moving, amp = 1.8) {
   return -amp + amp * Math.pow(u, 2.8);
 }
 
-export function getPlayerBounceY(player) {
+export function getPlayerBounceY(player, time = 0) {
+  if (player.isRolling?.(time) || player.isCrouching || player.isSneaking) return 0;
+  if (player.isJumping?.(time)) {
+    const t = player.getJumpT?.(time) ?? 0;
+    return -Math.sin(t * Math.PI) * 11;
+  }
   const amp = player.isSprinting ? 2.8 : 1.8;
   return getWalkBounceY(player.walkPhase, player.isMoving, amp);
 }
@@ -653,7 +842,8 @@ export const IDLE_BREATH_AMP = 1.1;
 export const IDLE_BREATH_HZ = 0.42;
 
 export function getPlayerIdleBreathY(player, time = 0) {
-  if (player.isMoving || player.isMeleeAnimating?.(time)) return 0;
+  if (player.isMoving || player.isCrouching || player.isSneaking || player.isMeleeAnimating?.(time)) return 0;
+  if (player.isRolling?.(time) || player.isJumping?.(time)) return 0;
   const phase = time * Math.PI * 2 * IDLE_BREATH_HZ;
   // Cosine — zero velocity at inhale/exhale peaks (smoother than raw sine steps).
   return -Math.cos(phase) * IDLE_BREATH_AMP;
@@ -831,8 +1021,10 @@ export class SpriteBank {
       return Math.max(0, Math.min(fb.frameCount - 1, anim.frame | 0));
     }
     if (anim.elapsed != null) {
-      const idx = Math.floor(Math.max(0, anim.elapsed) * fb.fps);
-      return Math.min(idx, fb.frameCount - 1);
+      let idx = Math.floor(Math.max(0, anim.elapsed) * fb.fps);
+      idx = Math.min(idx, fb.frameCount - 1);
+      if (anim.reverse) idx = fb.frameCount - 1 - idx;
+      return idx;
     }
     if (anim.progress != null) {
       const p = Math.max(0, Math.min(1, anim.progress));
