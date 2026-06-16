@@ -1,7 +1,7 @@
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, getBiome, rollWorldSeed } from './worldGen.js';
-import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET } from './player.js';
+import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
 import { createExplosion, createGroundSpew, updateParticles } from './enemies.js';
 import { SoundManager } from './audio.js';
 import { Minimap } from './minimap.js';
@@ -403,11 +403,10 @@ class Game {
       return;
     }
 
-    this.mouse.wx = this.player.x + (this.mouse.sx - INTERNAL_W / 2) / PPU;
-    this.mouse.wz = this.player.z + (this.mouse.sy - INTERNAL_H / 2) / PPU;
-    const dx = this.mouse.wx - this.player.x;
-    const dz = this.mouse.wz - this.player.z;
-    this.player.angle = Math.atan2(dx, dz);
+    const target = this._screenToWorld(this.mouse.sx, this.mouse.sy);
+    this.mouse.wx = target.x;
+    this.mouse.wz = target.z;
+    this.player.angle = this._resolveAimAngle(this.mouse.sx, this.mouse.sy);
   }
 
   _updateCameraFollow(dt) {
@@ -465,6 +464,44 @@ class Game {
       x: Math.round((wx - cam.x) * PPU + INTERNAL_W / 2),
       y: Math.round((wz - cam.z) * PPU + INTERNAL_H / 2),
     };
+  }
+
+  /** Inverse of _worldToScreen — world point under a screen pixel. */
+  _screenToWorld(sx, sy) {
+    const cam = this._camera();
+    return {
+      x: cam.x + (sx - INTERNAL_W / 2) / PPU,
+      z: cam.z + (sy - INTERNAL_H / 2) / PPU,
+    };
+  }
+
+  _gunWorldPos(angle) {
+    const aim = gunAimTransform(angle);
+    const hold = GUN_HOLD_OFFSET + gunPivotHoldOffset(aim.angle);
+    return {
+      x: this.player.x + Math.sin(angle) * hold,
+      z: this.player.z + Math.cos(angle) * hold,
+    };
+  }
+
+  /** Aim so the bullet path on screen passes through the cursor (accounts for barrel lift). */
+  _resolveAimAngle(cursorSx, cursorSy) {
+    let angle = this.player.angle;
+    for (let i = 0; i < 6; i++) {
+      const spawn = findBulletSpawn(this.world, this.player.x, this.player.z, angle);
+      let ss;
+      if (spawn) {
+        ss = this._worldToScreen(spawn.x, spawn.z);
+      } else {
+        const gun = this._gunWorldPos(angle);
+        ss = this._worldToScreen(gun.x, gun.z);
+      }
+      const next = Math.atan2(cursorSx - ss.x, cursorSy - ss.y);
+      const delta = this._angleDelta(angle, next);
+      angle = next;
+      if (Math.abs(delta) < 0.00005) break;
+    }
+    return angle;
   }
 
   /** World Z at sprite feet — used for depth sort vs foliage bases. */
@@ -604,6 +641,7 @@ class Game {
         this._lastBounceLand = -1;
       }
 
+      this._updateCameraFollow(dt);
       this._syncAim(dt);
 
       const fireEdge = this.mouseDown && !this.prevMouseDown;
@@ -639,7 +677,7 @@ class Game {
       this.prevMouseDown = this.mouseDown;
     }
 
-    this._updateCameraFollow(dt);
+    if (inventoryOpen) this._updateCameraFollow(dt);
     const reloadResult = this.player.updateReload(time);
     if (reloadResult?.ejectCasings > 0) {
       const cfg = WEAPONS[this.player.weaponKey];

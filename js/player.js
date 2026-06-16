@@ -1281,7 +1281,7 @@ export class Player {
   }
 }
 
-function findBulletSpawn(world, px, pz, angle) {
+export function findBulletSpawn(world, px, pz, angle) {
   const sin = Math.sin(angle);
   const cos = Math.cos(angle);
   const aim = gunAimTransform(angle);

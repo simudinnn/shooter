@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v111';
+const CACHE = 'robot-ruins-v113';
 
 function playerSprites() {
   // Only precache sprites that exist in assets/player/.
