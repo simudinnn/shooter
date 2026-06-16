@@ -388,18 +388,40 @@ class Game {
     if (!this.running || !this.player) return;
 
     if (this.mobile) {
+      let cursorSx;
+      let cursorSy;
+      let turnRate = null;
+
       const target = this._findNearestRobotOnScreen();
       if (target) {
-        const desired = Math.atan2(target.x - this.player.x, target.z - this.player.z);
-        this._rotateAimToward(desired, dt, AUTO_AIM_TARGET_TURN_RATE);
+        const ts = this._worldToScreen(target.x, target.z);
+        cursorSx = ts.x;
+        cursorSy = ts.y;
+        this.mouse.wx = target.x;
+        this.mouse.wz = target.z;
+        turnRate = AUTO_AIM_TARGET_TURN_RATE;
       } else {
         const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
         if (stickMag > 0.12) {
-          const desired = Math.atan2(this.touchMove.x, this.touchMove.z);
-          this._rotateAimToward(desired, dt, AUTO_AIM_STICK_TURN_RATE);
+          const stickAngle = Math.atan2(this.touchMove.x, this.touchMove.z);
+          const distPx = 72;
+          cursorSx = INTERNAL_W / 2 + Math.sin(stickAngle) * distPx;
+          cursorSy = INTERNAL_H / 2 + Math.cos(stickAngle) * distPx;
+          const w = this._screenToWorld(cursorSx, cursorSy);
+          this.mouse.wx = w.x;
+          this.mouse.wz = w.z;
+          turnRate = AUTO_AIM_STICK_TURN_RATE;
+        } else {
+          this._setAimCursorFromAngle(this.player.angle);
+          this.player.angle = this._resolveAimAngle(this.mouse.sx, this.mouse.sy);
+          return;
         }
       }
-      this._setAimCursorFromAngle(this.player.angle);
+
+      this.mouse.sx = cursorSx;
+      this.mouse.sy = cursorSy;
+      const desired = this._resolveAimAngle(cursorSx, cursorSy);
+      this._rotateAimToward(desired, dt, turnRate);
       return;
     }
 
