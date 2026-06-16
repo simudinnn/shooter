@@ -16,6 +16,8 @@ const GUN_SPRITES = ['glock', 'm16', 'm870', 'm24', 'uzi', 'revolver', 'famas', 
 /** Pump / bolt guns use a dedicated mid-fire cycle strip. */
 const GUN_CYCLE_SPRITES = ['m870', 'm24'];
 const MELEE_SPRITES = ['knife', 'fire_axe', 'wooden_bat', 'crowbar'];
+/** 16×16 inventory / GUI icons — weapon only, no hands (assets/items/{name}.png). */
+export const ITEM_WEAPON_SPRITES = [...GUN_SPRITES, ...MELEE_SPRITES];
 
 const WEAPON_ASSET_PATHS = (() => {
   const paths = {};
@@ -33,14 +35,27 @@ const WEAPON_ASSET_PATHS = (() => {
   return paths;
 })();
 
+const ITEM_WEAPON_ASSET_PATHS = Object.fromEntries(
+  ITEM_WEAPON_SPRITES.map((base) => [`item_${base}`, `assets/items/${base}.png`]),
+);
+
+const WORLD_FLOOR_SPRITES = ['floor_grass', 'floor_dirt', 'floor_rock'];
+
+const WORLD_FOLIAGE_SPRITES = [
+  'foliage_grass', 'foliage_grass_tall', 'foliage_rock',
+  'foliage_tree', 'foliage_stump',
+];
+
+const WORLD_ASSET_PATHS = Object.fromEntries([
+  ...WORLD_FLOOR_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
+  ...WORLD_FOLIAGE_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
+]);
+
 const CORE_ASSETS = {
   spider: 'assets/enemies/spider.png',
   spider_walk: 'assets/enemies/spider_walk.png',
   wall: 'assets/world/wall.png',
-  floor: 'assets/world/floor.png',
-  floor2: 'assets/world/floor2.png',
-  floor3: 'assets/world/floor3.png',
-  floor4: 'assets/world/floor4.png',
+  ...WORLD_ASSET_PATHS,
   ammo: 'assets/items/ammo.png',
   bandage: 'assets/items/bandage.png',
   mystery: 'assets/items/mystery.png',
@@ -96,7 +111,12 @@ export const SPRITE_ANIM = {
     fal_reload: { fps: 10, loop: false, frameW: 24, frameH: 24 },
     particle_smoke: { fps: 4, loop: false, frameW: 15, frameH: 15 },
     particle_spark: { fps: 5, loop: false, frameW: 15, frameH: 15 },
-    particle_fire: { fps: 2, loop: false, frameW: 15, frameH: 15 }
+    particle_fire: { fps: 2, loop: false, frameW: 15, frameH: 15 },
+    casing: { frameW: 4, frameH: 4, frames: 1 },
+    casing_red: { frameW: 4, frameH: 4, frames: 1 },
+    ...Object.fromEntries(
+      ITEM_WEAPON_SPRITES.map((base) => [`item_${base}`, { frameW: 16, frameH: 16, frames: 1 }]),
+    ),
   },
 };
 
@@ -106,12 +126,14 @@ export const loadedSheetMeta = {};
 export const ASSET_PATHS = {
   ...PLAYER_ASSET_PATHS,
   ...WEAPON_ASSET_PATHS,
+  ...ITEM_WEAPON_ASSET_PATHS,
   ...CORE_ASSETS,
 };
 
 export const FLOOR_VARIANTS = ['floor', 'floor2', 'floor3', 'floor4'];
 export const CRATE_VARIANTS = ['crate', 'crate2', 'crate3', 'crate4'];
 export const ITEM_NATIVE_PX = 16;
+export const CASING_NATIVE_PX = 4;
 export const CHAR_NATIVE_PX = 24;
 export const WEAPON_NATIVE_PX = 24;
 export const PARTICLE_FX_NATIVE_PX = 15;
@@ -132,8 +154,23 @@ export function spriteFeetOffset(nativePx, scale) {
   return nativePx * scale * 0.5;
 }
 
-export function weaponSpritePath(sprite) {
+export function weaponHoldSpritePath(sprite) {
   return `assets/weapons/${sprite}.png`;
+}
+
+/** 16×16 item icon for inventory / GUI / back-carry (no hands). */
+export function weaponItemSpritePath(sprite) {
+  return `assets/items/${sprite}.png`;
+}
+
+/** SpriteBank key for a weapon item icon. */
+export function weaponItemSpriteKey(sprite) {
+  return `item_${sprite}`;
+}
+
+/** @deprecated use weaponHoldSpritePath for in-hand sprites */
+export function weaponSpritePath(sprite) {
+  return weaponHoldSpritePath(sprite);
 }
 
 const FALLBACK_SIZE = 16;
@@ -167,6 +204,8 @@ function getAnimSpec(name) {
 }
 
 function defaultFrameSize(name) {
+  if (name.startsWith('item_')) return ITEM_NATIVE_PX;
+  if (name === 'casing' || name === 'casing_red') return CASING_NATIVE_PX;
   if (name.startsWith('particle_')) return 15;
   if (name.startsWith('player_') || name.startsWith('spider')) return CHAR_SIZE;
   if (GUN_SPRITES.some((b) => name === b || name.startsWith(`${b}_`))
@@ -531,6 +570,44 @@ function buildWeaponAnimStripFallback(name) {
   return c;
 }
 
+function buildWeaponItemFallback(sprite) {
+  const c = makeCanvas(ITEM_NATIVE_PX, ITEM_NATIVE_PX);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const o = 1;
+  if (GUN_SPRITES.includes(sprite)) {
+    drawGunArt(g, sprite, o);
+  } else if (MELEE_SPRITES.includes(sprite)) {
+    switch (sprite) {
+      case 'knife':
+        px(g, 7 + o, 2 + o, 2, 9, '#c0c4cc');
+        px(g, 6 + o, 9 + o, 4, 3, '#5a4030');
+        px(g, 7 + o, 1 + o, 2, 2, '#e8ecf0');
+        break;
+      case 'fire_axe':
+        px(g, 4 + o, 1 + o, 8, 5, '#a03028');
+        px(g, 5 + o, 0 + o, 6, 2, '#c84838');
+        px(g, 7 + o, 6 + o, 2, 9, '#5a4030');
+        break;
+      case 'wooden_bat':
+        px(g, 7 + o, 0 + o, 3, 13, '#8a6840');
+        px(g, 6 + o, 1 + o, 5, 11, '#6a5030');
+        px(g, 8 + o, 12 + o, 2, 2, '#4a3828');
+        break;
+      case 'crowbar':
+        px(g, 7 + o, 0 + o, 2, 12, '#707880');
+        px(g, 5 + o, 0 + o, 4, 3, '#9098a0');
+        px(g, 6 + o, 11 + o, 4, 2, '#606870');
+        break;
+      default:
+        px(g, 0, 0, ITEM_NATIVE_PX, ITEM_NATIVE_PX, '#ff00ff');
+    }
+  } else {
+    px(g, 0, 0, ITEM_NATIVE_PX, ITEM_NATIVE_PX, '#ff00ff');
+  }
+  return c;
+}
+
 function buildWeaponFallback(name) {
   if (name.endsWith('_reload') || name.endsWith('_cycle')) {
     return buildWeaponAnimStripFallback(name);
@@ -608,7 +685,80 @@ function buildParticleFxFallback(name) {
   return c;
 }
 
+function buildFloorFallback(name) {
+  const c = makeCanvas(FALLBACK_SIZE, FALLBACK_SIZE);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const palette = {
+    floor_grass: ['#b8b8b0', '#a8a8a0', '#c8c8c0'],
+    floor_dirt: ['#6a5840', '#5a4834', '#7a6848'],
+    floor_rock: ['#5a5a58', '#4a4a48', '#6a6a66'],
+  }[name] || ['#b8b8b0', '#a8a8a0', '#c8c8c0'];
+  px(g, 0, 0, 16, 16, palette[0]);
+  px(g, 0, 0, 7, 7, palette[1]);
+  px(g, 9, 9, 7, 7, palette[2]);
+  return c;
+}
+
+function buildFoliageFallback(name) {
+  const c = makeCanvas(FALLBACK_SIZE, FALLBACK_SIZE);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  switch (name) {
+    case 'foliage_grass':
+      px(g, 6, 11, 2, 3, '#505848');
+      px(g, 9, 11, 2, 3, '#505848');
+      px(g, 7, 9, 2, 4, '#606858');
+      px(g, 5, 10, 2, 3, '#585850');
+      px(g, 10, 10, 2, 3, '#585850');
+      break;
+    case 'foliage_grass_tall':
+      px(g, 7, 6, 2, 8, '#989890');
+      px(g, 4, 5, 2, 8, '#a8a8a0');
+      px(g, 10, 5, 2, 8, '#a8a8a0');
+      px(g, 6, 4, 4, 2, '#b8b8b0');
+      break;
+    case 'foliage_flower':
+      px(g, 7, 10, 2, 4, '#3a6a38');
+      px(g, 6, 5, 4, 4, '#e84868');
+      break;
+    case 'foliage_bush':
+      px(g, 3, 8, 10, 6, '#2d5a30');
+      px(g, 5, 5, 6, 5, '#3a7040');
+      break;
+    case 'foliage_tree':
+      px(g, 7, 10, 2, 5, '#5a4030');
+      px(g, 3, 2, 10, 9, '#2a6030');
+      px(g, 5, 1, 6, 5, '#3a7840');
+      break;
+    case 'foliage_dead_tree':
+      px(g, 7, 8, 2, 7, '#4a3828');
+      px(g, 4, 2, 2, 4, '#5a4838');
+      px(g, 10, 3, 2, 3, '#5a4838');
+      break;
+    case 'foliage_rock':
+      px(g, 3, 8, 10, 6, '#5a5a58');
+      px(g, 5, 6, 7, 5, '#6a6a66');
+      break;
+    case 'foliage_stump':
+      px(g, 5, 9, 6, 5, '#5a4030');
+      px(g, 6, 7, 4, 3, '#6a5040');
+      break;
+    default:
+      px(g, 4, 4, 8, 8, '#4a7a44');
+      break;
+  }
+  return c;
+}
+
 function buildFallback(name) {
+  if (name.startsWith('item_')) {
+    return buildWeaponItemFallback(name.slice(5));
+  }
+  if (name.startsWith('floor_')) return buildFloorFallback(name);
+  if (name.startsWith('foliage_')) {
+    return buildFoliageFallback(name);
+  }
   if (name.startsWith('player_') || name.startsWith('spider')) {
     return buildCharFallback(name);
   }
@@ -968,6 +1118,9 @@ export class SpriteBank {
     this.images = {};
     this.flipbooks = {};
     this.ready = false;
+    this._tileBitmapCache = new Map();
+    this._tileBitmapOrder = [];
+    this._tileBitmapMax = 384;
   }
 
   async loadAll() {
@@ -1100,10 +1253,100 @@ export class SpriteBank {
     ctx.restore();
   }
 
-  drawTile(ctx, name, sx, sy, tilePx) {
-    const img = this.images[name];
-    if (!img) return;
+  _getImage(name) {
+    if (this.images[name]) return this.images[name];
+    if (name.startsWith('floor_') || name.startsWith('foliage_')) {
+      const fallback = buildFallback(name);
+      this.images[name] = fallback;
+      this._parseFlipbook(name, fallback);
+      return fallback;
+    }
+    return null;
+  }
+
+  _tintKey(tint) {
+    if (!tint) return 0;
+    if (tint.a && tint.b) {
+      const ka = ((tint.a.r >> 4) << 8) | ((tint.a.g >> 4) << 4) | (tint.a.b >> 4);
+      const kb = ((tint.b.r >> 4) << 8) | ((tint.b.g >> 4) << 4) | (tint.b.b >> 4);
+      return (ka << 12) | kb;
+    }
+    return ((tint.r >> 4) << 8) | ((tint.g >> 4) << 4) | (tint.b >> 4);
+  }
+
+  _cacheTileBitmap(key, canvas) {
+    if (!this._tileBitmapCache.has(key)) {
+      this._tileBitmapOrder.push(key);
+      if (this._tileBitmapOrder.length > this._tileBitmapMax) {
+        const old = this._tileBitmapOrder.shift();
+        this._tileBitmapCache.delete(old);
+      }
+    }
+    this._tileBitmapCache.set(key, canvas);
+    return canvas;
+  }
+
+  getTileBitmap(name, px, tint) {
+    const img = this._getImage(name);
+    if (!img) return null;
+
+    const srcSize = img.naturalWidth || img.width || 16;
+    const scale = Math.max(1, Math.round(px / srcSize));
+    const outPx = srcSize * scale;
+    const tintKey = this._tintKey(tint);
+    const key = `${name}:${outPx}:${tintKey}`;
+    const hit = this._tileBitmapCache.get(key);
+    if (hit) return hit;
+
+    const native = document.createElement('canvas');
+    native.width = srcSize;
+    native.height = srcSize;
+    const nc = native.getContext('2d');
+    nc.imageSmoothingEnabled = false;
+    nc.drawImage(img, 0, 0, srcSize, srcSize);
+    if (tint) {
+      const a = tint.a || tint;
+      const b = tint.b || tint;
+      const grad = nc.createLinearGradient(0, 0, srcSize, 0);
+      grad.addColorStop(0, `rgb(${a.r},${a.g},${a.b})`);
+      grad.addColorStop(1, `rgb(${b.r},${b.g},${b.b})`);
+      nc.fillStyle = grad;
+      nc.fillRect(0, 0, srcSize, srcSize);
+      nc.globalCompositeOperation = 'destination-in';
+      nc.drawImage(img, 0, 0, srcSize, srcSize);
+      nc.globalCompositeOperation = 'multiply';
+      nc.drawImage(img, 0, 0, srcSize, srcSize);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outPx;
+    canvas.height = outPx;
+    const c = canvas.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.drawImage(native, 0, 0, outPx, outPx);
+    return this._cacheTileBitmap(key, canvas);
+  }
+
+  stampTile(ctx, name, sx, sy, tilePx, tint = null, alpha = 1) {
     const px = Math.round(tilePx);
-    ctx.drawImage(img, Math.round(sx), Math.round(sy), px, px);
+    const bmp = this.getTileBitmap(name, px, tint);
+    if (!bmp) return;
+    const x = Math.round(sx);
+    const y = Math.round(sy);
+    const prev = ctx.globalAlpha;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(bmp, x, y, px, px);
+    ctx.globalAlpha = prev;
+  }
+
+  drawTile(ctx, name, sx, sy, tilePx, tint = null) {
+    const px = Math.round(tilePx);
+    const bmp = this.getTileBitmap(name, px, tint);
+    if (!bmp) return;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bmp, Math.round(sx), Math.round(sy), px, px);
   }
 }

@@ -24,6 +24,7 @@ export class Robot {
     this.wanderAngle = Math.random() * Math.PI * 2;
     this.wanderTimer = 0;
     this.chasing = false;
+    this.aggroByHit = false;
     this.moving = false;
     this.knockVX = 0;
     this.knockVZ = 0;
@@ -110,6 +111,9 @@ export class Robot {
       this.alive = false;
       this.jump.active = false;
       this.jump.charging = false;
+    } else if (this.type === 'spider') {
+      this.chasing = true;
+      this.aggroByHit = true;
     }
     return true;
   }
@@ -294,6 +298,7 @@ export class Robot {
 
     if (!player.alive) {
       this.chasing = false;
+      this.aggroByHit = false;
       this.bob = 0;
       this.moving = false;
       return;
@@ -303,11 +308,11 @@ export class Robot {
     const dz = player.z - this.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     const stealth = player.getStealthMult?.() ?? 1;
-    const detectRange = 48 * stealth;
-    const chaseRange = 58 * stealth;
+    const detectRange = (this.type === 'spider' ? 26 : 48) * stealth;
+    const chaseRange = (this.type === 'spider' ? 36 : 58) * stealth;
     const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
 
-    if (hasLOS || (this.chasing && dist < chaseRange)) {
+    if (hasLOS || (this.chasing && dist < chaseRange) || this.aggroByHit) {
       this.chasing = true;
       this.angle = Math.atan2(dx, dz);
 
@@ -343,7 +348,7 @@ export class Robot {
       this._move(dt, world, player, robots, Math.sin(this.wanderAngle), Math.cos(this.wanderAngle), 0.45);
       this.angle = this.wanderAngle;
       moving = true;
-    } else if (dist > 60) {
+    } else if (dist > chaseRange + 4 && !this.aggroByHit) {
       this.chasing = false;
     }
 

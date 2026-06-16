@@ -1,3 +1,8 @@
+import { TILE, BASE_RADIUS, getTerrainMapColorFromTile } from './worldGen.js';
+
+/** Square viewport radius — fills minimap corners when zoomed in. */
+export const MINIMAP_RADIUS = 44;
+
 export class Minimap {
   constructor(canvas) {
     this.canvas = canvas;
@@ -7,12 +12,11 @@ export class Minimap {
     this.canvas.height = this.size;
   }
 
-  worldToMap(x, z, world) {
-    const halfW = world.halfW;
-    const halfH = world.halfH;
+  worldToMap(x, z, player) {
+    const scale = this.size / (MINIMAP_RADIUS * 2);
     return {
-      x: ((x + halfW) / (halfW * 2)) * this.size,
-      y: ((z + halfH) / (halfH * 2)) * this.size,
+      x: (x - player.x) * scale + this.size / 2,
+      y: (z - player.z) * scale + this.size / 2,
     };
   }
 
@@ -46,62 +50,55 @@ export class Minimap {
     ctx.fill();
   }
 
-  render(player, robots, world) {
+  render(player, robots, world, items) {
     const ctx = this.ctx;
     const s = this.size;
-    const halfW = world.halfW;
-    const halfH = world.halfH;
-    const scale = s / (halfW * 2);
+    const scale = s / (MINIMAP_RADIUS * 2);
+    const tilePx = Math.max(1, TILE * scale);
 
     ctx.fillStyle = 'rgba(10, 14, 18, 0.85)';
     ctx.fillRect(0, 0, s, s);
 
-    if (world.usesImageMap()) {
-      world.imageMap.drawMinimap(ctx, s);
-    } else {
-      const cx = s / 2;
-      const cy = s / 2;
-      const roadW = (8 / (halfW * 2)) * s;
-      ctx.fillStyle = 'rgba(42, 42, 48, 0.8)';
-      ctx.fillRect(cx - roadW / 2, 0, roadW, s);
-      ctx.fillRect(0, cy - roadW / 2, s, roadW);
+    const minTX = Math.floor((player.x - MINIMAP_RADIUS) / TILE);
+    const maxTX = Math.ceil((player.x + MINIMAP_RADIUS) / TILE);
+    const minTZ = Math.floor((player.z - MINIMAP_RADIUS) / TILE);
+    const maxTZ = Math.ceil((player.z + MINIMAP_RADIUS) / TILE);
+
+    for (let tz = minTZ; tz <= maxTZ; tz++) {
+      for (let tx = minTX; tx <= maxTX; tx++) {
+        const wx = tx * TILE + TILE * 0.5;
+        const wz = tz * TILE + TILE * 0.5;
+        if (Math.abs(wx - player.x) > MINIMAP_RADIUS || Math.abs(wz - player.z) > MINIMAP_RADIUS) continue;
+        const tile = world.getTile(tx, tz);
+        if (!tile) continue;
+        const p = this.worldToMap(tx * TILE, tz * TILE, player);
+        ctx.fillStyle = getTerrainMapColorFromTile(tile, wx, wz);
+        ctx.fillRect(p.x | 0, p.y | 0, Math.ceil(tilePx), Math.ceil(tilePx));
+      }
     }
 
-    ctx.strokeStyle = 'rgba(240, 160, 48, 0.4)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, s - 1, s - 1);
+    const baseP = this.worldToMap(0, 0, player);
+    const baseR = BASE_RADIUS * scale;
+    if (baseR > 2 && baseP.x + baseR > 0 && baseP.x - baseR < s && baseP.y + baseR > 0 && baseP.y - baseR < s) {
+      ctx.strokeStyle = 'rgba(100, 180, 255, 0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(baseP.x, baseP.y, baseR, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
-    if (!world.usesImageMap()) {
-      for (const obs of world.obstacles) {
-        const p = this.worldToMap(obs.x, obs.z, world);
-        if (obs.kind === 'box') {
-          const rw = Math.max(2, obs.halfW * 2 * scale);
-          const rh = Math.max(2, obs.halfD * 2 * scale);
-          ctx.fillStyle = obs.halfW > 2 ? 'rgba(74, 64, 56, 0.85)' : 'rgba(74, 48, 32, 0.8)';
-          ctx.fillRect(p.x - rw / 2, p.y - rh / 2, rw, rh);
-        } else {
-          const r = Math.max(2, (obs.radius || 1) * scale);
-          ctx.fillStyle = 'rgba(74, 48, 32, 0.8)';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    } else {
-      for (const obs of world.obstacles) {
-        if (obs.kind !== 'circle') continue;
-        const p = this.worldToMap(obs.x, obs.z, world);
-        const r = Math.max(2, (obs.radius || 1) * scale);
-        ctx.fillStyle = 'rgba(138, 80, 48, 0.9)';
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
+    for (const item of items?.items ?? []) {
+      if (!item.active) continue;
+      const p = this.worldToMap(item.x, item.z, player);
+      if (p.x < 0 || p.x > s || p.y < 0 || p.y > s) continue;
+      ctx.fillStyle = '#f0c030';
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
     }
 
     for (const robot of robots) {
       if (!robot.alive) continue;
-      const p = this.worldToMap(robot.x, robot.z, world);
+      const p = this.worldToMap(robot.x, robot.z, player);
+      if (p.x < 0 || p.x > s || p.y < 0 || p.y > s) continue;
       const hit = robot.knockVX * robot.knockVX + robot.knockVZ * robot.knockVZ > 4;
       const critical = robot.healthRatio <= 0.25;
       const damaged = robot.healthRatio <= 0.5;
@@ -111,8 +108,12 @@ export class Minimap {
       ctx.fill();
     }
 
-    const pp = this.worldToMap(player.x, player.z, world);
+    const pp = this.worldToMap(player.x, player.z, player);
     this._drawPlayerMarker(ctx, pp, player.angle);
+
+    ctx.strokeStyle = 'rgba(240, 160, 48, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, s - 1, s - 1);
 
     ctx.fillStyle = 'rgb(255, 230, 0)';
     ctx.font = '9px Segoe UI, sans-serif';

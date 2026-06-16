@@ -1,8 +1,12 @@
 import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS, EQUIPMENT_SLOT_COUNT } from './player.js';
-import { weaponSpritePath } from './sprites.js';
+import { weaponItemSpritePath } from './sprites.js';
 
 const EQUIPMENT_LABELS = ['Head', 'Body', 'Legs', 'Gear'];
 const ANIM_MS = 240;
+
+export const INV_SLOT_SRC = 'assets/ui/inv_slot.png';
+export const INV_CURSOR_SRC = 'assets/ui/inv_cursor.png';
+export const INV_LOCK_SRC = 'assets/items/lock.png';
 
 export class InventoryUI {
   constructor(game) {
@@ -12,8 +16,12 @@ export class InventoryUI {
     this.selectedSlot = null;
     this.drag = null;
     this._skipClick = false;
+    this._tooltipEl = null;
+    this._cursorEl = null;
+    this._hoverTooltipText = null;
     this._onDragMove = (e) => this._handleDragMove(e);
     this._onDragEnd = (e) => this._handleDragEnd(e);
+    this._onInvPointerMove = (e) => this._moveInvCursor(e);
     this.root = document.getElementById('inventory');
     this.panel = document.getElementById('inventory-panel');
     this.bgImg = document.getElementById('inventory-bg');
@@ -77,6 +85,7 @@ export class InventoryUI {
     this.game.mouseDown = false;
     this.game.prevMouseDown = false;
     this.root?.classList.remove('hidden');
+    this._enableInvCursor();
     this.render();
     requestAnimationFrame(() => {
       this.root?.classList.add('open');
@@ -87,6 +96,7 @@ export class InventoryUI {
   close() {
     if (!this.open || this.animating) return;
     this._cancelDrag();
+    this._disableInvCursor();
     this.animating = true;
     this.selectedSlot = null;
     this.root?.classList.remove('open');
@@ -99,6 +109,7 @@ export class InventoryUI {
 
   forceClose() {
     this._cancelDrag();
+    this._disableInvCursor();
     this.open = false;
     this.animating = false;
     this.selectedSlot = null;
@@ -113,25 +124,107 @@ export class InventoryUI {
   _makeSlot(className, extra = '') {
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = `${className} ${extra}`.trim();
+    el.className = `${className} inv-slot-sprite ${extra}`.trim();
     return el;
   }
 
-  _weaponIcon(sprite) {
+  _slotIcon(src) {
     const img = document.createElement('img');
-    img.className = 'inv-icon';
-    img.src = weaponSpritePath(sprite);
+    img.className = 'inv-slot-icon';
+    img.src = src;
     img.alt = '';
     img.draggable = false;
     img.onerror = () => { img.style.visibility = 'hidden'; };
     return img;
   }
 
-  _itemNameLabel(name) {
-    const label = document.createElement('span');
-    label.className = 'inv-item-name';
-    label.textContent = name;
-    return label;
+  _weaponIcon(sprite) {
+    return this._slotIcon(weaponItemSpritePath(sprite));
+  }
+
+  _lockIcon() {
+    return this._slotIcon(INV_LOCK_SRC);
+  }
+
+  _bindTooltip(slot, text) {
+    if (!text) return;
+    const show = (e) => {
+      this._hoverTooltipText = text;
+      this._showTooltipAt(e.clientX, e.clientY, text);
+    };
+    const move = (e) => {
+      if (this._hoverTooltipText !== text) return;
+      this._showTooltipAt(e.clientX, e.clientY, text);
+    };
+    const hide = () => {
+      if (this._hoverTooltipText === text) this._hoverTooltipText = null;
+      this._hideTooltip();
+    };
+    slot.addEventListener('pointerenter', show);
+    slot.addEventListener('pointermove', move);
+    slot.addEventListener('pointerleave', hide);
+  }
+
+  _ensureInvCursor() {
+    if (this._cursorEl) return;
+    this._cursorEl = document.createElement('img');
+    this._cursorEl.className = 'inv-cursor-follow';
+    this._cursorEl.src = INV_CURSOR_SRC;
+    this._cursorEl.alt = '';
+    this._cursorEl.draggable = false;
+    document.body.appendChild(this._cursorEl);
+  }
+
+  _enableInvCursor() {
+    this._ensureInvCursor();
+    this.root?.classList.add('inv-custom-cursor');
+    document.addEventListener('pointermove', this._onInvPointerMove);
+  }
+
+  _disableInvCursor() {
+    document.removeEventListener('pointermove', this._onInvPointerMove);
+    this.root?.classList.remove('inv-custom-cursor');
+    this._hoverTooltipText = null;
+    this._hideTooltip();
+    if (this._cursorEl) this._cursorEl.style.visibility = 'hidden';
+  }
+
+  _moveInvCursor(e) {
+    if (!this.open || !this._cursorEl) return;
+    this._cursorEl.style.visibility = 'visible';
+    this._cursorEl.style.left = `${e.clientX}px`;
+    this._cursorEl.style.top = `${e.clientY}px`;
+    if (this._hoverTooltipText) {
+      this._showTooltipAt(e.clientX, e.clientY, this._hoverTooltipText);
+    }
+  }
+
+  _showTooltipAt(clientX, clientY, text) {
+    if (!text) return;
+    if (!this._tooltipEl) {
+      this._tooltipEl = document.createElement('div');
+      this._tooltipEl.className = 'inv-tooltip';
+      document.body.appendChild(this._tooltipEl);
+    }
+    this._tooltipEl.textContent = text;
+    this._tooltipEl.classList.add('visible');
+    this._tooltipEl.style.visibility = 'hidden';
+    this._tooltipEl.style.left = '0';
+    this._tooltipEl.style.top = '0';
+    const tip = this._tooltipEl.getBoundingClientRect();
+    let left = clientX - tip.width / 2;
+    let top = clientY - tip.height - 16;
+    if (top < 8) top = clientY + 20;
+    left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8));
+    this._tooltipEl.style.left = `${left}px`;
+    this._tooltipEl.style.top = `${top}px`;
+    this._tooltipEl.style.visibility = 'visible';
+  }
+
+  _hideTooltip() {
+    if (!this._tooltipEl) return;
+    this._tooltipEl.classList.remove('visible');
+    this._tooltipEl.style.visibility = 'hidden';
   }
 
   _onItemSlotClick(index, player) {
@@ -202,6 +295,8 @@ export class InventoryUI {
 
   _beginDrag(e, fromType, index, player) {
     this._cancelDrag();
+    this._hoverTooltipText = null;
+    this._hideTooltip();
     this.drag = {
       fromType,
       fromIndex: index,
@@ -348,6 +443,8 @@ export class InventoryUI {
     const player = this.game.player;
     if (!player || !this.weaponsEl || !this.equipmentEl || !this.itemsEl) return;
 
+    this._hoverTooltipText = null;
+    this._hideTooltip();
     this.weaponsEl.innerHTML = '';
     this.equipmentEl.innerHTML = '';
     this.itemsEl.innerHTML = '';
@@ -359,16 +456,16 @@ export class InventoryUI {
       if (!player.isMeleeActive()) primary.classList.add('inv-active');
       const cfg = WEAPONS[player.weaponKey];
       primary.appendChild(this._weaponIcon(cfg.sprite));
-      const tag = document.createElement('span');
-      tag.className = 'inv-slot-tag';
-      tag.textContent = 'Main';
-      primary.appendChild(tag);
-      primary.appendChild(this._itemNameLabel(cfg.name));
     } else {
       primary.classList.add('inv-empty-slot');
       primary.textContent = 'Main';
     }
     primary.title = 'Main weapon — drop a gun here to equip';
+    if (player.weaponKey) {
+      this._bindTooltip(primary, WEAPONS[player.weaponKey].name);
+    } else {
+      this._bindTooltip(primary, 'Main weapon');
+    }
     primary.addEventListener('click', () => {
       if (player.weaponKey) {
         player.setWeaponSlot('gun');
@@ -382,12 +479,8 @@ export class InventoryUI {
     secondary.dataset.dropZone = 'melee';
     if (player.isMeleeActive()) secondary.classList.add('inv-active');
     secondary.appendChild(this._weaponIcon(player.getActiveMelee().sprite));
-    const secTag = document.createElement('span');
-    secTag.className = 'inv-slot-tag';
-    secTag.textContent = 'Melee';
-    secondary.appendChild(secTag);
-    secondary.appendChild(this._itemNameLabel(player.getActiveMelee().name));
     secondary.title = 'Melee weapon — drop a melee here to equip';
+    this._bindTooltip(secondary, player.getActiveMelee().name);
     secondary.addEventListener('click', () => {
       player.equipMelee(player.meleeKey);
       this.render();
@@ -397,14 +490,7 @@ export class InventoryUI {
     for (let i = 0; i < EQUIPMENT_SLOT_COUNT; i++) {
       const slot = this._makeSlot('inv-equip-slot', 'inv-locked');
       slot.disabled = true;
-      const label = document.createElement('span');
-      label.className = 'inv-lock-label';
-      label.textContent = EQUIPMENT_LABELS[i];
-      slot.appendChild(label);
-      const lock = document.createElement('span');
-      lock.className = 'inv-lock-icon';
-      lock.textContent = '🔒';
-      slot.appendChild(lock);
+      slot.appendChild(this._lockIcon());
       this.equipmentEl.appendChild(slot);
     }
 
@@ -417,19 +503,20 @@ export class InventoryUI {
 
       if (!unlocked) {
         slot.disabled = true;
-        slot.appendChild(Object.assign(document.createElement('span'), {
-          className: 'inv-lock-icon',
-          textContent: '🔒',
-        }));
+        slot.appendChild(this._lockIcon());
       } else if (data?.kind === 'weapon') {
         const cfg = WEAPONS[data.key];
-        const st = player.weaponInventory.get(data.key);
         slot.appendChild(this._weaponIcon(cfg.sprite));
-        slot.appendChild(this._itemNameLabel(cfg.name));
+        this._bindTooltip(slot, cfg.name);
         this._bindItemSlotDrag(slot, i, player);
         slot.addEventListener('click', (e) => {
           if (this._skipClick) { this._skipClick = false; return; }
-          if (this.selectedSlot !== null || e.shiftKey) {
+          if (e.shiftKey) {
+            player.swapItemSlotWithMain(i);
+            this.render();
+            return;
+          }
+          if (this.selectedSlot !== null) {
             this._onItemSlotClick(i, player);
             return;
           }
@@ -439,11 +526,16 @@ export class InventoryUI {
       } else if (data?.kind === 'melee') {
         const cfg = MELEE_WEAPONS[data.key];
         slot.appendChild(this._weaponIcon(cfg.sprite));
-        slot.appendChild(this._itemNameLabel(cfg.name));
+        this._bindTooltip(slot, cfg.name);
         this._bindItemSlotDrag(slot, i, player);
         slot.addEventListener('click', (e) => {
           if (this._skipClick) { this._skipClick = false; return; }
-          if (this.selectedSlot !== null || e.shiftKey) {
+          if (e.shiftKey) {
+            player.swapItemSlotWithMelee(i);
+            this.render();
+            return;
+          }
+          if (this.selectedSlot !== null) {
             this._onItemSlotClick(i, player);
             return;
           }

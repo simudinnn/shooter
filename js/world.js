@@ -1,164 +1,257 @@
-import { tryLoadImageMap } from './imageMap.js';
+import {
+  TILE,
+  CHUNK_TILES,
+  CHUNK_WORLD,
+  BASE_RADIUS,
+  generateChunk,
+  worldToChunk,
+  getBiome,
+  isInBase,
+  getFloorSpriteName,
+  unpackTintGradient,
+  isTintedFoliage,
+  isCanopyFoliage,
+} from './worldGen.js';
 
-export const MAP_SIZE = 90;
+export { TILE, CHUNK_TILES, BASE_RADIUS } from './worldGen.js';
+export const MAP_SIZE = 999999;
 export const PLAYER_RADIUS = 0.6;
 export const BULLET_RADIUS = 0.15;
-export const TILE = 4;
+
+const BAKE_VERSION = 11;
+const MAX_CACHED_CHUNKS = 256;
 
 export class World {
   constructor() {
+    this.chunks = new Map();
+    this.chunkOrder = [];
     this.obstacles = [];
     this.decor = [];
     this.imageMap = null;
-    this._rng = Math.random;
   }
 
   get halfW() {
-    return this.imageMap?.loaded ? this.imageMap.halfW : MAP_SIZE;
+    return MAP_SIZE;
   }
 
   get halfH() {
-    return this.imageMap?.loaded ? this.imageMap.halfH : MAP_SIZE;
+    return MAP_SIZE;
   }
 
   usesImageMap() {
-    return !!this.imageMap?.loaded;
+    return false;
   }
 
   async build() {
+    this.chunks.clear();
+    this.chunkOrder = [];
     this.obstacles = [];
     this.decor = [];
-    this.imageMap = await tryLoadImageMap();
-
-    if (this.usesImageMap()) return;
-
-    this._buildPerimeter();
-    this._buildRandomInterior();
+    this._touchChunk(0, 0);
   }
 
-  _addBox(x, z, halfW, halfD, rotY = 0, kind = 'wall') {
-    this.obstacles.push({ kind: 'box', x, z, halfW, halfD, rotY });
-    this.decor.push({ kind, x, z, halfW, halfD, rotY });
-  }
-
-  _addWallRun(axis, fixed, start, end, gapStart, gapEnd, halfThick, halfLen) {
-    if (gapStart > start) {
-      const len = gapStart - start;
-      const mid = start + len / 2;
-      if (axis === 'x') this._addBox(mid, fixed, len / 2, halfThick);
-      else this._addBox(fixed, mid, halfThick, len / 2);
-    }
-    if (end > gapEnd) {
-      const len = end - gapEnd;
-      const mid = gapEnd + len / 2;
-      if (axis === 'x') this._addBox(mid, fixed, len / 2, halfThick);
-      else this._addBox(fixed, mid, halfThick, len / 2);
-    }
-  }
-
-  _buildPerimeter() {
-    const b = 62;
-    const t = 0.85;
-    const gateN = 8 + Math.floor(this._rng() * 6);
-    const gateE = 8 + Math.floor(this._rng() * 6);
-    const gateS = 8 + Math.floor(this._rng() * 6);
-    const gateW = 8 + Math.floor(this._rng() * 6);
-    this._addWallRun('x', -b, -b, b, -gateN, gateN, t, b);
-    this._addWallRun('x', b, -b, b, -gateS, gateS, t, b);
-    this._addWallRun('z', -b, -b, b, -gateW, gateW, t, b);
-    this._addWallRun('z', b, -b, b, -gateE, gateE, t, b);
-  }
-
-  _buildRandomInterior() {
-    const t = 0.68;
-    const centerClear = 26;
-    const outerMin = 34;
-    const outerMax = 56;
-
-    const pickOuter = () => {
-      for (let i = 0; i < 40; i++) {
-        const a = this._rng() * Math.PI * 2;
-        const d = outerMin + this._rng() * (outerMax - outerMin);
-        const x = Math.sin(a) * d;
-        const z = Math.cos(a) * d;
-        if (x * x + z * z >= centerClear ** 2) return { x, z };
-      }
-      const a = this._rng() * Math.PI * 2;
-      return { x: Math.sin(a) * outerMin, z: Math.cos(a) * outerMin };
-    };
-
-    const clusters = 6 + Math.floor(this._rng() * 3);
-    for (let i = 0; i < clusters; i++) {
-      const { x: rx, z: rz } = pickOuter();
-      const hw = 5 + this._rng() * 6;
-      const hd = 5 + this._rng() * 6;
-      const door = 3 + this._rng() * 2;
-      const openSide = Math.floor(this._rng() * 4);
-
-      if (openSide !== 0) this._addBox(rx, rz - hd, hw, t, 0, 'room');
-      if (openSide !== 1) this._addBox(rx - hw, rz, t, hd, 0, 'room');
-      if (openSide !== 2) this._addBox(rx + hw, rz, t, hd, 0, 'room');
-      if (openSide !== 3) {
-        const gapX = rx + (this._rng() - 0.5) * hw * 0.4;
-        this._addWallRun('x', rz + hd, rx - hw, rx + hw, gapX - door / 2, gapX + door / 2, t, hw);
-      } else {
-        const gapZ = rz + (this._rng() - 0.5) * hd * 0.4;
-        this._addWallRun('z', rx - hw, rz - hd, rz + hd, gapZ - door / 2, gapZ + door / 2, t, hd);
+  prewarmGround(sprites, ppu, radiusChunks = 2) {
+    const tilePx = TILE * ppu;
+    for (let cz = -radiusChunks; cz <= radiusChunks; cz++) {
+      for (let cx = -radiusChunks; cx <= radiusChunks; cx++) {
+        this._bakeChunkGround(this.getChunk(cx, cz), sprites, tilePx);
       }
     }
+  }
 
-    const edgeWalls = 4 + Math.floor(this._rng() * 3);
-    for (let i = 0; i < edgeWalls; i++) {
-      const horizontal = this._rng() > 0.5;
-      const pos = pickOuter();
-      const len = 10 + this._rng() * 14;
-      const gap = 4 + this._rng() * 3;
-      const gapCenter = (this._rng() - 0.5) * len * 0.35;
-      if (horizontal) {
-        this._addWallRun('x', pos.z, pos.x - len / 2, pos.x + len / 2, pos.x + gapCenter - gap / 2, pos.x + gapCenter + gap / 2, t, len / 2);
-      } else {
-        this._addWallRun('z', pos.x, pos.z - len / 2, pos.z + len / 2, pos.z + gapCenter - gap / 2, pos.z + gapCenter + gap / 2, t, len / 2);
+  _chunkKey(cx, cz) {
+    return `${cx},${cz}`;
+  }
+
+  _touchChunk(cx, cz) {
+    const key = this._chunkKey(cx, cz);
+    if (this.chunks.has(key)) return this.chunks.get(key);
+
+    const chunk = generateChunk(cx, cz);
+    this.chunks.set(key, chunk);
+    this.chunkOrder.push(key);
+    if (this.chunkOrder.length > MAX_CACHED_CHUNKS) {
+      const old = this.chunkOrder.shift();
+      this.chunks.delete(old);
+    }
+    return chunk;
+  }
+
+  getChunk(cx, cz) {
+    return this._touchChunk(cx, cz);
+  }
+
+  getBiomeAt(wx, wz) {
+    return getBiome(wx, wz);
+  }
+
+  isBaseZone(wx, wz) {
+    return isInBase(wx, wz);
+  }
+
+  getTile(tx, tz) {
+    const cx = Math.floor(tx / CHUNK_TILES);
+    const cz = Math.floor(tz / CHUNK_TILES);
+    const lx = tx - cx * CHUNK_TILES;
+    const lz = tz - cz * CHUNK_TILES;
+    if (lx < 0 || lz < 0 || lx >= CHUNK_TILES || lz >= CHUNK_TILES) return null;
+    return this.getChunk(cx, cz).tiles[lz * CHUNK_TILES + lx];
+  }
+
+  _bakeChunkGround(chunk, sprites, tilePx) {
+    if (chunk.bakedLayer && chunk.bakedTilePx === tilePx && chunk.bakeVersion === BAKE_VERSION) {
+      return chunk.bakedLayer;
+    }
+
+    const px = Math.round(tilePx);
+    const size = CHUNK_TILES * px;
+    if (!chunk._bakeCanvas) {
+      chunk._bakeCanvas = document.createElement('canvas');
+      chunk._bakeCtx = chunk._bakeCanvas.getContext('2d');
+    }
+    const canvas = chunk._bakeCanvas;
+    const ctx = chunk._bakeCtx;
+    if (canvas.width !== size) {
+      canvas.width = size;
+      canvas.height = size;
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, size, size);
+
+    const originTX = chunk.cx * CHUNK_TILES;
+    const originTZ = chunk.cz * CHUNK_TILES;
+
+    for (const tile of chunk.tiles) {
+      const lx = tile.tx - originTX;
+      const lz = tile.tz - originTZ;
+      const tint = tile.tintKey ? unpackTintGradient(tile.tintKey) : null;
+      sprites.stampTile(
+        ctx,
+        getFloorSpriteName(tile.floorKind),
+        lx * px,
+        lz * px,
+        px,
+        tile.floorKind === 'grass' ? tint : null,
+      );
+    }
+
+    const originX = chunk.cx * CHUNK_WORLD;
+    const originZ = chunk.cz * CHUNK_WORLD;
+    const half = px * 0.5;
+    const toPx = px / TILE;
+    for (const f of chunk.foliage) {
+      if (isCanopyFoliage(f.kind)) continue;
+      const fTint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
+      const tileWx = Math.floor(f.x / TILE) * TILE;
+      const tileWz = Math.floor(f.z / TILE) * TILE;
+      const localX = Math.round((f.x - tileWx) * toPx);
+      const localZ = Math.round((f.z - tileWz) * toPx);
+      const fx = (tileWx - originX) * toPx + localX - half;
+      const fz = (tileWz - originZ) * toPx + localZ - half;
+      sprites.stampTile(ctx, f.sprite, fx, fz, px, fTint);
+    }
+
+    chunk.bakedLayer = canvas;
+    chunk.bakedTilePx = tilePx;
+    chunk.bakeVersion = BAKE_VERSION;
+    return canvas;
+  }
+
+  drawGroundLayer(ctx, camX, camZ, viewHalfW, viewHalfH, ppu, sprites, screenW, screenH) {
+    const tilePx = Math.round(TILE * ppu);
+    const chunkPx = CHUNK_TILES * tilePx;
+    const camPxX = Math.round(-camX * ppu + screenW / 2);
+    const camPxY = Math.round(-camZ * ppu + screenH / 2);
+    const minTX = Math.floor((camX - viewHalfW) / TILE);
+    const maxTX = Math.ceil((camX + viewHalfW) / TILE);
+    const minTZ = Math.floor((camZ - viewHalfH) / TILE);
+    const maxTZ = Math.ceil((camZ + viewHalfH) / TILE);
+    const minCX = Math.floor(minTX / CHUNK_TILES);
+    const maxCX = Math.floor(maxTX / CHUNK_TILES);
+    const minCZ = Math.floor(minTZ / CHUNK_TILES);
+    const maxCZ = Math.floor(maxTZ / CHUNK_TILES);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(camPxX, camPxY);
+    for (let cz = minCZ; cz <= maxCZ; cz++) {
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        const chunk = this.getChunk(cx, cz);
+        const layer = this._bakeChunkGround(chunk, sprites, tilePx);
+        const wx = cx * CHUNK_WORLD;
+        const wz = cz * CHUNK_WORLD;
+        ctx.drawImage(layer, Math.round(wx * ppu), Math.round(wz * ppu), chunkPx, chunkPx);
       }
     }
+    ctx.restore();
+  }
 
-    const coverCount = 8 + Math.floor(this._rng() * 6);
-    for (let i = 0; i < coverCount; i++) {
-      const { x, z } = pickOuter();
-      if (this.checkCollision(x, z, 1.2)) continue;
-      const rotY = this._rng() * Math.PI;
-      const hw = 2 + this._rng() * 3.5;
-      const hd = 0.55 + this._rng() * 0.25;
-      this._addBox(x, z, hw, hd, rotY, 'cover');
-    }
-
-    const corners = 2 + Math.floor(this._rng() * 2);
-    for (let i = 0; i < corners; i++) {
-      const { x: cx, z: cz } = pickOuter();
-      const arm = 4 + this._rng() * 5;
-      const flipX = this._rng() > 0.5 ? 1 : -1;
-      const flipZ = this._rng() > 0.5 ? 1 : -1;
-      this._addBox(cx, cz + flipZ * arm / 2, arm / 2, t, 0, 'wall');
-      this._addBox(cx + flipX * arm / 2, cz, t, arm / 2, 0, 'wall');
+  forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, fn) {
+    const minCX = Math.floor(minTX / CHUNK_TILES);
+    const maxCX = Math.floor(maxTX / CHUNK_TILES);
+    const minCZ = Math.floor(minTZ / CHUNK_TILES);
+    const maxCZ = Math.floor(maxTZ / CHUNK_TILES);
+    for (let cz = minCZ; cz <= maxCZ; cz++) {
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        fn(this.getChunk(cx, cz));
+      }
     }
   }
 
-  randomMapPoint(minDistFromCenter = 0) {
-    return this._randomMapPoint(minDistFromCenter);
+  collectCanopyFoliage(minX, maxX, minZ, maxZ) {
+    const minTX = Math.floor(minX / TILE);
+    const maxTX = Math.ceil(maxX / TILE);
+    const minTZ = Math.floor(minZ / TILE);
+    const maxTZ = Math.ceil(maxZ / TILE);
+    const out = [];
+    this.forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, (chunk) => {
+      for (const f of chunk.foliage) {
+        if (!isCanopyFoliage(f.kind)) continue;
+        if (f.x >= minX && f.x <= maxX && f.z >= minZ && f.z <= maxZ) out.push(f);
+      }
+    });
+    return out;
   }
 
-  _randomMapPoint(minDistFromCenter = 0) {
-    const hw = this.halfW * 0.85;
-    const hh = this.halfH * 0.85;
-    const x = (this._rng() - 0.5) * hw * 2;
-    const z = (this._rng() - 0.5) * hh * 2;
-    if (x * x + z * z < minDistFromCenter ** 2) return null;
-    return { x, z };
+  collectFoliage(minX, maxX, minZ, maxZ) {
+    const minTX = Math.floor(minX / TILE);
+    const maxTX = Math.ceil(maxX / TILE);
+    const minTZ = Math.floor(minZ / TILE);
+    const maxTZ = Math.ceil(maxZ / TILE);
+    const out = [];
+    this.forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, (chunk) => {
+      for (const f of chunk.foliage) {
+        if (f.x >= minX && f.x <= maxX && f.z >= minZ && f.z <= maxZ) out.push(f);
+      }
+    });
+    return out;
+  }
+
+  collectObstaclesNear(x, z, radius) {
+    const { cx: ccx, cz: ccz } = worldToChunk(x, z);
+    const reach = Math.ceil(radius / (CHUNK_TILES * TILE)) + 1;
+    const out = [];
+    for (let dz = -reach; dz <= reach; dz++) {
+      for (let dx = -reach; dx <= reach; dx++) {
+        const chunk = this.getChunk(ccx + dx, ccz + dz);
+        for (const obs of chunk.obstacles) out.push(obs);
+      }
+    }
+    return out;
+  }
+
+  randomMapPoint(minDistFromCenter = BASE_RADIUS + 8) {
+    for (let i = 0; i < 80; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = minDistFromCenter + Math.random() * 120;
+      const x = Math.sin(angle) * dist;
+      const z = Math.cos(angle) * dist;
+      if (!this.checkCollision(x, z, 0.5)) return { x, z };
+    }
+    return { x: minDistFromCenter, z: 0 };
   }
 
   getPlayerSpawn() {
-    if (this.usesImageMap()) {
-      return this.imageMap.findWalkableNear(0, 0, 12);
-    }
     return { x: 0, z: 0 };
   }
 
@@ -166,23 +259,6 @@ export class World {
     const dx = px - ox;
     const dz = pz - oz;
     return dx * dx + dz * dz < (pr + or) ** 2;
-  }
-
-  _worldToLocal(dx, dz, rotY) {
-    const c = Math.cos(rotY);
-    const s = Math.sin(rotY);
-    return { lx: dx * c - dz * s, lz: dx * s + dz * c };
-  }
-
-  _localToWorld(lx, lz, rotY) {
-    const c = Math.cos(rotY);
-    const s = Math.sin(rotY);
-    return { x: lx * c + lz * s, z: -lx * s + lz * c };
-  }
-
-  _boxHit(px, pz, pr, obs) {
-    const { lx, lz } = this._worldToLocal(px - obs.x, pz - obs.z, obs.rotY || 0);
-    return Math.abs(lx) < obs.halfW + pr && Math.abs(lz) < obs.halfD + pr;
   }
 
   _pushOutCircle(px, pz, pr, obs) {
@@ -196,26 +272,9 @@ export class World {
     return { x: px + dx * push, z: pz + dz * push };
   }
 
-  _pushOutBox(px, pz, pr, obs) {
-    const { lx, lz } = this._worldToLocal(px - obs.x, pz - obs.z, obs.rotY || 0);
-    const hw = obs.halfW + pr;
-    const hd = obs.halfD + pr;
-    if (Math.abs(lx) >= hw || Math.abs(lz) >= hd) return { x: px, z: pz };
-    const penX = hw - Math.abs(lx);
-    const penZ = hd - Math.abs(lz);
-    let nlx = lx;
-    let nlz = lz;
-    if (penX < penZ) nlx = Math.sign(lx || 1) * hw;
-    else nlz = Math.sign(lz || 1) * hd;
-    const w = this._localToWorld(nlx, nlz, obs.rotY || 0);
-    return { x: obs.x + w.x, z: obs.z + w.z };
-  }
-
-  _checkObstacleCollision(x, z, radius) {
-    for (const obs of this.obstacles) {
-      if (obs.kind === 'box') {
-        if (this._boxHit(x, z, radius, obs)) return true;
-      } else if (this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
+  _checkObstacleCollision(x, z, radius, obstacles) {
+    for (const obs of obstacles) {
+      if (obs.kind === 'circle' && this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
         return true;
       }
     }
@@ -223,103 +282,60 @@ export class World {
   }
 
   checkCollision(x, z, radius) {
-    if (this.usesImageMap()) {
-      if (this.imageMap.checkCollision(x, z, radius)) return true;
-      return this._checkObstacleCollision(x, z, radius);
-    }
-
-    const half = MAP_SIZE - radius - 0.5;
-    if (Math.abs(x) > half || Math.abs(z) > half) return true;
-    return this._checkObstacleCollision(x, z, radius);
+    const obstacles = this.collectObstaclesNear(x, z, radius + 2);
+    return this._checkObstacleCollision(x, z, radius, obstacles);
   }
 
   segmentBlocked(x0, z0, x1, z1, radius = BULLET_RADIUS) {
-    if (this.usesImageMap()) {
-      if (this.imageMap.segmentBlocked(x0, z0, x1, z1, radius)) return true;
-    } else {
-      const dist = Math.hypot(x1 - x0, z1 - z0);
-      const steps = Math.max(2, Math.ceil(dist / 0.2));
-      for (let i = 1; i <= steps; i++) {
-        const t = i / steps;
-        const x = x0 + (x1 - x0) * t;
-        const z = z0 + (z1 - z0) * t;
-        if (this.checkCollision(x, z, radius)) return true;
-      }
-      return false;
-    }
-
     const dist = Math.hypot(x1 - x0, z1 - z0);
-    const steps = Math.max(2, Math.ceil(dist / 0.2));
+    const steps = Math.max(2, Math.ceil(dist / 0.25));
+    const midX = (x0 + x1) * 0.5;
+    const midZ = (z0 + z1) * 0.5;
+    const obstacles = this.collectObstaclesNear(midX, midZ, dist * 0.5 + 2);
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       const x = x0 + (x1 - x0) * t;
       const z = z0 + (z1 - z0) * t;
-      if (this._checkObstacleCollision(x, z, radius)) return true;
+      if (this._checkObstacleCollision(x, z, radius, obstacles)) return true;
     }
     return false;
   }
 
   hasLineOfSight(x0, z0, x1, z1, radius = 0.25) {
-    if (this.usesImageMap()) {
-      if (!this.imageMap.hasLineOfSight(x0, z0, x1, z1, radius)) return false;
-    } else {
-      const dist = Math.hypot(x1 - x0, z1 - z0);
-      if (dist < 0.5) return true;
-      const steps = Math.max(4, Math.ceil(dist / 0.45));
-      for (let i = 1; i < steps; i++) {
-        const t = i / steps;
-        const x = x0 + (x1 - x0) * t;
-        const z = z0 + (z1 - z0) * t;
-        if (this.checkCollision(x, z, radius)) return false;
-      }
-      return true;
-    }
-
-    const dist = Math.hypot(x1 - x0, z1 - z0);
-    const steps = Math.max(4, Math.ceil(dist / 0.35));
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const x = x0 + (x1 - x0) * t;
-      const z = z0 + (z1 - z0) * t;
-      if (this._checkObstacleCollision(x, z, radius)) return false;
-    }
-    return true;
+    return !this.segmentBlocked(x0, z0, x1, z1, radius);
   }
 
   resolveMovement(oldX, oldZ, newX, newZ, radius) {
     let x = newX;
     let z = newZ;
-    const halfW = this.halfW - radius - 0.5;
-    const halfH = this.halfH - radius - 0.5;
-    x = Math.max(-halfW, Math.min(halfW, x));
-    z = Math.max(-halfH, Math.min(halfH, z));
+    const obstacles = this.collectObstaclesNear(x, z, radius + 3);
 
-    for (let i = 0; i < 5; i++) {
-      for (const obs of this.obstacles) {
-        if (obs.kind === 'box' && this._boxHit(x, z, radius, obs)) {
-          const p = this._pushOutBox(x, z, radius, obs);
-          x = p.x; z = p.z;
-        } else if (obs.kind === 'circle' && this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
+    for (let i = 0; i < 4; i++) {
+      for (const obs of obstacles) {
+        if (obs.kind === 'circle' && this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
           const p = this._pushOutCircle(x, z, radius, obs);
-          x = p.x; z = p.z;
+          x = p.x;
+          z = p.z;
         }
       }
     }
 
-    if (!this.checkCollision(x, z, radius)) return { x, z };
-    if (!this.checkCollision(newX, oldZ, radius)) return { x: newX, z: oldZ };
-    if (!this.checkCollision(oldX, newZ, radius)) return { x: oldX, z: newZ };
+    if (!this._checkObstacleCollision(x, z, radius, obstacles)) return { x, z };
+    if (!this._checkObstacleCollision(newX, oldZ, radius, obstacles)) return { x: newX, z: oldZ };
+    if (!this._checkObstacleCollision(oldX, newZ, radius, obstacles)) return { x: oldX, z: newZ };
     return { x: oldX, z: oldZ };
   }
 
   moveAxis(x, z, dx, dz, radius) {
     if (dx !== 0) {
       const r = this.resolveMovement(x, z, x + dx, z, radius);
-      x = r.x; z = r.z;
+      x = r.x;
+      z = r.z;
     }
     if (dz !== 0) {
       const r = this.resolveMovement(x, z, x, z + dz, radius);
-      x = r.x; z = r.z;
+      x = r.x;
+      z = r.z;
     }
     return { x, z };
   }

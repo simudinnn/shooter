@@ -68,6 +68,7 @@ body.game-active.mobile-ui {
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 1;
+  image-rendering: pixelated;
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }
@@ -280,34 +281,6 @@ button:active {
   z-index: 2;
 }
 
-#stamina-bar-wrap {
-  position: relative;
-  width: 100%;
-  height: 12px;
-  margin-top: 5px;
-  background: rgba(0, 0, 0, 0.6);
-  border: 2px solid rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-#stamina-bar {
-  position: absolute;
-  inset: 0;
-  height: 100%;
-  width: 100%;
-  background: linear-gradient(90deg, #c89828, #f0c848);
-  transition: width 0.12s;
-}
-
-#stamina-bar-wrap.low #stamina-bar {
-  background: linear-gradient(90deg, #904828, #b86830);
-}
-
-#stamina-bar-wrap.regen-locked #stamina-bar {
-  background: linear-gradient(90deg, #686868, #909090);
-}
-
 #weapon-panel {
   position: absolute;
   bottom: 32px;
@@ -378,6 +351,24 @@ button:active {
   opacity: 1;
 }
 
+#inventory.inv-custom-cursor,
+#inventory.inv-custom-cursor * {
+  cursor: none !important;
+}
+
+.inv-cursor-follow {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+  z-index: 130;
+  visibility: hidden;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
 #inventory-panel {
   position: relative;
   width: min(98vw, 760px);
@@ -420,9 +411,10 @@ button:active {
   gap: 5px;
   min-width: 0;
   min-height: 0;
+  flex: 1;
   padding: 4px;
-  border-radius: 3px;
-  background: rgba(8, 12, 10, 0.42);
+  border-radius: 0;
+  background: transparent;
   pointer-events: auto;
   overflow: hidden;
 }
@@ -437,15 +429,15 @@ button:active {
 
 .inv-weapons-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
   flex: 0 0 auto;
 }
 
 .inv-equipment-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
   flex: 0 0 auto;
 }
 
@@ -453,31 +445,51 @@ button:active {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   grid-template-rows: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+  gap: 6px;
   flex: 1 1 auto;
   min-height: 0;
-  align-content: start;
+  width: 100%;
+  align-content: stretch;
+}
+
+:root {
+  --inv-slot-art: 18px;
+}
+
+.inv-slot-sprite {
+  background: transparent url('assets/ui/inv_slot.png') center / 100% 100% no-repeat;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  outline: none;
+  overflow: hidden;
+  box-shadow: none;
+  filter: none;
+}
+
+.inv-slot-sprite:focus,
+.inv-slot-sprite:focus-visible {
+  outline: none;
 }
 
 .inv-weapon-slot,
 .inv-equip-slot {
   position: relative;
-  aspect-ratio: 1;
   width: 100%;
+  aspect-ratio: 1;
+  max-height: 100%;
   min-height: 0;
-  padding: 3px;
-  border: 1px solid rgba(240, 160, 48, 0.28);
-  border-radius: 3px;
-  background: rgba(8, 12, 10, 0.55);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 0;
   cursor: pointer;
   color: #8899aa;
   font-family: var(--pixel-font);
-  font-size: 16px;
+  font-size: clamp(9px, 18%, 13px);
   letter-spacing: 0;
 }
 
@@ -485,46 +497,49 @@ button:active {
   position: relative;
   width: 100%;
   aspect-ratio: 1;
-  min-height: 0;
   max-height: 100%;
-  padding: 3px;
-  border: 1px solid rgba(240, 160, 48, 0.28);
-  border-radius: 3px;
-  background: rgba(8, 12, 10, 0.55);
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 0;
   cursor: pointer;
-  color: #8899aa;
+  color: transparent;
   font-family: var(--pixel-font);
-  font-size: 16px;
+  font-size: 0;
   letter-spacing: 0;
 }
 
 .inv-weapon-slot:hover:not(:disabled),
 .inv-item-slot:not(.inv-locked):hover:not(:disabled) {
-  border-color: #f0a030;
-  background: rgba(240, 160, 48, 0.1);
+  filter: brightness(1.12);
+}
+
+.inv-item-slot.inv-selected::after,
+.inv-weapon-slot.inv-active::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px #70d090;
+}
+
+.inv-item-slot.inv-selected::after {
+  box-shadow: inset 0 0 0 2px #f0a030;
 }
 
 .inv-weapon-slot.inv-active,
 .inv-item-slot.inv-active {
-  border-color: #70d090;
-  box-shadow: inset 0 0 8px rgba(80, 200, 120, 0.2);
+  filter: none;
 }
 
 .inv-item-slot.inv-selected {
-  border-color: #f0a030;
-  box-shadow: inset 0 0 10px rgba(240, 160, 48, 0.35);
-  background: rgba(240, 160, 48, 0.12);
+  filter: brightness(1.08);
 }
 
 .inv-item-slot.inv-drag-source {
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: none;
-  background: rgba(0, 0, 0, 0.35);
+  filter: brightness(0.55);
 }
 
 .inv-item-slot.inv-drag-source > * {
@@ -535,16 +550,18 @@ button:active {
   color: transparent;
 }
 
-.inv-weapon-slot.inv-primary.inv-drop-target {
-  border-color: #70d090;
-  box-shadow: inset 0 0 10px rgba(80, 200, 120, 0.35);
-  background: rgba(80, 200, 120, 0.12);
+.inv-weapon-slot.inv-primary.inv-drop-target::after,
+.inv-item-slot.inv-drop-target::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px #70d090;
 }
 
+.inv-weapon-slot.inv-primary.inv-drop-target,
 .inv-item-slot.inv-drop-target {
-  border-color: #70d090;
-  box-shadow: inset 0 0 10px rgba(80, 200, 120, 0.35);
-  background: rgba(80, 200, 120, 0.12);
+  filter: brightness(1.15);
 }
 
 .inv-drag-ghost {
@@ -560,64 +577,54 @@ button:active {
   opacity: 0.92;
 }
 
-.inv-drag-ghost .inv-icon {
+.inv-drag-ghost .inv-slot-icon {
   width: 48px;
-  height: auto;
+  height: 48px;
 }
 
 .inv-weapon-slot.inv-empty-slot {
   color: #556066;
-  font-size: 16px;
+  font-size: clamp(9px, 18%, 13px);
 }
 
 .inv-equip-slot.inv-locked,
 .inv-item-slot.inv-locked {
-  border-style: dashed;
-  border-color: rgba(120, 130, 140, 0.35);
-  background: rgba(0, 0, 0, 0.35);
   cursor: default;
-  opacity: 0.65;
+  opacity: 0.85;
 }
 
-.inv-icon {
-  width: 72%;
-  height: auto;
-  max-height: 58%;
+.inv-slot-icon {
+  width: 82%;
+  height: 82%;
+  max-width: 82%;
+  max-height: 82%;
+  flex: 0 0 auto;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  object-fit: contain;
+  object-fit: fill;
   pointer-events: none;
 }
 
-.inv-slot-tag {
+.inv-tooltip {
+  position: fixed;
+  z-index: 300;
+  padding: 4px 8px;
+  background: rgba(12, 18, 14, 0.96);
+  border: 1px solid #f0a030;
+  color: #e8e4dc;
+  font-family: var(--pixel-font);
   font-size: 16px;
-  color: #f0a030;
   letter-spacing: 0;
-}
-
-.inv-item-name {
-  font-size: 16px;
-  color: #a8b8c8;
-  letter-spacing: 0;
-  text-align: center;
-  line-height: 1.1;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  pointer-events: none;
   white-space: nowrap;
-  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease;
 }
 
-.inv-lock-label {
-  font-size: 16px;
-  color: #667;
-  letter-spacing: 0;
-}
-
-.inv-lock-icon {
-  font-size: 16px;
-  opacity: 0.7;
-  line-height: 1;
+.inv-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
 }
 
 @keyframes pulse {
@@ -823,25 +830,12 @@ body.game-active.mobile-ui .inv-items-grid {
 body.game-active.mobile-ui .inv-weapon-slot,
 body.game-active.mobile-ui .inv-equip-slot,
 body.game-active.mobile-ui .inv-item-slot {
-  padding: 2px;
   font-size: 8px;
 }
 
-body.game-active.mobile-ui .inv-slot-tag,
-body.game-active.mobile-ui .inv-item-name {
-  font-size: 8px;
-}
-
-body.game-active.mobile-ui .inv-lock-label {
-  font-size: 8px;
-}
-
-body.game-active.mobile-ui .inv-lock-icon {
-  font-size: 16px;
-}
-
-body.game-active.mobile-ui .inv-drag-ghost .inv-icon {
-  width: 36px;
+body.game-active.mobile-ui .inv-drag-ghost .inv-slot-icon {
+  width: 40px;
+  height: 40px;
 }
 
 body.game-active.mobile-ui .inv-item-slot:not(.inv-locked) {

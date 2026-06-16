@@ -127,57 +127,31 @@ export function createBulletCasing(gunX, gunZ, aimAngle, flipX, color = 'yellow'
 
 
   for (let i = 0; i < count; i++) {
-
-    const spread = (Math.random() - 0.5) * 0.85;
-
+    const spread = (Math.random() - 0.5) * 0.45;
     const a = eject + spread;
-
-    const speed = rng(2.4, 5.8);
-
+    const speed = rng(1.2, 2.8);
     particles.push(arcParticle({
-
-      x: gunX + (Math.random() - 0.5) * 0.1,
-
-      z: gunZ + (Math.random() - 0.5) * 0.1,
-
-      vx: Math.sin(a) * speed + Math.sin(aimAngle) * rng(0.35, 0.75),
-
-      vz: Math.cos(a) * speed + Math.cos(aimAngle) * rng(0.35, 0.75),
-
-      fall: -rng(4, 12),
-
+      x: gunX + (Math.random() - 0.5) * 0.06,
+      z: gunZ + (Math.random() - 0.5) * 0.06,
+      vx: Math.sin(a) * speed + Math.sin(aimAngle) * rng(0.1, 0.35),
+      vz: Math.cos(a) * speed + Math.cos(aimAngle) * rng(0.1, 0.35),
+      fall: -rng(2, 6),
       fallVel: 0,
-
-      fallGravity: rng(260, 340),
-
+      fallGravity: rng(280, 360),
       groundDrop: groundDropPx,
-
       bouncesLeft: 1,
-
-      bounceDamp: rng(0.22, 0.38),
-
+      bounceDamp: rng(0.18, 0.32),
       bounceMinVel: rng(38, 52),
-
       life: rng(1.6, 3.2),
-
       color: Math.random() > 0.45 ? fill : rim,
-
       size: rng(0.1, 0.22),
-
-      drag: rng(0.96, 0.99),
-
-      groundFriction: 0.86,
-
+      drag: rng(0.88, 0.94),
+      groundFriction: 0.72,
       kind: 'casing',
-
       casingSprite: color === 'red' ? 'casing_red' : 'casing',
-
       spin: Math.random() * Math.PI * 2,
-
-      spinVel: rng(-14, 14),
-
+      spinVel: rng(-8, 8),
     }));
-
   }
 
   return particles;
@@ -586,7 +560,11 @@ export function updateParticles(particles, dt, world = null) {
 
             p.grounded = true;
 
-            if (p.kind === 'casing') p.spinVel = 0;
+            if (p.kind === 'casing') {
+              p.spinVel = 0;
+              p.vx = 0;
+              p.vz = 0;
+            }
 
             if (p.kind === 'blood') {
 

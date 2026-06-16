@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v42';
+const CACHE = 'robot-ruins-v70';
 
 function playerSprites() {
   const paths = [
@@ -26,11 +26,24 @@ function weaponSprites() {
     paths.push(`./assets/weapons/${base}_shot.png`);
   }
   for (const base of melees) paths.push(`./assets/weapons/${base}.png`);
+  for (const base of [...guns, ...melees]) paths.push(`./assets/items/${base}.png`);
   return paths;
 }
 
 const PLAYER_SPRITES = playerSprites();
 const WEAPON_SPRITES = weaponSprites();
+
+function worldSprites() {
+  const floors = ['floor_grass', 'floor_dirt', 'floor_rock'];
+  const foliage = ['foliage_grass', 'foliage_grass_tall', 'foliage_rock', 'foliage_tree', 'foliage_stump'];
+  return [
+    './assets/world/wall.png',
+    ...floors.map((n) => `./assets/world/${n}.png`),
+    ...foliage.map((n) => `./assets/world/${n}.png`),
+  ];
+}
+
+const WORLD_SPRITES = worldSprites();
 
 const SHELL = [
   './',
@@ -41,7 +54,7 @@ const SHELL = [
   './js/main.js',
   './js/player.js',
   './js/enemies.js',
-  './js/waves.js',
+  './js/chunkEntities.js',
   './js/audio.js',
   './js/minimap.js',
   './js/items.js',
@@ -51,25 +64,22 @@ const SHELL = [
   './js/particles.js',
   './js/sprites.js',
   './js/world.js',
-  './js/imageMap.js',
+  './js/worldGen.js',
   './assets/fonts/ascii.png',
   './assets/fonts/game-pixel.woff2',
   './assets/fonts/game-pixel.ttf',
   './assets/ui/inventory.png',
+  './assets/ui/inv_slot.png',
+  './assets/ui/inv_cursor.png',
+  './assets/items/lock.png',
 ];
 
 const ASSETS = [
   ...PLAYER_SPRITES,
   ...WEAPON_SPRITES,
+  ...WORLD_SPRITES,
   './assets/enemies/spider.png',
   './assets/enemies/spider_walk.png',
-  './assets/world/wall.png',
-  './assets/world/floor.png',
-  './assets/world/floor2.png',
-  './assets/world/floor3.png',
-  './assets/world/floor4.png',
-  './assets/world/map.png',
-  './assets/world/map_collision.png',
   './assets/items/ammo.png',
   './assets/items/bandage.png',
   './assets/items/mystery.png',

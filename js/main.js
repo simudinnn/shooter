@@ -1,11 +1,12 @@
-import { World, MAP_SIZE, TILE } from './world.js';
-import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, STAMINA_SPRINT_MIN } from './player.js';
+import { World, TILE } from './world.js';
+import { ChunkEntityManager } from './chunkEntities.js';
+import { unpackTintGradient, getBiome } from './worldGen.js';
+import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET } from './player.js';
 import { createExplosion, createGroundSpew, updateParticles } from './enemies.js';
-import { WaveManager } from './waves.js';
 import { SoundManager } from './audio.js';
 import { Minimap } from './minimap.js';
 import { ItemManager, ITEM_DRAW_SCALE } from './items.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getFloorVariant, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
@@ -15,13 +16,13 @@ const INTERNAL_W = 480;
 const INTERNAL_H = 270;
 /** Supersample the internal buffer for sharper fullscreen upscale. */
 const RENDER_SCALE = 2;
-const PPU = 7.5;
+const PPU = 8;
 const SPRITE_PLAYER = 1.50;
 const SPRITE_ENEMY = 1.45;
 const SPRITE_ITEM = ITEM_DRAW_SCALE;
 const SPRITE_CRATE = 2.2;
 const SPRITE_BULLET = 1.2;
-const SPRITE_CASING = 0.35;
+const SPRITE_CASING = 1.5;
 const SPRITE_GUN = 1.35;
 const SPRITE_CURSOR = 1.4;
 const AUTO_AIM_TURN_RATE = 16;
@@ -29,9 +30,9 @@ const AUTO_AIM_TARGET_TURN_RATE = 4.5;
 const AUTO_AIM_STICK_TURN_RATE = 12;
 const AUTO_AIM_SCREEN_PAD = 28;
 /** Subtle camera lean toward cursor (world units = px / PPU). */
-const CAM_FOLLOW_STRENGTH = 0.24;
+const CAM_FOLLOW_STRENGTH = 0.15;
 const CAM_FOLLOW_MAX_PX = 64;
-const CAM_FOLLOW_SMOOTH = 40;
+const CAM_FOLLOW_SMOOTH = 50;
 
 class Game {
   constructor() {
@@ -59,7 +60,7 @@ class Game {
     this._initCanvas();
     this._initUI();
     this._bindEvents();
-    this.sprites.loadAll();
+    this._minimapTick = 0;
   }
 
   _initCanvas() {
@@ -95,8 +96,6 @@ class Game {
       hud: document.getElementById('hud'),
       healthBar: document.getElementById('health-bar'),
       healthText: document.getElementById('health-text'),
-      staminaBar: document.getElementById('stamina-bar'),
-      staminaBarWrap: document.getElementById('stamina-bar-wrap'),
       pickupStatus: document.getElementById('pickup-status'),
       powerupStatus: document.getElementById('powerup-status'),
       interactPrompt: document.getElementById('interact-prompt'),
@@ -104,8 +103,7 @@ class Game {
       ammoCurrent: document.getElementById('ammo-current'),
       ammoReserve: document.getElementById('ammo-reserve'),
       reloadIndicator: document.getElementById('reload-indicator'),
-      waveNum: document.getElementById('wave-num'),
-      robotsLeft: document.getElementById('robots-left'),
+      zoneLabel: document.getElementById('zone-label'),
       damageFlash: document.getElementById('damage-flash'),
       startBtn: document.getElementById('start-btn'),
       restartBtn: document.getElementById('restart-btn'),
@@ -408,6 +406,25 @@ class Game {
     };
   }
 
+  /** Visible world rect — matches ground draw culling (+ optional margin). */
+  getViewBoundsWorld(margin = TILE) {
+    const cam = this._camera();
+    const viewHalfW = INTERNAL_W / PPU / 2 + margin;
+    const viewHalfH = INTERNAL_H / PPU / 2 + margin;
+    return {
+      minX: cam.x - viewHalfW,
+      maxX: cam.x + viewHalfW,
+      minZ: cam.z - viewHalfH,
+      maxZ: cam.z + viewHalfH,
+    };
+  }
+
+  isWorldPointOnScreen(wx, wz, extraPad = 0) {
+    const v = this.getViewBoundsWorld(TILE);
+    const pad = extraPad;
+    return wx >= v.minX - pad && wx <= v.maxX + pad && wz >= v.minZ - pad && wz <= v.maxZ + pad;
+  }
+
   _worldToScreen(wx, wz) {
     const cam = this._camera();
     return {
@@ -429,18 +446,20 @@ class Game {
     this.audio.init();
     this.audio.resume();
 
+    await this.sprites.loadAll();
+
     this.world = new World();
     await this.world.build();
+    this.world.prewarmGround(this.sprites, PPU);
     this.player = new Player();
     const spawn = this.world.getPlayerSpawn();
     this.player.x = spawn.x;
     this.player.z = spawn.z;
     this.bullets = new BulletPool();
     this.robots = [];
-    this.waves = new WaveManager(this.world, this);
-    this.waves.reset();
+    this.chunkEntities = new ChunkEntityManager(this.world, this);
+    this.chunkEntities.reset();
     this.items = new ItemManager(this.world);
-    this.items.spawnAll();
     this.particles = [];
     this._weaponBreathY = 0;
     this.camOffset = { x: 0, z: 0 };
@@ -468,7 +487,6 @@ class Game {
 
     if (!inventoryOpen) {
       this.player.updateMobility(time);
-      this.player.updateStamina(dt, time);
 
       const { moveX: rawMoveX, moveZ: rawMoveZ } = this._getMoveInput();
       let moveX = rawMoveX;
@@ -488,9 +506,9 @@ class Game {
         }
         let sprint;
         if (this.mobile && usingStick) {
-          sprint = stickMag > 0.9 && isMovingForward(this.player) && this.player.canSprint();
+          sprint = stickMag > 0.9 && isMovingForward(this.player);
         } else {
-          sprint = sprintInput && isMovingForward(this.player) && this.player.canSprint();
+          sprint = sprintInput && isMovingForward(this.player);
         }
         const speed = this.player.speed * (sprint ? this.player.sprintMult : 1) * this.player.getSpeedMult(time);
         this.player.isSprinting = sprint;
@@ -577,6 +595,7 @@ class Game {
     this.player.updateGunKick(dt);
 
     this.items.update(dt, this.player, this);
+    this.chunkEntities.update(this.player);
     this.bullets.update(dt, this.world, (b) => this._onBulletHit(b));
     for (const robot of this.robots) {
       robot.update(dt, this.player, this.world, this.robots, (r) => {
@@ -619,7 +638,6 @@ class Game {
         }
       }
     }
-    this.waves.update(dt);
     const breathTarget = getPlayerIdleBreathY(this.player, time);
     this._weaponBreathY += (breathTarget - this._weaponBreathY) * Math.min(1, dt * 18);
     updateParticles(this.particles, dt, this.world);
@@ -871,6 +889,8 @@ class Game {
         Math.round(s.y + airY),
         SPRITE_CASING,
         p.spin || 0,
+        false,
+        p.grounded ? 'handle' : 'center',
       );
       ctx.globalAlpha = 1;
     } else if (p.kind === 'blood' && p.grounded && p.splatW) {
@@ -899,26 +919,20 @@ class Game {
     ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
 
     const cam = this._camera();
-
-    if (this.world.usesImageMap()) {
-      this.world.imageMap.draw(this.ctx, (wx, wz) => this._worldToScreen(wx, wz));
-    } else {
-      const tilePx = TILE * PPU;
-      const startTX = Math.floor((cam.x - INTERNAL_W / PPU / 2) / TILE);
-      const endTX = Math.ceil((cam.x + INTERNAL_W / PPU / 2) / TILE);
-      const startTZ = Math.floor((cam.z - INTERNAL_H / PPU / 2) / TILE);
-      const endTZ = Math.ceil((cam.z + INTERNAL_H / PPU / 2) / TILE);
-
-      for (let tz = startTZ; tz <= endTZ; tz++) {
-        for (let tx = startTX; tx <= endTX; tx++) {
-          const wx = tx * TILE;
-          const wz = tz * TILE;
-          const s = this._worldToScreen(wx, wz);
-          const variant = getFloorVariant(tx, tz);
-          this.sprites.drawTile(this.ctx, variant, s.x - tilePx / 2, s.y - tilePx / 2, tilePx);
-        }
-      }
-    }
+    const viewHalfW = INTERNAL_W / PPU / 2 + TILE;
+    const viewHalfH = INTERNAL_H / PPU / 2 + TILE;
+    const tilePx = TILE * PPU;
+    this.world.drawGroundLayer(
+      ctx,
+      cam.x,
+      cam.z,
+      viewHalfW,
+      viewHalfH,
+      PPU,
+      this.sprites,
+      INTERNAL_W,
+      INTERNAL_H,
+    );
 
     for (const d of this.world.decor) {
       if (d.kind === 'crate') {
@@ -926,7 +940,6 @@ class Game {
         this.sprites.draw(this.ctx, d.sprite || 'crate', s.x, s.y, SPRITE_CRATE);
         continue;
       }
-      if (this.world.usesImageMap()) continue;
       const hw = d.halfW * PPU;
       const hd = d.halfD * PPU;
       const s = this._worldToScreen(d.x, d.z);
@@ -938,6 +951,34 @@ class Game {
     }
 
     const drawList = [];
+    const canopy = this.world.collectCanopyFoliage(
+      cam.x - viewHalfW,
+      cam.x + viewHalfW,
+      cam.z - viewHalfH,
+      cam.z + viewHalfH,
+    );
+    for (const f of canopy) {
+      const tileOx = Math.floor(f.x / TILE) * TILE;
+      const tileOz = Math.floor(f.z / TILE) * TILE;
+      const jx = Math.round((f.x - tileOx) * PPU);
+      const jz = Math.round((f.z - tileOz) * PPU);
+      const half = tilePx * 0.5;
+      drawList.push({
+        z: f.sortZ ?? f.z,
+        draw: () => {
+          const anchor = this._worldToScreen(tileOx, tileOz);
+          const tint = f.tintKey ? unpackTintGradient(f.tintKey) : null;
+          this.sprites.drawTile(
+            ctx,
+            f.sprite,
+            anchor.x + jx - half,
+            anchor.y + jz - half,
+            tilePx,
+            tint,
+          );
+        },
+      });
+    }
     for (const item of this.items.items) {
       if (!item.active) continue;
       drawList.push({ z: item.z, draw: () => {
@@ -1131,14 +1172,6 @@ class Game {
     const hpPct = (this.player.health / this.player.maxHealth) * 100;
     this.el.healthBar.style.width = `${hpPct}%`;
     this.el.healthText.textContent = Math.ceil(this.player.health) + (this.player.shield > 0 ? ` (+${Math.ceil(this.player.shield)})` : '');
-    const stPct = (this.player.stamina / this.player.maxStamina) * 100;
-    if (this.el.staminaBar) this.el.staminaBar.style.width = `${stPct}%`;
-    if (this.el.staminaBarWrap) {
-      const low = this.player.stamina < STAMINA_SPRINT_MIN;
-      const regenLocked = time < this.player.staminaRegenDelayUntil;
-      this.el.staminaBarWrap.classList.toggle('low', low);
-      this.el.staminaBarWrap.classList.toggle('regen-locked', regenLocked);
-    }
     this.el.weaponName.textContent = w.name;
     if (this.player.isMeleeActive()) {
       this.el.ammoCurrent.textContent = '—';
@@ -1154,11 +1187,11 @@ class Game {
       this.el.reloadIndicator.classList.toggle('hidden', !gun.reloading);
     }
 
-    if (this.inventoryUI?.isOpen()) {
-      this.inventoryUI.render();
+    const biome = getBiome(this.player.x, this.player.z);
+    const zoneNames = { base: 'Base', meadow: 'Meadow', forest: 'Forest', scrub: 'Scrub', rock: 'Rock' };
+    if (this.el.zoneLabel) {
+      this.el.zoneLabel.textContent = zoneNames[biome] || biome;
     }
-    this.el.waveNum.textContent = this.waves?.wave || 0;
-    this.el.robotsLeft.textContent = this.waves?.aliveCount() ?? 0;
 
     if (this.items.pickupMsg) {
       this.el.pickupStatus.textContent = this.items.pickupMsg;
@@ -1178,7 +1211,10 @@ class Game {
       this.el.interactPrompt.textContent = interact.type === 'mystery_weapon' ? '[E] Open weapon crate' : '[E] Open mystery box';
     }
 
-    this.minimap.render(this.player, this.robots, this.world);
+    this._minimapTick++;
+    if ((this._minimapTick & 3) === 0) {
+      this.minimap.render(this.player, this.robots, this.world, this.items);
+    }
   }
 
   _checkGameOver() {

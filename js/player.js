@@ -6,15 +6,6 @@ export const ROLL_SPEED = 24;
 export const JUMP_DURATION = 0.42;
 export const JUMP_SPEED = 10;
 export const SNEAK_MULT = 0.52;
-export const STAMINA_MAX = 200;
-export const STAMINA_REGEN = 26;
-export const STAMINA_SPRINT_DRAIN = 22;
-export const STAMINA_ROLL_COST = 20;
-export const STAMINA_JUMP_COST = 14;
-export const STAMINA_ROLL_MIN = 20;
-export const STAMINA_JUMP_MIN = 14;
-export const STAMINA_SPRINT_MIN = 10;
-export const STAMINA_REGEN_DELAY = 2;
 export const GUN_HOLD_OFFSET = 1.1;
 /** Extra distance from gun hold point to barrel tip (world units). */
 export const BARREL_TIP_OFFSET = 0.55;
@@ -24,7 +15,7 @@ export const BARREL_SCREEN_RAISE = 8;
 const SCREEN_PPU = 5.5;
 
 export const ITEM_STORAGE_SIZE = 20;
-export const UNLOCKED_ITEM_SLOTS = 14;
+export const UNLOCKED_ITEM_SLOTS = 10;
 export const EQUIPMENT_SLOT_COUNT = 4;
 
 export const WEAPONS = {
@@ -288,9 +279,6 @@ export class Player {
     this.isCrouching = false;
     this.isSneaking = false;
     this.sneakMult = SNEAK_MULT;
-    this.stamina = STAMINA_MAX;
-    this.maxStamina = STAMINA_MAX;
-    this.staminaRegenDelayUntil = 0;
     this.roll = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: ROLL_DURATION };
     this.jump = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: JUMP_DURATION, inPlace: false };
     this.reloadAim = {
@@ -578,46 +566,19 @@ export class Player {
 
   canRoll(time) {
     if (!this.alive || this.isMobilityLocked(time)) return false;
-    if (this.stamina < STAMINA_ROLL_MIN) return false;
     return true;
   }
 
   canJump(time) {
     if (!this.alive || this.isMobilityLocked(time)) return false;
     if (this.weapon?.reloading) return false;
-    if (this.stamina < STAMINA_JUMP_MIN) return false;
     return true;
-  }
-
-  canSprint() {
-    return this.stamina >= STAMINA_SPRINT_MIN;
-  }
-
-  markStaminaUsed(time) {
-    this.staminaRegenDelayUntil = time + STAMINA_REGEN_DELAY;
-  }
-
-  updateStamina(dt, time) {
-    if (!this.alive) return;
-    if (this.isMobilityLocked(time)) return;
-    if (this.isSprinting && this.isMoving) {
-      const drain = STAMINA_SPRINT_DRAIN * dt;
-      if (drain > 0) {
-        this.stamina = Math.max(0, this.stamina - drain);
-        this.markStaminaUsed(time);
-      }
-      return;
-    }
-    if (time < this.staminaRegenDelayUntil) return;
-    this.stamina = Math.min(this.maxStamina, this.stamina + STAMINA_REGEN * dt);
   }
 
   startRoll(time, dirX, dirZ) {
     if (!this.canRoll(time)) return false;
     const len = Math.hypot(dirX, dirZ);
     if (len < 0.01) return false;
-    this.stamina = Math.max(0, this.stamina - STAMINA_ROLL_COST);
-    this.markStaminaUsed(time);
     this.roll.active = true;
     this.roll.duration = ROLL_DURATION;
     this.roll.until = time + ROLL_DURATION;
@@ -635,8 +596,6 @@ export class Player {
 
   startJump(time, hasMoveIntent = false, dirX = 0, dirZ = 0) {
     if (!this.canJump(time)) return false;
-    this.stamina = Math.max(0, this.stamina - STAMINA_JUMP_COST);
-    this.markStaminaUsed(time);
     this.jump.inPlace = !hasMoveIntent;
     if (hasMoveIntent) {
       let dx = dirX;
