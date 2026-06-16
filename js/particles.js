@@ -286,7 +286,7 @@ export function createRobotHitSparks(x, z, fromX, fromZ, damage) {
 
   const particles = [];
 
-  const count = Math.min(10, 2 + Math.floor(damage / 5));
+  const count = Math.min(7, 1 + Math.floor(damage / 7));
 
   const dx = x - fromX;
 
@@ -348,7 +348,7 @@ export function createRobotHitSparks(x, z, fromX, fromZ, damage) {
 
 
 
-  const scrapeCount = Math.max(1, Math.floor(count * rng(0.25, 0.45)));
+  const scrapeCount = Math.max(1, Math.floor(count * rng(0.2, 0.35)));
 
   for (let i = 0; i < scrapeCount; i++) {
 
@@ -516,7 +516,7 @@ export function createRobotFire(x, z, spread = 0.95) {
 
 
 
-export function updateParticles(particles, dt, world = null) {
+export function updateParticles(particles, dt, world = null, callbacks = null) {
 
   for (let i = particles.length - 1; i >= 0; i--) {
 
@@ -564,6 +564,10 @@ export function updateParticles(particles, dt, world = null) {
               p.spinVel = 0;
               p.vx = 0;
               p.vz = 0;
+              if (!p._landSnd) {
+                p._landSnd = true;
+                callbacks?.onCasingLand?.();
+              }
             }
 
             if (p.kind === 'blood') {

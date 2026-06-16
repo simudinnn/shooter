@@ -1,17 +1,18 @@
 import { Robot, createGroundErupt } from './enemies.js';
 import { CHUNK_WORLD, hash01, isInBase } from './worldGen.js';
+import { CHEST_CHUNK_SPAWN_RATE } from './chests.js';
 
-/** Chunks around the player that stay populated with spiders/items. */
+/** Chunks around the player that stay populated with spiders/chests. */
 export const ENTITY_CHUNK_RADIUS = 4;
 /** World units — entities farther than this are removed. */
 export const ENTITY_DESPAWN_DIST = ENTITY_CHUNK_RADIUS * CHUNK_WORLD + 40;
 
 /** Soft caps within despawn range — keeps the world from flooding. */
 export const MAX_NEARBY_SPIDERS = 18;
-export const MAX_NEARBY_ITEMS = 12;
+export const MAX_NEARBY_CHESTS = 10;
 /** Per-chunk spawn chance when a chunk is first populated. */
 export const SPIDER_CHUNK_CHANCE = 0.28;
-export const ITEM_CHUNK_CHANCE = 0.05;
+export const CHEST_CHUNK_CHANCE = CHEST_CHUNK_SPAWN_RATE;
 
 export class ChunkEntityManager {
   constructor(world, game) {
@@ -68,10 +69,10 @@ export class ChunkEntityManager {
     return this._livingRobots().filter((r) => this._nearbyDist2(player, r.x, r.z) <= d2).length;
   }
 
-  _countNearbyItems(player) {
+  _countNearbyChests(player) {
     const d2 = this._despawnDist2();
-    return this.game.items.items.filter(
-      (item) => item.active && this._nearbyDist2(player, item.x, item.z) <= d2,
+    return this.game.chests.chests.filter(
+      (c) => this._nearbyDist2(player, c.x, c.z) <= d2,
     ).length;
   }
 
@@ -85,7 +86,6 @@ export class ChunkEntityManager {
     return { fx: Math.sin(player.angle), fz: Math.cos(player.angle) };
   }
 
-  /** Skip chunks clearly behind the player's travel/aim direction. */
   _shouldPopulateChunk(chunk, player, fx, fz) {
     if (!player.isMoving) return true;
     const center = this._chunkCenter(chunk.cx, chunk.cz);
@@ -96,7 +96,6 @@ export class ChunkEntityManager {
     return (dx / dist) * fx + (dz / dist) * fz > -0.25;
   }
 
-  /** Prefer spawn points in front of the player. */
   _isAheadOfPlayer(player, x, z, fx, fz, minAhead = 3) {
     return (x - player.x) * fx + (z - player.z) * fz >= minAhead;
   }
@@ -104,7 +103,7 @@ export class ChunkEntityManager {
   _despawnFar(player) {
     const d2 = this._despawnDist2();
     const clearedSpiderChunks = new Set();
-    const clearedItemChunks = new Set();
+    const clearedChestChunks = new Set();
 
     this.game.robots = this.game.robots.filter((r) => {
       if (!r.alive && !r.emerging) return false;
@@ -115,14 +114,20 @@ export class ChunkEntityManager {
       return false;
     });
 
-    this.game.items.items = this.game.items.items.filter((item) => {
-      if (!item.active) return false;
-      if (this._nearbyDist2(player, item.x, item.z) <= d2) return true;
-      if (item.homeCx !== undefined && item.homeCz !== undefined) {
-        clearedItemChunks.add(`${item.homeCx},${item.homeCz}`);
+    // Avoid mutating this.game.chests.chests inside Array.filter (can desync visual vs collision).
+    const nextChests = [];
+    for (const chest of this.game.chests.chests) {
+      if (this._nearbyDist2(player, chest.x, chest.z) <= d2) {
+        nextChests.push(chest);
+        continue;
       }
-      return false;
-    });
+      if (chest.homeCx !== undefined && chest.homeCz !== undefined) {
+        clearedChestChunks.add(`${chest.homeCx},${chest.homeCz}`);
+      }
+      // Unregister obstacle, but don't splice while iterating.
+      this.game.chests._unregisterObstacle(chest);
+    }
+    this.game.chests.chests = nextChests;
 
     for (const key of clearedSpiderChunks) {
       const chunk = this.world.chunks.get(key);
@@ -133,13 +138,13 @@ export class ChunkEntityManager {
       if (!hasLocal) chunk.spidersSpawned = false;
     }
 
-    for (const key of clearedItemChunks) {
+    for (const key of clearedChestChunks) {
       const chunk = this.world.chunks.get(key);
       if (!chunk) continue;
-      const hasLocal = this.game.items.items.some(
-        (item) => item.active && item.homeCx === chunk.cx && item.homeCz === chunk.cz,
+      const hasLocal = this.game.chests.chests.some(
+        (c) => c.homeCx === chunk.cx && c.homeCz === chunk.cz,
       );
-      if (!hasLocal) chunk.itemsSpawned = false;
+      if (!hasLocal) chunk.chestsSpawned = false;
     }
   }
 
@@ -160,7 +165,7 @@ export class ChunkEntityManager {
 
     for (const { chunk } of chunks) {
       if (!chunk.spidersSpawned) this._spawnChunkSpiders(chunk, player, fx, fz);
-      if (!chunk.itemsSpawned) this._spawnChunkItems(chunk, player, fx, fz);
+      if (!chunk.chestsSpawned) this._spawnChunkChests(chunk, player, fx, fz);
     }
   }
 
@@ -177,9 +182,7 @@ export class ChunkEntityManager {
       return;
     }
 
-    if (this._countNearbySpiders(player) >= MAX_NEARBY_SPIDERS) {
-      return;
-    }
+    if (this._countNearbySpiders(player) >= MAX_NEARBY_SPIDERS) return;
 
     const pos = this._findChunkPoint(chunk, 3, player, this._livingRobots(), fx, fz);
     if (!pos) return;
@@ -192,12 +195,12 @@ export class ChunkEntityManager {
     chunk.spidersSpawned = true;
   }
 
-  _spawnChunkItems(chunk, player, fx, fz) {
-    this.game.items.spawnInChunk(
+  _spawnChunkChests(chunk, player, fx, fz) {
+    this.game.chests.spawnInChunk(
       chunk,
       this.world,
       player,
-      () => this._countNearbyItems(player) < MAX_NEARBY_ITEMS,
+      () => this._countNearbyChests(player) < MAX_NEARBY_CHESTS,
       { fx, fz },
     );
   }

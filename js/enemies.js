@@ -17,7 +17,7 @@ export class Robot {
     this.radius = 1.45;
     this.moveRadius = 0.62;
     this.meleeDamage = Math.floor((12 + Math.random() * 10) * (1 + (wave - 1) * 0.07));
-    this.meleeRange = 1.9;
+    this.meleeRange = 1.7;
     this.attackRate = Math.max(0.45, 0.75 + Math.random() * 0.35 - (wave - 1) * 0.03);
     this.meleeCooldown = 0.3 + Math.random() * 0.5;
     this.walkPhase = Math.random() * Math.PI * 2;
@@ -451,7 +451,7 @@ export function createGroundErupt(x, z) {
 
 export function createExplosion(x, z) {
   const particles = [];
-  const count = 4 + Math.floor(Math.random() * 3);
+  const count = 3 + Math.floor(Math.random() * 2);
   const colors = ['#ffe060', '#c84820', '#9098a8', '#fff8c0'];
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;

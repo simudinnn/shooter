@@ -4,7 +4,41 @@ export const TILE = 4;
 export const CHUNK_TILES = 8;
 export const CHUNK_WORLD = TILE * CHUNK_TILES;
 export const BASE_RADIUS = 22;
+
+let _worldSeed = 90210;
+
+/** @deprecated use getWorldSeed() — default until rollWorldSeed() runs */
 export const WORLD_SEED = 90210;
+
+export function getWorldSeed() {
+  return _worldSeed;
+}
+
+export function setWorldSeed(seed) {
+  _worldSeed = (seed >>> 0) || 1;
+  _refreshTintPalette();
+}
+
+function _jitterRgb(base, salt, spread = 42) {
+  const r = (s) => hash01(_worldSeed, s);
+  return {
+    r: Math.min(255, Math.max(0, Math.round(base.r + (r(salt) - 0.5) * spread))),
+    g: Math.min(255, Math.max(0, Math.round(base.g + (r(salt + 17) - 0.5) * spread))),
+    b: Math.min(255, Math.max(0, Math.round(base.b + (r(salt + 31) - 0.5) * spread))),
+  };
+}
+
+function _refreshTintPalette() {
+  _tintDry = _jitterRgb(TINT_DRY_BASE, 901, 55);
+  _tintMeadow = _jitterRgb(TINT_MEADOW_BASE, 902, 48);
+  _tintForest = _jitterRgb(TINT_FOREST_BASE, 903, 40);
+}
+
+/** New procedural layout (biomes, floor islands, grass tint) for each deploy. */
+export function rollWorldSeed() {
+  setWorldSeed((Math.random() * 0xffffffff) >>> 0);
+  return _worldSeed;
+}
 
 export const FLOOR_KINDS = ['grass', 'dirt', 'rock'];
 
@@ -16,19 +50,33 @@ const FOLIAGE = {
   stump: { sprite: 'foliage_stump', blocks: true, radius: 0.4, tinted: false, canopy: false },
 };
 
-const TINT_DRY = { r: 210, g: 195, b: 120 };
-const TINT_MEADOW = { r: 130, g: 248, b: 132 };
-const TINT_FOREST = { r: 105, g: 205, b: 108 };
+const TINT_DRY_BASE = { r: 210, g: 195, b: 120 };
+const TINT_MEADOW_BASE = { r: 130, g: 248, b: 132 };
+const TINT_FOREST_BASE = { r: 105, g: 205, b: 108 };
+
+let _tintDry = { ...TINT_DRY_BASE };
+let _tintMeadow = { ...TINT_MEADOW_BASE };
+let _tintForest = { ...TINT_FOREST_BASE };
 
 /** One native sprite pixel in world units (16px art on a TILE-wide cell). */
 const FOLIAGE_PIXEL_W = TILE / 16;
 
+/** Snap a world axis to the 16px sprite pixel grid (same as foliage). */
+export function snapWorldAxis(v) {
+  const step = TILE / 16;
+  return Math.round(v / step) * step;
+}
+
+export function snapWorldPoint(x, z) {
+  return { x: snapWorldAxis(x), z: snapWorldAxis(z) };
+}
+
 function snapFoliageAxis(v) {
-  return Math.round(v / FOLIAGE_PIXEL_W) * FOLIAGE_PIXEL_W;
+  return snapWorldAxis(v);
 }
 
 function hash32(x, z) {
-  let h = (x | 0) * 374761393 + (z | 0) * 668265263 + WORLD_SEED * 982451653;
+  let h = (x | 0) * 374761393 + (z | 0) * 668265263 + _worldSeed * 982451653;
   h = (h ^ (h >> 13)) * 1274126177;
   return (h ^ (h >> 16)) >>> 0;
 }
@@ -150,11 +198,11 @@ export function getGrassTint(wx, wz) {
     * (1 - smoothstep((elevation - 0.44) / 0.26));
   const dryMix = 1 - meadowMix;
 
-  let tint = lerpRgb(TINT_DRY, TINT_MEADOW, meadowMix);
-  tint = lerpRgb(tint, TINT_FOREST, forestMix * 0.8);
+  let tint = lerpRgb(_tintDry, _tintMeadow, meadowMix);
+  tint = lerpRgb(tint, _tintForest, forestMix * 0.8);
 
   const dryPush = dryMix * smoothstep((0.3 - moisture) / 0.16);
-  if (dryPush > 0) tint = lerpRgb(tint, TINT_DRY, dryPush * 0.4);
+  if (dryPush > 0) tint = lerpRgb(tint, _tintDry, dryPush * 0.4);
 
   const bright = 0.94 + fbm(wx * 0.035 + 300, wz * 0.035 - 120, 2) * 0.1;
   return {

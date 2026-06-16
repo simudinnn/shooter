@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#1a2820" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -10,7 +10,6 @@
   <title>Robot Ruins — 2.5D FPS</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="preload" href="assets/fonts/game-pixel.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -44,7 +43,7 @@
         <div id="powerup-status"></div>
       </div>
     </div>
-    <div id="interact-prompt" class="hidden">[E] Open</div>
+    <div id="interact-prompt" class="hidden">RMB to open</div>
     <div id="weapon-panel">
       <div id="weapon-name">Glock</div>
       <div id="ammo-display">
@@ -61,19 +60,28 @@
 
   <div id="inventory" class="hidden">
     <div class="inv-backdrop"></div>
-    <div id="inventory-panel">
-      <img id="inventory-bg" src="assets/ui/inventory.png" alt="" draggable="false" />
-      <div id="inventory-layout">
-        <aside class="inv-left">
-          <h2 class="inv-heading">Weapons</h2>
-          <div id="inv-weapons-grid" class="inv-weapons-grid"></div>
-          <h2 class="inv-heading">Equipment</h2>
-          <div id="inv-equipment-grid" class="inv-equipment-grid"></div>
-        </aside>
-        <aside class="inv-right">
-          <h2 class="inv-heading">Items</h2>
-          <div id="inv-items-grid" class="inv-items-grid"></div>
-        </aside>
+    <div id="inventory-dual-wrap">
+      <div id="inventory-panel">
+        <img id="inventory-bg" src="assets/ui/inventory.png" alt="" draggable="false" />
+        <div id="inventory-layout">
+          <aside class="inv-left">
+            <h2 class="inv-heading">Weapons</h2>
+            <div id="inv-weapons-grid" class="inv-weapons-grid"></div>
+            <h2 class="inv-heading">Equipment</h2>
+            <div id="inv-equipment-grid" class="inv-equipment-grid"></div>
+          </aside>
+          <aside class="inv-right">
+            <h2 class="inv-heading">Items</h2>
+            <div id="inv-items-grid" class="inv-items-grid"></div>
+          </aside>
+        </div>
+      </div>
+      <div id="chest-panel" class="hidden">
+        <img id="chest-panel-bg" src="assets/ui/chest_inventory.png" alt="" draggable="false" />
+        <div id="chest-panel-layout">
+          <h2 class="inv-heading chest-heading">Chest</h2>
+          <div id="inv-chest-grid" class="inv-chest-grid"></div>
+        </div>
       </div>
     </div>
   </div>

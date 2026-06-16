@@ -27,7 +27,17 @@ export class World {
     this.chunkOrder = [];
     this.obstacles = [];
     this.decor = [];
+    this.dynamicObstacles = [];
     this.imageMap = null;
+  }
+
+  addDynamicObstacle(obs) {
+    this.dynamicObstacles.push(obs);
+  }
+
+  removeDynamicObstacle(obs) {
+    const i = this.dynamicObstacles.indexOf(obs);
+    if (i >= 0) this.dynamicObstacles.splice(i, 1);
   }
 
   get halfW() {
@@ -47,6 +57,7 @@ export class World {
     this.chunkOrder = [];
     this.obstacles = [];
     this.decor = [];
+    this.dynamicObstacles = [];
     this._touchChunk(0, 0);
   }
 
@@ -236,6 +247,10 @@ export class World {
         const chunk = this.getChunk(ccx + dx, ccz + dz);
         for (const obs of chunk.obstacles) out.push(obs);
       }
+    }
+    const pad = radius + 8;
+    for (const obs of this.dynamicObstacles) {
+      if (Math.abs(obs.x - x) <= pad && Math.abs(obs.z - z) <= pad) out.push(obs);
     }
     return out;
   }

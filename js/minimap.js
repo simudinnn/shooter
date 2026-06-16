@@ -1,7 +1,7 @@
 import { TILE, BASE_RADIUS, getTerrainMapColorFromTile } from './worldGen.js';
 
 /** Square viewport radius — fills minimap corners when zoomed in. */
-export const MINIMAP_RADIUS = 44;
+export const MINIMAP_RADIUS = 40;
 
 export class Minimap {
   constructor(canvas) {
@@ -50,7 +50,7 @@ export class Minimap {
     ctx.fill();
   }
 
-  render(player, robots, world, items) {
+  render(player, robots, world, chests) {
     const ctx = this.ctx;
     const s = this.size;
     const scale = s / (MINIMAP_RADIUS * 2);
@@ -87,12 +87,11 @@ export class Minimap {
       ctx.stroke();
     }
 
-    for (const item of items?.items ?? []) {
-      if (!item.active) continue;
-      const p = this.worldToMap(item.x, item.z, player);
+    for (const chest of chests?.chests ?? []) {
+      const p = this.worldToMap(chest.x, chest.z, player);
       if (p.x < 0 || p.x > s || p.y < 0 || p.y > s) continue;
-      ctx.fillStyle = '#f0c030';
-      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+      ctx.fillStyle = '#c87830';
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
     }
 
     for (const robot of robots) {

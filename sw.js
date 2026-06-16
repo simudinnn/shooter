@@ -1,20 +1,12 @@
-const CACHE = 'robot-ruins-v70';
+const CACHE = 'robot-ruins-v95';
 
 function playerSprites() {
-  const paths = [
+  // Only precache sprites that exist in assets/player/.
+  return [
     './assets/player/idle.png',
-    './assets/player/roll.png',
-    './assets/player/crouch.png',
-    './assets/player/sneak.png',
-    './assets/player/jump.png',
     './assets/player/walk.png',
     './assets/player/run.png',
   ];
-  for (let i = 1; i <= 4; i++) {
-    paths.push(`./assets/player/walk_${i}.png`);
-    paths.push(`./assets/player/run_${i}.png`);
-  }
-  return paths;
 }
 
 function weaponSprites() {
@@ -55,9 +47,12 @@ const SHELL = [
   './js/player.js',
   './js/enemies.js',
   './js/chunkEntities.js',
+  './js/chests.js',
+  './js/loot.js',
   './js/audio.js',
   './js/minimap.js',
   './js/items.js',
+  './js/ammo.js',
   './js/joystick.js',
   './js/inventory.js',
   './js/collision.js',
@@ -71,7 +66,12 @@ const SHELL = [
   './assets/ui/inventory.png',
   './assets/ui/inv_slot.png',
   './assets/ui/inv_cursor.png',
+  './assets/ui/chest_inventory.png',
   './assets/items/lock.png',
+  './assets/buildings/chest_wood.png',
+  './assets/buildings/chest_metal.png',
+  './assets/buildings/chest_rust.png',
+  './assets/buildings/chest_moss.png',
 ];
 
 const ASSETS = [
@@ -81,6 +81,10 @@ const ASSETS = [
   './assets/enemies/spider.png',
   './assets/enemies/spider_walk.png',
   './assets/items/ammo.png',
+  './assets/items/pistol_ammo.png',
+  './assets/items/rifle_ammo.png',
+  './assets/items/shotgun_ammo.png',
+  './assets/items/sniper_ammo.png',
   './assets/items/bandage.png',
   './assets/items/mystery.png',
   './assets/items/mystery_weapon.png',
@@ -88,10 +92,6 @@ const ASSETS = [
   './assets/items/particle_spark.png',
   './assets/items/particle_smoke.png',
   './assets/items/particle_fire.png',
-  './assets/items/crate.png',
-  './assets/items/crate2.png',
-  './assets/items/crate3.png',
-  './assets/items/crate4.png',
   './assets/ui/cursor.png',
   './icons/icon-192.png',
   './icons/icon-512.png',

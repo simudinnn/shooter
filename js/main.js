@@ -1,12 +1,14 @@
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
-import { unpackTintGradient, getBiome } from './worldGen.js';
+import { unpackTintGradient, getBiome, rollWorldSeed } from './worldGen.js';
 import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET } from './player.js';
 import { createExplosion, createGroundSpew, updateParticles } from './enemies.js';
 import { SoundManager } from './audio.js';
 import { Minimap } from './minimap.js';
-import { ItemManager, ITEM_DRAW_SCALE } from './items.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
+import { ItemManager } from './items.js';
+import { ChestManager, CHEST_DRAW_SCALE } from './chests.js';
+import { chestSpriteName } from './loot.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
@@ -19,12 +21,12 @@ const RENDER_SCALE = 2;
 const PPU = 8;
 const SPRITE_PLAYER = 1.50;
 const SPRITE_ENEMY = 1.45;
-const SPRITE_ITEM = ITEM_DRAW_SCALE;
+const SPRITE_CHEST = CHEST_DRAW_SCALE;
 const SPRITE_CRATE = 2.2;
 const SPRITE_BULLET = 1.2;
 const SPRITE_CASING = 1.5;
 const SPRITE_GUN = 1.35;
-const SPRITE_CURSOR = 1.4;
+const SPRITE_CURSOR = CURSOR_DRAW_SCALE;
 const AUTO_AIM_TURN_RATE = 16;
 const AUTO_AIM_TARGET_TURN_RATE = 4.5;
 const AUTO_AIM_STICK_TURN_RATE = 12;
@@ -52,7 +54,7 @@ class Game {
     this.modifiers = { ctrl: false, shift: false };
     this.audio = new SoundManager();
     this.sprites = new SpriteBank();
-    this.mouse = { sx: INTERNAL_W / 2, sy: INTERNAL_H / 2, wx: 0, wz: 0 };
+    this.mouse = { sx: INTERNAL_W / 2, sy: INTERNAL_H / 2, wx: 0, wz: 0, clientX: 0, clientY: 0 };
     this.camOffset = { x: 0, z: 0 };
     this.touchMove = { x: 0, z: 0 };
     this.mobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -78,10 +80,10 @@ class Game {
   _resizeCanvas() {
     const bufW = INTERNAL_W * this.renderScale;
     const bufH = INTERNAL_H * this.renderScale;
-    const scale = Math.max(1, Math.ceil(Math.max(
+    const scale = Math.max(
       window.innerWidth / bufW,
       window.innerHeight / bufH,
-    )));
+    );
     this.displayScale = scale;
     this.canvas.style.width = `${bufW * scale}px`;
     this.canvas.style.height = `${bufH * scale}px`;
@@ -172,7 +174,6 @@ class Game {
     if (e.repeat) return;
     if (this.inventoryUI?.isOpen()) return;
     if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
-    if (e.code === 'KeyE') this.items?.tryInteract(this.player, this);
     if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
     if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
   }
@@ -206,6 +207,9 @@ class Game {
         this.canvas.focus();
         this.audio.resume();
         this.mouseDown = true;
+      } else if (e.button === 2 && this.running && !this.inventoryUI?.isOpen()) {
+        const chest = this._getChestUnderCursor();
+        if (chest) this.inventoryUI.openChest(chest);
       }
     });
 
@@ -266,9 +270,7 @@ class Game {
     bindBtn('mb-gun', () => { if (this.running) this.player?.setWeaponSlot('gun'); }, () => {});
     bindBtn('mb-knife', () => { if (this.running) this.player?.setWeaponSlot('melee'); }, () => {});
 
-    bindBtn('mb-interact', () => {
-      if (this.running) this.items?.tryInteract(this.player, this);
-    }, () => {});
+    bindBtn('mb-interact', () => {}, () => {});
 
     bindBtn('mb-inventory', () => {
       if (this.running) this.inventoryUI.toggle();
@@ -301,6 +303,8 @@ class Game {
     const sy = ((e.clientY - rect.top) / rect.height) * INTERNAL_H;
     this.mouse.sx = Math.max(0, Math.min(INTERNAL_W, sx));
     this.mouse.sy = Math.max(0, Math.min(INTERNAL_H, sy));
+    this.mouse.clientX = e.clientX;
+    this.mouse.clientY = e.clientY;
   }
 
   _angleDelta(from, to) {
@@ -436,10 +440,17 @@ class Game {
   start() {
     this.el.startBtn.disabled = true;
     this.el.restartBtn.disabled = true;
-    this._bootGame().finally(() => {
-      this.el.startBtn.disabled = false;
-      this.el.restartBtn.disabled = false;
-    });
+    this._bootGame()
+      .catch((err) => {
+        console.error('Deploy/start failed:', err);
+        this.el.startScreen?.classList.remove('hidden');
+        this.el.gameOver?.classList.add('hidden');
+        this.el.hud?.classList.add('hidden');
+      })
+      .finally(() => {
+        this.el.startBtn.disabled = false;
+        this.el.restartBtn.disabled = false;
+      });
   }
 
   async _bootGame() {
@@ -448,6 +459,7 @@ class Game {
 
     await this.sprites.loadAll();
 
+    rollWorldSeed();
     this.world = new World();
     await this.world.build();
     this.world.prewarmGround(this.sprites, PPU);
@@ -460,6 +472,7 @@ class Game {
     this.chunkEntities = new ChunkEntityManager(this.world, this);
     this.chunkEntities.reset();
     this.items = new ItemManager(this.world);
+    this.chests = new ChestManager(this.world);
     this.particles = [];
     this._weaponBreathY = 0;
     this.camOffset = { x: 0, z: 0 };
@@ -542,6 +555,7 @@ class Game {
             const feetX = this.player.x - mx * 0.1;
             const feetZ = this.player.z + feetOffZ - mz * 0.1;
             this.particles.push(...createStepDust(feetX, feetZ));
+            this.audio.footstep();
           }
         }
       } else {
@@ -594,9 +608,9 @@ class Game {
     this._updateMidCooldownCasings(time);
     this.player.updateGunKick(dt);
 
-    this.items.update(dt, this.player, this);
+    this.items.update(dt);
     this.chunkEntities.update(this.player);
-    this.bullets.update(dt, this.world, (b) => this._onBulletHit(b));
+    this.bullets.update(dt, this.world, (b) => this._onBulletHit(b), this.player);
     for (const robot of this.robots) {
       robot.update(dt, this.player, this.world, this.robots, (r) => {
         if (this.player.takeDamage(r.meleeDamage, time)) {
@@ -637,10 +651,25 @@ class Game {
           robot.statusFxAcc = 0;
         }
       }
+
+      if (robot.alive && robot.moving && !robot.emerging && !(robot.jump?.active || robot.jump?.charging)) {
+        const step = Math.floor(robot.walkPhase / 2);
+        if (step !== robot._audioStep) {
+          robot._audioStep = step;
+          if (step > 0) {
+            const dist = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
+            this.audio.enemyFootstep(dist);
+          }
+        }
+      } else {
+        robot._audioStep = -1;
+      }
     }
     const breathTarget = getPlayerIdleBreathY(this.player, time);
     this._weaponBreathY += (breathTarget - this._weaponBreathY) * Math.min(1, dt * 18);
-    updateParticles(this.particles, dt, this.world);
+    updateParticles(this.particles, dt, this.world, {
+      onCasingLand: () => this.audio.casingLand(),
+    });
   }
 
   _damageRobot(robot, damage, fromX, fromZ, bullet = null) {
@@ -655,7 +684,39 @@ class Game {
     }
   }
 
+  _chestScreenPos(chest) {
+    return this._worldToScreen(chest.x, chest.z);
+  }
+
+  _getChestUnderCursor() {
+    const chest = this._getHoveredChest();
+    if (!chest) return null;
+    if (!this.chests.isInInteractRange(this.player, chest)) return null;
+    return chest;
+  }
+
+  _getHoveredChest() {
+    if (!this.chests?.chests?.length) return null;
+    const halfW = Math.round(16 * SPRITE_CHEST * 0.5);
+    const halfH = Math.round(16 * SPRITE_CHEST * 0.45);
+    let best = null;
+    let bestD = Infinity;
+    for (const chest of this.chests.chests) {
+      const s = this._chestScreenPos(chest);
+      const dx = this.mouse.sx - s.x;
+      const dy = this.mouse.sy - s.y;
+      if (Math.abs(dx) > halfW + 6 || Math.abs(dy) > halfH + 8) continue;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = chest;
+      }
+    }
+    return best;
+  }
+
   _tryStartReload(time) {
+    if (this.player.isMeleeActive()) return;
     const result = this.player.startReload(time);
     if (!result) return;
     if (result.cancelled) return;
@@ -667,6 +728,7 @@ class Game {
   }
 
   _emitCasings(count, color) {
+    if (count > 0) this.audio.casingEject();
     const angle = this.player.angle;
     const flip = Math.sin(angle) < 0;
     const aim = gunAimTransform(angle);
@@ -979,12 +1041,10 @@ class Game {
         },
       });
     }
-    for (const item of this.items.items) {
-      if (!item.active) continue;
-      drawList.push({ z: item.z, draw: () => {
-        const bob = Math.sin(item.bobPhase) * 3;
-        const s = this._worldToScreen(item.x, item.z);
-        this.sprites.draw(ctx, this.items.getSpriteName(item.type), s.x, s.y + bob, SPRITE_ITEM);
+    for (const chest of this.chests.chests) {
+      drawList.push({ z: chest.z, draw: () => {
+        const s = this._chestScreenPos(chest);
+        this.sprites.draw(ctx, chestSpriteName(chest.variant), s.x, s.y, SPRITE_CHEST);
       }});
     }
     for (const robot of this.robots) {
@@ -1180,10 +1240,11 @@ class Game {
       this.el.reloadIndicator.classList.add('hidden');
     } else {
       const gun = this.player.getWeapon();
-      this.el.ammoCurrent.textContent = gun.ammo;
-      this.el.ammoReserve.textContent = gun.reserve;
+      const reserve = this.player.getReserveAmmo();
+      this.el.ammoCurrent.textContent = `${gun.ammo}/${gun.magSize}`;
+      this.el.ammoReserve.textContent = reserve;
       this.el.ammoCurrent.style.color = gun.ammo === 0 ? '#ff4040' : '#e8e4dc';
-      this.el.ammoReserve.style.color = gun.reserve >= this.player.getMaxReserve() ? '#f0a030' : '#8899aa';
+      this.el.ammoReserve.style.color = reserve > 0 ? '#8899aa' : '#556066';
       this.el.reloadIndicator.classList.toggle('hidden', !gun.reloading);
     }
 
@@ -1205,15 +1266,29 @@ class Game {
     this.el.powerupStatus.textContent = power;
     this.el.powerupStatus.classList.toggle('active', !!power);
 
-    const interact = this.items.getNearbyInteractable(this.player);
-    this.el.interactPrompt.classList.toggle('hidden', !interact);
-    if (interact) {
-      this.el.interactPrompt.textContent = interact.type === 'mystery_weapon' ? '[E] Open weapon crate' : '[E] Open mystery box';
+    const hoveredChest = this._getHoveredChest();
+    const canOpenChest = !this.inventoryUI.open
+      && hoveredChest
+      && this.chests.isInInteractRange(this.player, hoveredChest);
+    this.el.interactPrompt.classList.toggle('hidden', !canOpenChest);
+    if (canOpenChest) {
+      const mx = this.mouse.clientX;
+      const my = this.mouse.clientY;
+      this.el.interactPrompt.textContent = 'RMB to open';
+      this.el.interactPrompt.style.left = `${mx}px`;
+      this.el.interactPrompt.style.top = `${my - 28}px`;
+      this.el.interactPrompt.style.bottom = 'auto';
+      this.el.interactPrompt.style.transform = 'translate(-50%, -100%)';
+    } else {
+      this.el.interactPrompt.style.left = '';
+      this.el.interactPrompt.style.top = '';
+      this.el.interactPrompt.style.bottom = '';
+      this.el.interactPrompt.style.transform = '';
     }
 
     this._minimapTick++;
     if ((this._minimapTick & 3) === 0) {
-      this.minimap.render(this.player, this.robots, this.world, this.items);
+      this.minimap.render(this.player, this.robots, this.world, this.chests);
     }
   }
 

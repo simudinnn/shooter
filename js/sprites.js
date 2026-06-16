@@ -6,10 +6,6 @@ const PLAYER_ASSET_PATHS = {
   player_idle: 'assets/player/idle.png',
   player_walk: 'assets/player/walk.png',
   player_run: 'assets/player/run.png',
-  player_roll: 'assets/player/roll.png',
-  player_crouch: 'assets/player/crouch.png',
-  player_sneak: 'assets/player/sneak.png',
-  player_jump: 'assets/player/jump.png',
 };
 
 const GUN_SPRITES = ['glock', 'm16', 'm870', 'm24', 'uzi', 'revolver', 'famas', 'fal'];
@@ -51,12 +47,21 @@ const WORLD_ASSET_PATHS = Object.fromEntries([
   ...WORLD_FOLIAGE_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
 ]);
 
+const BUILDING_ASSET_PATHS = Object.fromEntries(
+  ['chest_wood', 'chest_metal', 'chest_rust', 'chest_moss'].map((name) => [name, `assets/buildings/${name}.png`]),
+);
+
 const CORE_ASSETS = {
   spider: 'assets/enemies/spider.png',
   spider_walk: 'assets/enemies/spider_walk.png',
   wall: 'assets/world/wall.png',
   ...WORLD_ASSET_PATHS,
+  ...BUILDING_ASSET_PATHS,
   ammo: 'assets/items/ammo.png',
+  pistol_ammo: 'assets/items/pistol_ammo.png',
+  rifle_ammo: 'assets/items/rifle_ammo.png',
+  shotgun_ammo: 'assets/items/shotgun_ammo.png',
+  sniper_ammo: 'assets/items/sniper_ammo.png',
   bandage: 'assets/items/bandage.png',
   mystery: 'assets/items/mystery.png',
   mystery_weapon: 'assets/items/mystery_weapon.png',
@@ -66,10 +71,6 @@ const CORE_ASSETS = {
   particle_spark: 'assets/items/particle_spark.png',
   particle_smoke: 'assets/items/particle_smoke.png',
   particle_fire: 'assets/items/particle_fire.png',
-  crate: 'assets/items/crate.png',
-  crate2: 'assets/items/crate2.png',
-  crate3: 'assets/items/crate3.png',
-  crate4: 'assets/items/crate4.png',
   cursor: 'assets/ui/cursor.png',
   cursor_melee: 'assets/ui/cursor_melee.png',
   cursor_shotgun: 'assets/ui/cursor_shotgun.png',
@@ -114,6 +115,9 @@ export const SPRITE_ANIM = {
     particle_fire: { fps: 2, loop: false, frameW: 15, frameH: 15 },
     casing: { frameW: 4, frameH: 4, frames: 1 },
     casing_red: { frameW: 4, frameH: 4, frames: 1 },
+    cursor: { frameW: 15, frameH: 15, frames: 1 },
+    cursor_melee: { frameW: 15, frameH: 15, frames: 1 },
+    cursor_shotgun: { frameW: 15, frameH: 15, frames: 1 },
     ...Object.fromEntries(
       ITEM_WEAPON_SPRITES.map((base) => [`item_${base}`, { frameW: 16, frameH: 16, frames: 1 }]),
     ),
@@ -137,6 +141,9 @@ export const CASING_NATIVE_PX = 4;
 export const CHAR_NATIVE_PX = 24;
 export const WEAPON_NATIVE_PX = 24;
 export const PARTICLE_FX_NATIVE_PX = 15;
+export const CURSOR_NATIVE_PX = 15;
+/** Draw scale for ~21px on-screen cursor (15px art × 1.4). */
+export const CURSOR_DRAW_SCALE = 1.4;
 
 export function getParticleFxSprite(kind) {
   if (kind === 'smoke') return 'particle_smoke';
@@ -1151,6 +1158,10 @@ export class SpriteBank {
         frameW = h;
         frameH = h;
         frameCount = w / h;
+      } else if (w === h && w > frameW) {
+        frameW = w;
+        frameH = h;
+        frameCount = 1;
       }
     }
 
@@ -1214,7 +1225,7 @@ export class SpriteBank {
   }
 
   draw(ctx, name, sx, sy, scale = 2, angle = 0, flipX = false, pivot = 'center', chopTilt = 0, anim = null) {
-    const img = this.images[name];
+    const img = this.images[name] ?? this._getImage(name);
     if (!img) return;
     const fb = this.flipbooks[name];
     const frameIdx = this._resolveFrame(fb, anim);
@@ -1255,13 +1266,11 @@ export class SpriteBank {
 
   _getImage(name) {
     if (this.images[name]) return this.images[name];
-    if (name.startsWith('floor_') || name.startsWith('foliage_')) {
-      const fallback = buildFallback(name);
-      this.images[name] = fallback;
-      this._parseFlipbook(name, fallback);
-      return fallback;
-    }
-    return null;
+    const fallback = buildFallback(name);
+    if (!fallback) return null;
+    this.images[name] = fallback;
+    if (name.startsWith('floor_') || name.startsWith('foliage_')) this._parseFlipbook(name, fallback);
+    return fallback;
   }
 
   _tintKey(tint) {

@@ -3,6 +3,9 @@ export class SoundManager {
     this.ctx = null;
     this.master = null;
     this.enabled = false;
+    this._lastCasingLand = 0;
+    this._lastFootstep = 0;
+    this._lastEnemyStep = 0;
   }
 
   init() {
@@ -16,6 +19,14 @@ export class SoundManager {
 
   resume() {
     if (this.ctx?.state === 'suspended') this.ctx.resume();
+  }
+
+  /** 0 beyond maxDist, 1 at or inside fullDist, smooth falloff between. */
+  _distanceAtten(dist, fullDist = 5, maxDist = 28) {
+    if (dist >= maxDist) return 0;
+    if (dist <= fullDist) return 1;
+    const t = (maxDist - dist) / (maxDist - fullDist);
+    return t * t;
   }
 
   _noise(duration, volume = 0.3, filterFreq = 800) {
@@ -48,7 +59,7 @@ export class SoundManager {
     const gain = ctx.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(freq * 0.3, ctx.currentTime + duration);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 0.3), ctx.currentTime + duration);
     gain.gain.setValueAtTime(volume, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
     osc.connect(gain);
@@ -116,6 +127,62 @@ export class SoundManager {
   mysteryOpen() {
     this._noise(0.12, 0.2, 600);
     [440, 554, 659, 880].forEach((f, i) => setTimeout(() => this._tone(f, 0.12, 0.1, 'sine'), i * 70));
+  }
+
+  chestOpen() {
+    this._noise(0.1, 0.18, 420);
+    this._tone(220, 0.06, 0.1, 'triangle');
+    setTimeout(() => this._tone(330, 0.08, 0.08, 'sine'), 60);
+    setTimeout(() => this._tone(440, 0.1, 0.07, 'triangle'), 120);
+  }
+
+  inventoryMove() {
+    this._noise(0.025, 0.06, 1400);
+    this._tone(520, 0.03, 0.05, 'triangle');
+  }
+
+  inventoryPlace() {
+    this._noise(0.03, 0.07, 900);
+    this._tone(380, 0.04, 0.06, 'square');
+  }
+
+  inventoryEquip() {
+    this._tone(330, 0.05, 0.09, 'triangle');
+    this._tone(495, 0.06, 0.07, 'sine');
+  }
+
+  footstep() {
+    if (!this.enabled || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (now - this._lastFootstep < 0.22) return;
+    this._lastFootstep = now;
+    this._noise(0.035, 0.07, 500 + Math.random() * 200);
+    this._tone(80 + Math.random() * 40, 0.03, 0.04, 'triangle');
+  }
+
+  enemyFootstep(distance = 0) {
+    if (!this.enabled || !this.ctx) return;
+    const vol = this._distanceAtten(distance);
+    if (vol <= 0) return;
+    const now = this.ctx.currentTime;
+    if (now - this._lastEnemyStep < 0.18) return;
+    this._lastEnemyStep = now;
+    this._noise(0.04, 0.05 * vol, 350 + Math.random() * 150);
+    this._tone(60 + Math.random() * 30, 0.035, 0.035 * vol, 'square');
+  }
+
+  casingEject() {
+    this._noise(0.02, 0.1, 3200);
+    this._tone(1200 + Math.random() * 400, 0.025, 0.05, 'triangle');
+  }
+
+  casingLand() {
+    if (!this.enabled || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (now - this._lastCasingLand < 0.045) return;
+    this._lastCasingLand = now;
+    this._noise(0.028, 0.09, 2200);
+    this._tone(700 + Math.random() * 300, 0.022, 0.045, 'triangle');
   }
 
   shotgunShot() {

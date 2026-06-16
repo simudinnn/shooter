@@ -58,7 +58,6 @@ export class WaveManager {
     this.wave += 1;
     this.state = 'spawning';
     this.game.showWaveBanner(`Wave ${this.wave}`, 2.2);
-    this.game.items?.spawnWaveItems(this.wave);
     const count = 4 + this.wave * 2;
     const interval = Math.max(0.28, 0.62 - this.wave * 0.025);
     const placeholders = [];
