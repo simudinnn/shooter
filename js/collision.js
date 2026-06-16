@@ -1,3 +1,23 @@
+function pushAabbFromCircle(acx, acz, halfW, halfH, ox, oz, or) {
+  const closestX = Math.max(acx - halfW, Math.min(ox, acx + halfW));
+  const closestZ = Math.max(acz - halfH, Math.min(oz, acz + halfH));
+  const nx = closestX - ox;
+  const nz = closestZ - oz;
+  const distSq = nx * nx + nz * nz;
+  if (distSq >= or * or) return { cx: acx, cz: acz };
+
+  if (distSq < 1e-8) {
+    return { cx: acx + or, cz: acz };
+  }
+
+  const dist = Math.sqrt(distSq);
+  const overlap = or - dist;
+  return {
+    cx: acx + (nx / dist) * overlap,
+    cz: acz + (nz / dist) * overlap,
+  };
+}
+
 /** Push a circle out of overlapping entities (player / robots). */
 export function resolveEntityPosition(x, z, radius, entities, exclude = null) {
   let nx = x;
@@ -33,6 +53,29 @@ export function resolveEntityPosition(x, z, radius, entities, exclude = null) {
   return { x: nx, z: nz };
 }
 
+export function resolveEntityPositionShape(x, z, shape, entities, exclude = null) {
+  if (!shape || shape.kind === 'circle') {
+    return resolveEntityPosition(x, z, shape?.radius ?? 0, entities, exclude);
+  }
+
+  let acx = x;
+  let acz = z + shape.zOff;
+
+  for (let pass = 0; pass < 4; pass++) {
+    for (const ent of entities) {
+      if (ent === exclude) continue;
+      if (ent.alive === false) continue;
+      if (ent.emerging) continue;
+
+      const pushed = pushAabbFromCircle(acx, acz, shape.halfW, shape.halfH, ent.x, ent.z, ent.radius ?? 0);
+      acx = pushed.cx;
+      acz = pushed.cz;
+    }
+  }
+
+  return { x: acx, z: acz - shape.zOff };
+}
+
 export function collectCollisionTargets({ player, robots, exclude = null }) {
   const out = [];
   if (player?.alive && player !== exclude) out.push(player);
@@ -44,9 +87,9 @@ export function collectCollisionTargets({ player, robots, exclude = null }) {
   return out;
 }
 
-export function moveWithEntityCollision(world, x, z, dx, dz, entityRadius, worldRadius, targets, exclude = null) {
-  const moved = world.moveAxis(x, z, dx, dz, worldRadius);
-  let pos = resolveEntityPosition(moved.x, moved.z, entityRadius, targets, exclude);
-  if (world.checkCollision(pos.x, pos.z, worldRadius)) pos = moved;
+export function moveWithEntityCollision(world, x, z, dx, dz, entityShape, worldShape, targets, exclude = null) {
+  const moved = world.moveAxisShape(x, z, dx, dz, worldShape);
+  let pos = resolveEntityPositionShape(moved.x, moved.z, entityShape, targets, exclude);
+  if (world.checkCollisionShape(pos.x, pos.z, worldShape)) pos = moved;
   return pos;
 }

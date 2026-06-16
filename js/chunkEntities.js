@@ -1,4 +1,4 @@
-import { Robot, createGroundErupt } from './enemies.js';
+import { Robot, Scout, createGroundErupt, SCOUT_SPAWN_SHARE } from './enemies.js';
 import { CHUNK_WORLD, hash01, isInBase } from './worldGen.js';
 import { CHEST_CHUNK_SPAWN_RATE } from './chests.js';
 
@@ -184,10 +184,16 @@ export class ChunkEntityManager {
 
     if (this._countNearbySpiders(player) >= MAX_NEARBY_SPIDERS) return;
 
-    const pos = this._findChunkPoint(chunk, 3, player, this._livingRobots(), fx, fz);
+    const typeRoll = hash01(chunk.cx * 31 + 47, chunk.cz * 41 + 53);
+    const useScout = typeRoll < SCOUT_SPAWN_SHARE;
+    const spawnR = useScout ? 1.0 : 0.85;
+
+    const pos = this._findChunkPoint(chunk, 3, player, this._livingRobots(), fx, fz, spawnR);
     if (!pos) return;
 
-    const robot = Robot.createEmerging(pos.x, pos.z, 1, this.world, 'spider');
+    const robot = useScout
+      ? Scout.createEmerging(pos.x, pos.z, 1, this.world)
+      : Robot.createEmerging(pos.x, pos.z, 1, this.world, 'spider');
     robot.homeCx = chunk.cx;
     robot.homeCz = chunk.cz;
     this.game.robots.push(robot);
@@ -222,7 +228,7 @@ export class ChunkEntityManager {
     ];
   }
 
-  _findChunkPoint(chunk, salt, player, existing, fx, fz) {
+  _findChunkPoint(chunk, salt, player, existing, fx, fz, spawnR = 0.85) {
     const minX = chunk.cx * CHUNK_WORLD + 1.2;
     const minZ = chunk.cz * CHUNK_WORLD + 1.2;
     const span = CHUNK_WORLD - 2.4;
@@ -248,7 +254,7 @@ export class ChunkEntityManager {
           this.world,
           x,
           z,
-          0.85,
+          spawnR,
           existing,
           player,
           2.5,

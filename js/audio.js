@@ -6,6 +6,7 @@ export class SoundManager {
     this._lastCasingLand = 0;
     this._lastFootstep = 0;
     this._lastEnemyStep = 0;
+    this._lastScoutStomp = 0;
   }
 
   init() {
@@ -169,6 +170,39 @@ export class SoundManager {
     this._lastEnemyStep = now;
     this._noise(0.04, 0.05 * vol, 350 + Math.random() * 150);
     this._tone(60 + Math.random() * 30, 0.035, 0.035 * vol, 'square');
+  }
+
+  scoutStomp(distance = 0) {
+    if (!this.enabled || !this.ctx) return;
+    const vol = this._distanceAtten(distance, 6, 32);
+    if (vol <= 0) return;
+    const now = this.ctx.currentTime;
+    if (now - this._lastScoutStomp < 0.34) return;
+    this._lastScoutStomp = now;
+    this._noise(0.07, 0.14 * vol, 180 + Math.random() * 90);
+    this._tone(42 + Math.random() * 18, 0.09, 0.12 * vol, 'sawtooth');
+    this._tone(95, 0.04, 0.05 * vol, 'square');
+  }
+
+  scoutChargeStart(distance = 0) {
+    if (!this.enabled || !this.ctx) return;
+    const vol = this._distanceAtten(distance, 4, 36);
+    if (vol <= 0) return;
+    const { ctx, master } = this;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(90, t);
+    osc.frequency.exponentialRampToValueAtTime(280, t + 0.55);
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.11 * vol, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.62);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(t);
+    osc.stop(t + 0.65);
+    this._noise(0.12, 0.08 * vol, 520);
   }
 
   casingEject() {

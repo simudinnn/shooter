@@ -13,6 +13,13 @@ export const BARREL_TIP_OFFSET = 0.55;
 /** Lifts spawn point on screen toward the gun barrel (pixels, screen-up). */
 export const BARREL_SCREEN_RAISE = 8;
 
+/** 24px diameter damage / melee hit circle at PPU 8. */
+export const PLAYER_HIT_RADIUS = 1.5;
+/** Movement collision around the legs (screen pixels). */
+export const PLAYER_MOVE_W_PX = 16;
+export const PLAYER_MOVE_H_PX = 10;
+export const PLAYER_SPRITE_SCALE = 1.5;
+
 const SCREEN_PPU = 5.5;
 
 export const ITEM_STORAGE_SIZE = 20;
@@ -236,7 +243,7 @@ export class Player {
     this.maxHealth = 100;
     this.health = 100;
     this.alive = true;
-    this.radius = 1.75;
+    this.radius = PLAYER_HIT_RADIUS;
     this.isMoving = false;
     this.isSprinting = false;
     this.walkPhase = 0;
@@ -295,6 +302,21 @@ export class Player {
 
   _now() {
     return performance.now() / 1000;
+  }
+
+  /** Legs-only AABB for movement (lower half of the 24px sprite). */
+  getMoveCollider(ppu = 8) {
+    const zOffPx = 6 * PLAYER_SPRITE_SCALE;
+    return {
+      kind: 'aabb',
+      zOff: zOffPx / ppu,
+      halfW: (PLAYER_MOVE_W_PX * 0.5) / ppu,
+      halfH: (PLAYER_MOVE_H_PX * 0.5) / ppu,
+    };
+  }
+
+  getHitCollider() {
+    return { kind: 'circle', radius: this.radius };
   }
 
   _cancelActiveReload() {
@@ -1239,8 +1261,9 @@ export class Player {
     return Math.min(1, (time - this.weapon.reloadStart) / this.weapon.reloadTime);
   }
 
-  takeDamage(amount, time) {
-    if (!this.alive || time < this.invulnTimer) return false;
+  takeDamage(amount, time, opts = {}) {
+    if (!this.alive) return false;
+    if (!opts.perBullet && time < this.invulnTimer) return false;
     let remaining = amount;
     if (this.shield > 0) {
       const absorbed = Math.min(this.shield, remaining);
@@ -1248,11 +1271,11 @@ export class Player {
       remaining -= absorbed;
     }
     if (remaining <= 0) {
-      this.invulnTimer = time + 0.25;
+      if (!opts.perBullet) this.invulnTimer = time + 0.25;
       return true;
     }
     this.health = Math.max(0, this.health - remaining);
-    this.invulnTimer = time + 0.4;
+    if (!opts.perBullet) this.invulnTimer = time + 0.4;
     if (this.health <= 0) this.alive = false;
     return true;
   }

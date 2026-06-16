@@ -1,15 +1,21 @@
-import { CHUNK_WORLD, isInBase, snapWorldPoint } from './worldGen.js';
+import { CHUNK_WORLD, isInBase, snapWorldPoint, TILE } from './worldGen.js';
 import { rollChestLoot, rollChestVariant } from './loot.js';
 
 /** Match CHEST_CHUNK_CHANCE in chunkEntities.js */
-export const CHEST_CHUNK_SPAWN_RATE = 0.08;
+export const CHEST_CHUNK_SPAWN_RATE = 0.5;
 
 export const CHEST_INTERACT_DIST = 2.8;
 export const CHEST_DRAW_SCALE = 2.1;
-/** World half-width of chest sprite at PPU 8 — used for collision footprint. */
-const CHEST_ART_PX = 16;
+/** Native chest art size (assets/buildings/chest_*.png are 16×16). */
+export const CHEST_NATIVE_PX = 16;
 const CHEST_GAME_PPU = 8;
-export const CHEST_COLLISION_RADIUS = (CHEST_ART_PX * CHEST_DRAW_SCALE * 0.5) / CHEST_GAME_PPU * 0.52;
+/** Opaque-pixel centroid in the 16×16 sheet (art sits low in the frame). */
+export const CHEST_VIS_PIVOT = { nx: 8.5, ny: 11.0 };
+export const CHEST_OPAQUE_HALF_W = 6.5;
+export const CHEST_OPAQUE_HALF_H = 4.5;
+/** Collision matches visible opaque width at draw scale. */
+export const CHEST_COLLISION_RADIUS = (CHEST_OPAQUE_HALF_W * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
+export const CHEST_DRAW_PIVOT = CHEST_VIS_PIVOT;
 
 /** Single world anchor for draw, collision, interaction, and minimap. */
 export function getChestWorldPos(chest) {
@@ -41,10 +47,9 @@ export class ChestManager {
     if (!pos) return;
 
     chunk.chestsSpawned = true;
-    const snapped = snapWorldPoint(pos.x, pos.z);
     const chest = {
-      x: snapped.x,
-      z: snapped.z,
+      x: pos.x,
+      z: pos.z,
       variant: rollChestVariant(),
       slots: rollChestLoot(),
       opened: false,
@@ -121,8 +126,10 @@ export class ChestManager {
 
     const isValid = (x, z, requireAhead) => {
       const snapped = snapWorldPoint(x, z);
-      x = snapped.x;
-      z = snapped.z;
+      const tileOx = Math.floor(snapped.x / TILE) * TILE;
+      const tileOz = Math.floor(snapped.z / TILE) * TILE;
+      x = tileOx + TILE * 0.5;
+      z = tileOz + TILE * 0.5;
       if (isInBase(x, z)) return false;
       if (requireAhead && spawnBias) {
         if ((x - player.x) * fx + (z - player.z) * fz < 3) return false;
@@ -145,7 +152,9 @@ export class ChestManager {
       for (const [x, z] of tries) {
         if (isValid(x, z, passAhead)) {
           const snapped = snapWorldPoint(x, z);
-          return { x: snapped.x, z: snapped.z };
+          const tileOx = Math.floor(snapped.x / TILE) * TILE;
+          const tileOz = Math.floor(snapped.z / TILE) * TILE;
+          return { x: tileOx + TILE * 0.5, z: tileOz + TILE * 0.5 };
         }
       }
     }

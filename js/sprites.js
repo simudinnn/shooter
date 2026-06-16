@@ -38,8 +38,9 @@ const ITEM_WEAPON_ASSET_PATHS = Object.fromEntries(
 const WORLD_FLOOR_SPRITES = ['floor_grass', 'floor_dirt', 'floor_rock'];
 
 const WORLD_FOLIAGE_SPRITES = [
-  'foliage_grass', 'foliage_grass_tall', 'foliage_rock',
-  'foliage_tree', 'foliage_stump',
+  'foliage_grass', 'foliage_grass2', 'foliage_grass3', 'foliage_grass4',
+  'foliage_grass_tall', 'foliage_pebble', 'foliage_rock',
+  'foliage_bush', 'foliage_tree', 'foliage_tree2', 'foliage_tree3', 'foliage_stump',
 ];
 
 const WORLD_ASSET_PATHS = Object.fromEntries([
@@ -54,6 +55,9 @@ const BUILDING_ASSET_PATHS = Object.fromEntries(
 const CORE_ASSETS = {
   spider: 'assets/enemies/spider.png',
   spider_walk: 'assets/enemies/spider_walk.png',
+  scout: 'assets/enemies/scout.png',
+  scout_walk: 'assets/enemies/scout_walk.png',
+  scout_charge: 'assets/enemies/charge.png',
   wall: 'assets/world/wall.png',
   ...WORLD_ASSET_PATHS,
   ...BUILDING_ASSET_PATHS,
@@ -100,6 +104,8 @@ export const SPRITE_ANIM = {
     player_sneak: { fps: 7, loop: true },
     player_jump: { fps: 12, loop: false },
     spider_walk: { fps: 10, loop: true },
+    scout_walk: { fps: 6, loop: true, frameW: 32, frameH: 32 },
+    scout_charge: { fps: 10, loop: false, frameW: 32, frameH: 32 },
     glock_reload: { fps: 10, loop: false, frameW: 24, frameH: 24 },
     m16_reload: { fps: 10, loop: false, frameW: 24, frameH: 24 },
     m870_reload: { fps: 10, loop: false, frameW: 24, frameH: 24 },
@@ -139,6 +145,22 @@ export const CRATE_VARIANTS = ['crate', 'crate2', 'crate3', 'crate4'];
 export const ITEM_NATIVE_PX = 16;
 export const CASING_NATIVE_PX = 4;
 export const CHAR_NATIVE_PX = 24;
+export const SCOUT_NATIVE_PX = 32;
+export const ENEMY_DRAW_SCALE = {
+  spider: 1.45,
+  /** Match spider on-screen size: 24px art × 1.45 ≈ 32px art × this scale (slightly smaller). */
+  scout: 1.6
+};
+
+export const SCOUT_WALK_FPS = 6;
+
+export function getEnemyNativePx(type) {
+  return type === 'scout' ? SCOUT_NATIVE_PX : CHAR_NATIVE_PX;
+}
+
+export function getEnemyDrawScale(type) {
+  return ENEMY_DRAW_SCALE[type] ?? 1.45;
+}
 export const WEAPON_NATIVE_PX = 24;
 export const PARTICLE_FX_NATIVE_PX = 15;
 export const CURSOR_NATIVE_PX = 15;
@@ -214,6 +236,7 @@ function defaultFrameSize(name) {
   if (name.startsWith('item_')) return ITEM_NATIVE_PX;
   if (name === 'casing' || name === 'casing_red') return CASING_NATIVE_PX;
   if (name.startsWith('particle_')) return 15;
+  if (name.startsWith('scout')) return SCOUT_NATIVE_PX;
   if (name.startsWith('player_') || name.startsWith('spider')) return CHAR_SIZE;
   if (GUN_SPRITES.some((b) => name === b || name.startsWith(`${b}_`))
     || MELEE_SPRITES.includes(name)) {
@@ -692,81 +715,12 @@ function buildParticleFxFallback(name) {
   return c;
 }
 
-function buildFloorFallback(name) {
-  const c = makeCanvas(FALLBACK_SIZE, FALLBACK_SIZE);
-  const g = c.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  const palette = {
-    floor_grass: ['#b8b8b0', '#a8a8a0', '#c8c8c0'],
-    floor_dirt: ['#6a5840', '#5a4834', '#7a6848'],
-    floor_rock: ['#5a5a58', '#4a4a48', '#6a6a66'],
-  }[name] || ['#b8b8b0', '#a8a8a0', '#c8c8c0'];
-  px(g, 0, 0, 16, 16, palette[0]);
-  px(g, 0, 0, 7, 7, palette[1]);
-  px(g, 9, 9, 7, 7, palette[2]);
-  return c;
-}
-
-function buildFoliageFallback(name) {
-  const c = makeCanvas(FALLBACK_SIZE, FALLBACK_SIZE);
-  const g = c.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  switch (name) {
-    case 'foliage_grass':
-      px(g, 6, 11, 2, 3, '#505848');
-      px(g, 9, 11, 2, 3, '#505848');
-      px(g, 7, 9, 2, 4, '#606858');
-      px(g, 5, 10, 2, 3, '#585850');
-      px(g, 10, 10, 2, 3, '#585850');
-      break;
-    case 'foliage_grass_tall':
-      px(g, 7, 6, 2, 8, '#989890');
-      px(g, 4, 5, 2, 8, '#a8a8a0');
-      px(g, 10, 5, 2, 8, '#a8a8a0');
-      px(g, 6, 4, 4, 2, '#b8b8b0');
-      break;
-    case 'foliage_flower':
-      px(g, 7, 10, 2, 4, '#3a6a38');
-      px(g, 6, 5, 4, 4, '#e84868');
-      break;
-    case 'foliage_bush':
-      px(g, 3, 8, 10, 6, '#2d5a30');
-      px(g, 5, 5, 6, 5, '#3a7040');
-      break;
-    case 'foliage_tree':
-      px(g, 7, 10, 2, 5, '#5a4030');
-      px(g, 3, 2, 10, 9, '#2a6030');
-      px(g, 5, 1, 6, 5, '#3a7840');
-      break;
-    case 'foliage_dead_tree':
-      px(g, 7, 8, 2, 7, '#4a3828');
-      px(g, 4, 2, 2, 4, '#5a4838');
-      px(g, 10, 3, 2, 3, '#5a4838');
-      break;
-    case 'foliage_rock':
-      px(g, 3, 8, 10, 6, '#5a5a58');
-      px(g, 5, 6, 7, 5, '#6a6a66');
-      break;
-    case 'foliage_stump':
-      px(g, 5, 9, 6, 5, '#5a4030');
-      px(g, 6, 7, 4, 3, '#6a5040');
-      break;
-    default:
-      px(g, 4, 4, 8, 8, '#4a7a44');
-      break;
-  }
-  return c;
-}
-
 function buildFallback(name) {
   if (name.startsWith('item_')) {
     return buildWeaponItemFallback(name.slice(5));
   }
-  if (name.startsWith('floor_')) return buildFloorFallback(name);
-  if (name.startsWith('foliage_')) {
-    return buildFoliageFallback(name);
-  }
-  if (name.startsWith('player_') || name.startsWith('spider')) {
+  if (name.startsWith('floor_') || name.startsWith('foliage_')) return null;
+  if (name.startsWith('player_') || name.startsWith('spider') || name.startsWith('scout')) {
     return buildCharFallback(name);
   }
   if (name.startsWith('particle_')) {
@@ -984,6 +938,17 @@ export function getWalkBounceY(walkPhase, moving, amp = 1.8) {
   return -amp + amp * Math.pow(u, 2.8);
 }
 
+/** Scout walk — synced to walk flipbook fps; heavier landing, shadow stays grounded. */
+export function getScoutWalkBounceY(animTime, moving, fps = SCOUT_WALK_FPS, amp = 2.2) {
+  if (!moving) return 0;
+  const t = (animTime * fps) % 1;
+  if (t < 0.18) {
+    return -Math.pow(t / 0.18, 0.5) * amp;
+  }
+  const u = (t - 0.18) / 0.82;
+  return -amp + amp * Math.pow(u, 3.6);
+}
+
 export function getPlayerBounceY(player, time = 0) {
   if (player.isRolling?.(time) || player.isCrouching || player.isSneaking) return 0;
   if (player.isJumping?.(time)) {
@@ -1103,6 +1068,24 @@ export function getWalkSheet(base, moving) {
   return `${base}_walk`;
 }
 
+/** Enemy body sheet — scout uses charge strip while winding up / firing. */
+export function getEnemyBodySheet(type, moving, shootPhase = null) {
+  if (type === 'scout') {
+    if (shootPhase === 'charging' || shootPhase === 'firing') return 'scout_charge';
+    return getWalkSheet('scout', moving);
+  }
+  return getWalkSheet(type, moving);
+}
+
+/** Flipbook timing for enemy body sheets. */
+export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null) {
+  if (type === 'scout' && (shootPhase === 'charging' || shootPhase === 'firing')) {
+    const elapsed = chargeAnimStart != null ? Math.max(0, time - chargeAnimStart) : 0;
+    return { elapsed };
+  }
+  return getWalkAnim(moving, time);
+}
+
 /** Time-based flipbook anim for walk sheets (respects SPRITE_ANIM fps). */
 export function getWalkAnim(moving, time = 0) {
   if (!moving) return null;
@@ -1215,9 +1198,13 @@ export class SpriteBank {
         resolve();
       };
       img.onerror = () => {
-        const fallback = buildFallback(name);
-        this.images[name] = fallback;
-        this._parseFlipbook(name, fallback);
+        if (!name.startsWith('floor_') && !name.startsWith('foliage_')) {
+          const fallback = buildFallback(name);
+          if (fallback) {
+            this.images[name] = fallback;
+            this._parseFlipbook(name, fallback);
+          }
+        }
         resolve();
       };
       img.src = path;
@@ -1239,7 +1226,10 @@ export class SpriteBank {
     }
     let pivotX;
     let pivotY;
-    if (pivot === 'shoulder') {
+    if (typeof pivot === 'object' && pivot.nx != null && pivot.ny != null) {
+      pivotX = pivot.nx;
+      pivotY = pivot.ny;
+    } else if (pivot === 'shoulder') {
       pivotX = fw * 0.5;
       pivotY = fh * 0.78;
     } else if (pivot === 'handle') {
@@ -1266,6 +1256,7 @@ export class SpriteBank {
 
   _getImage(name) {
     if (this.images[name]) return this.images[name];
+    if (name.startsWith('floor_') || name.startsWith('foliage_')) return null;
     const fallback = buildFallback(name);
     if (!fallback) return null;
     this.images[name] = fallback;

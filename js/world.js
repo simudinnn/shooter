@@ -10,6 +10,7 @@ import {
   getFloorSpriteName,
   unpackTintGradient,
   isTintedFoliage,
+  isYsortFoliage,
   isCanopyFoliage,
 } from './worldGen.js';
 
@@ -18,7 +19,7 @@ export const MAP_SIZE = 999999;
 export const PLAYER_RADIUS = 0.6;
 export const BULLET_RADIUS = 0.15;
 
-const BAKE_VERSION = 11;
+const BAKE_VERSION = 15;
 const MAX_CACHED_CHUNKS = 256;
 
 export class World {
@@ -151,7 +152,7 @@ export class World {
     const half = px * 0.5;
     const toPx = px / TILE;
     for (const f of chunk.foliage) {
-      if (isCanopyFoliage(f.kind)) continue;
+      if (isYsortFoliage(f.kind)) continue;
       const fTint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
       const tileWx = Math.floor(f.x / TILE) * TILE;
       const tileWz = Math.floor(f.z / TILE) * TILE;
@@ -209,7 +210,7 @@ export class World {
     }
   }
 
-  collectCanopyFoliage(minX, maxX, minZ, maxZ) {
+  collectYsortFoliage(minX, maxX, minZ, maxZ) {
     const minTX = Math.floor(minX / TILE);
     const maxTX = Math.ceil(maxX / TILE);
     const minTZ = Math.floor(minZ / TILE);
@@ -217,11 +218,16 @@ export class World {
     const out = [];
     this.forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, (chunk) => {
       for (const f of chunk.foliage) {
-        if (!isCanopyFoliage(f.kind)) continue;
+        if (!isYsortFoliage(f.kind)) continue;
         if (f.x >= minX && f.x <= maxX && f.z >= minZ && f.z <= maxZ) out.push(f);
       }
     });
     return out;
+  }
+
+  /** @deprecated use collectYsortFoliage */
+  collectCanopyFoliage(minX, maxX, minZ, maxZ) {
+    return this.collectYsortFoliage(minX, maxX, minZ, maxZ);
   }
 
   collectFoliage(minX, maxX, minZ, maxZ) {
@@ -296,9 +302,53 @@ export class World {
     return false;
   }
 
+  _shapeReach(shape) {
+    if (!shape || shape.kind === 'circle') return (shape?.radius ?? 0) + 2;
+    return Math.hypot(shape.halfW, shape.halfH) + Math.abs(shape.zOff ?? 0) + 2;
+  }
+
+  _aabbCircleHit(acx, acz, halfW, halfH, ox, oz, or) {
+    const closestX = Math.max(acx - halfW, Math.min(ox, acx + halfW));
+    const closestZ = Math.max(acz - halfH, Math.min(oz, acz + halfH));
+    const dx = ox - closestX;
+    const dz = oz - closestZ;
+    return dx * dx + dz * dz < or * or;
+  }
+
+  _pushAabbFromCircle(acx, acz, halfW, halfH, obs) {
+    const closestX = Math.max(acx - halfW, Math.min(obs.x, acx + halfW));
+    const closestZ = Math.max(acz - halfH, Math.min(obs.z, acz + halfH));
+    const nx = closestX - obs.x;
+    const nz = closestZ - obs.z;
+    const distSq = nx * nx + nz * nz;
+    if (distSq >= obs.radius * obs.radius) return { cx: acx, cz: acz };
+    if (distSq < 1e-8) return { cx: acx + obs.radius, cz: acz };
+    const dist = Math.sqrt(distSq);
+    const overlap = obs.radius - dist;
+    return { cx: acx + (nx / dist) * overlap, cz: acz + (nz / dist) * overlap };
+  }
+
+  _checkShapeCollision(px, pz, shape, obstacles) {
+    if (!shape || shape.kind === 'circle') {
+      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles);
+    }
+    const acx = px;
+    const acz = pz + shape.zOff;
+    for (const obs of obstacles) {
+      if (obs.kind === 'circle' && this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  checkCollisionShape(px, pz, shape) {
+    const obstacles = this.collectObstaclesNear(px, pz, this._shapeReach(shape));
+    return this._checkShapeCollision(px, pz, shape, obstacles);
+  }
+
   checkCollision(x, z, radius) {
-    const obstacles = this.collectObstaclesNear(x, z, radius + 2);
-    return this._checkObstacleCollision(x, z, radius, obstacles);
+    return this.checkCollisionShape(x, z, { kind: 'circle', radius });
   }
 
   segmentBlocked(x0, z0, x1, z1, radius = BULLET_RADIUS) {
@@ -318,6 +368,33 @@ export class World {
 
   hasLineOfSight(x0, z0, x1, z1, radius = 0.25) {
     return !this.segmentBlocked(x0, z0, x1, z1, radius);
+  }
+
+  resolveMovementShape(oldX, oldZ, newX, newZ, shape) {
+    if (!shape || shape.kind === 'circle') {
+      return this.resolveMovement(oldX, oldZ, newX, newZ, shape?.radius ?? 0);
+    }
+
+    let x = newX;
+    let z = newZ;
+    const obstacles = this.collectObstaclesNear(x, z, this._shapeReach(shape));
+
+    for (let i = 0; i < 4; i++) {
+      for (const obs of obstacles) {
+        if (obs.kind !== 'circle') continue;
+        let acx = x;
+        let acz = z + shape.zOff;
+        if (!this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) continue;
+        const pushed = this._pushAabbFromCircle(acx, acz, shape.halfW, shape.halfH, obs);
+        x = pushed.cx;
+        z = pushed.cz - shape.zOff;
+      }
+    }
+
+    if (!this._checkShapeCollision(x, z, shape, obstacles)) return { x, z };
+    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles)) return { x: newX, z: oldZ };
+    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles)) return { x: oldX, z: newZ };
+    return { x: oldX, z: oldZ };
   }
 
   resolveMovement(oldX, oldZ, newX, newZ, radius) {
@@ -349,6 +426,20 @@ export class World {
     }
     if (dz !== 0) {
       const r = this.resolveMovement(x, z, x, z + dz, radius);
+      x = r.x;
+      z = r.z;
+    }
+    return { x, z };
+  }
+
+  moveAxisShape(x, z, dx, dz, shape) {
+    if (dx !== 0) {
+      const r = this.resolveMovementShape(x, z, x + dx, z, shape);
+      x = r.x;
+      z = r.z;
+    }
+    if (dz !== 0) {
+      const r = this.resolveMovementShape(x, z, x, z + dz, shape);
       x = r.x;
       z = r.z;
     }

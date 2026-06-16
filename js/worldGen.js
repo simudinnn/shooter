@@ -43,11 +43,18 @@ export function rollWorldSeed() {
 export const FLOOR_KINDS = ['grass', 'dirt', 'rock'];
 
 const FOLIAGE = {
-  grass: { sprite: 'foliage_grass', blocks: false, tinted: true, canopy: false },
-  grass_tall: { sprite: 'foliage_grass_tall', blocks: false, tinted: true, canopy: true },
-  rock: { sprite: 'foliage_rock', blocks: true, radius: 0.45, tinted: false, canopy: false },
-  tree: { sprite: 'foliage_tree', blocks: true, radius: 0.85, tinted: false, canopy: false },
-  stump: { sprite: 'foliage_stump', blocks: true, radius: 0.4, tinted: false, canopy: false },
+  grass: { sprite: 'foliage_grass', blocks: false, tinted: true, ysort: false },
+  grass2: { sprite: 'foliage_grass2', blocks: false, tinted: true, ysort: false },
+  grass3: { sprite: 'foliage_grass3', blocks: false, tinted: true, ysort: false },
+  grass4: { sprite: 'foliage_grass4', blocks: false, tinted: true, ysort: false },
+  grass_tall: { sprite: 'foliage_grass_tall', blocks: false, tinted: true, ysort: true, sortZBias: TILE * 0.01 -0.05},
+  pebble: { sprite: 'foliage_pebble', blocks: false, tinted: false, ysort: false },
+  rock: { sprite: 'foliage_rock', blocks: true, radius: 0.45, tinted: false, ysort: false },
+  bush: { sprite: 'foliage_bush', blocks: false, tinted: true, ysort: true, sortZBias: TILE * 0.01  -0.05},
+  tree: { sprite: 'foliage_tree', blocks: true, radius: 1.35, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01  -0.05},
+  tree2: { sprite: 'foliage_tree2', blocks: true, radius: 1.35, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 -0.05 },
+  tree3: { sprite: 'foliage_tree3', blocks: true, radius: 1.35, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 -0.05 },
+  stump: { sprite: 'foliage_stump', blocks: true, radius: 0.4, tinted: false, ysort: false },
 };
 
 const TINT_DRY_BASE = { r: 210, g: 195, b: 120 };
@@ -204,7 +211,7 @@ export function getGrassTint(wx, wz) {
   const dryPush = dryMix * smoothstep((0.3 - moisture) / 0.16);
   if (dryPush > 0) tint = lerpRgb(tint, _tintDry, dryPush * 0.4);
 
-  const bright = 0.94 + fbm(wx * 0.035 + 300, wz * 0.035 - 120, 2) * 0.1;
+  const bright = 0.94 + fbm(wx * 0.035 + 300, wz * 0.035 - 120, 2) * 0.01;
   return {
     r: Math.min(255, Math.round(tint.r * bright)),
     g: Math.min(255, Math.round(tint.g * bright)),
@@ -275,9 +282,14 @@ export function isTintedFoliage(kind) {
   return def?.tinted === true;
 }
 
-export function isCanopyFoliage(kind) {
+export function isYsortFoliage(kind) {
   const def = FOLIAGE[kind];
-  return def?.canopy === true;
+  return def?.ysort === true;
+}
+
+/** @deprecated use isYsortFoliage */
+export function isCanopyFoliage(kind) {
+  return isYsortFoliage(kind);
 }
 
 function pushFoliage(foliage, obstacles, tx, tz, wx, wz, fKey, jitterSalt = 0) {
@@ -290,10 +302,11 @@ function pushFoliage(foliage, obstacles, tx, tz, wx, wz, fKey, jitterSalt = 0) {
   const entry = {
     x: fx,
     z: fz,
-    sortZ: fz + (fKey === 'grass_tall' ? 0.02 : 0),
+    sortZ: fz + (def.sortZBias ?? 0),
     sprite: def.sprite,
     kind: fKey,
     blocks: def.blocks,
+    drawSize: def.drawSize ?? 1,
     tintKey: def.tinted ? packTintGradient(getGrassTintGradient(wx, wz, tx, tz)) : 0,
   };
   foliage.push(entry);
@@ -307,29 +320,82 @@ function pushFoliage(foliage, obstacles, tx, tz, wx, wz, fKey, jitterSalt = 0) {
   }
 }
 
+function pickGrassVariant(tx, tz, salt = 0) {
+  const h = hash01(tx * 131 + salt, tz * 149 + salt * 3);
+  if (h < 0.25) return 'grass';
+  if (h < 0.5) return 'grass2';
+  if (h < 0.75) return 'grass3';
+  return 'grass4';
+}
+
+/** Patch noise — values above threshold form clustered spawn regions. */
+function inFoliagePatch(tx, tz, freq, offsetX, offsetZ, threshold) {
+  const v = fbm(tx * freq + offsetX, tz * freq + offsetZ, 2);
+  if (v <= threshold) return 0;
+  return smoothstep((v - threshold) / Math.max(0.001, 1 - threshold));
+}
+
 function pickFoliageForTile(tx, tz, floorKind, foliage, obstacles, wx, wz) {
   const scatter = hash01(tx * 113 + 5, tz * 97 + 11);
-  const patch = hash01(tx * 59 + 71, tz * 83 + 47);
   const accent = hash01(tx * 127 + 19, tz * 91 + 31);
+  const biome = getBiome(wx, wz);
 
   if (floorKind === 'grass') {
     const { moisture } = sampleTerrain(wx, wz);
-    const shortChance = 0.1 + moisture * 0.14;
-    const tallChance = 0.04 + moisture * 0.09;
+    let inTallPatch = false;
+    let inBushPatch = false;
 
-    if (scatter < shortChance) {
-      pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'grass');
+    if (biome === 'scrub') {
+      const tallDensity = inFoliagePatch(tx, tz, 0.11, 44, -22, 0.22);
+      if (tallDensity > 0) {
+        inTallPatch = true;
+        const tallChance = 0.07 + tallDensity * 0.62;
+        if (hash01(tx * 59 + 41, tz * 83 + 47) < tallChance) {
+          pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'grass_tall', 41);
+        }
+      }
     }
-    if (patch < tallChance) {
-      pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'grass_tall', 41);
+
+    if (!isInBase(wx, wz)) {
+      const bushThreshold = biome === 'forest' ? 0.28 : biome === 'meadow' ? 0.34 : 0.4;
+      const bushDensity = inFoliagePatch(tx, tz, 0.09, 120, 80, bushThreshold);
+      if (bushDensity > 0) {
+        inBushPatch = true;
+        const bushChance = 0.1 + bushDensity * 0.75 + moisture * 0.08;
+        if (hash01(tx * 191 + 11, tz * 197 + 13) < bushChance) {
+          pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'bush', 67);
+        }
+      }
+    }
+
+    if (!inTallPatch && !inBushPatch) {
+      const shortChance = 0.1 + moisture * 0.014;
+      if (scatter < shortChance) {
+        pushFoliage(foliage, obstacles, tx, tz, wx, wz, pickGrassVariant(tx, tz, scatter * 100 | 0));
+      }
+    }
+
+    const pebbleChance = 0.02 + accent * 0.04;
+    if (hash01(tx * 201 + 3, tz * 193 + 7) < pebbleChance) {
+      pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'pebble', 53);
+    }
+    return;
+  }
+
+  if (floorKind === 'dirt') {
+    if (hash01(tx * 201 + 5, tz * 193 + 9) < 0.05 + accent * 0.05) {
+      pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'pebble', 61);
     }
     return;
   }
 
   if (floorKind === 'rock') {
-    const rockChance = 0.16 + accent * 0.2;
+    const rockChance = 0.03 + accent * 0.2;
     if (scatter < rockChance) {
       pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'rock');
+    }
+    if (hash01(tx * 211 + 7, tz * 199 + 11) < 0.05 + accent * 0.06) {
+      pushFoliage(foliage, obstacles, tx, tz, wx, wz, 'pebble', 71);
     }
   }
 }

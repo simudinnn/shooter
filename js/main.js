@@ -6,9 +6,9 @@ import { createExplosion, createGroundSpew, updateParticles } from './enemies.js
 import { SoundManager } from './audio.js';
 import { Minimap } from './minimap.js';
 import { ItemManager } from './items.js';
-import { ChestManager, CHEST_DRAW_SCALE } from './chests.js';
+import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_H, CHEST_DRAW_PIVOT } from './chests.js';
 import { chestSpriteName } from './loot.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
@@ -20,7 +20,6 @@ const INTERNAL_H = 270;
 const RENDER_SCALE = 2;
 const PPU = 8;
 const SPRITE_PLAYER = 1.50;
-const SPRITE_ENEMY = 1.45;
 const SPRITE_CHEST = CHEST_DRAW_SCALE;
 const SPRITE_CRATE = 2.2;
 const SPRITE_BULLET = 1.2;
@@ -174,6 +173,7 @@ class Game {
     if (e.repeat) return;
     if (this.inventoryUI?.isOpen()) return;
     if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
+    if (e.code === 'KeyE') this._tryOpenNearbyChest();
     if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
     if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
   }
@@ -234,17 +234,42 @@ class Game {
   _bindMobileControls() {
     if (!this.el.mobileControls) return;
 
-    const bindBtn = (id, down, up) => {
+    const bindPress = (id, onPress) => {
       const btn = document.getElementById(id);
       if (!btn) return;
-      const start = (e) => { e.preventDefault(); down(); };
-      const end = (e) => { e.preventDefault(); up(); };
-      btn.addEventListener('touchstart', start, { passive: false });
-      btn.addEventListener('touchend', end);
-      btn.addEventListener('touchcancel', end);
-      btn.addEventListener('mousedown', start);
-      btn.addEventListener('mouseup', end);
-      btn.addEventListener('mouseleave', end);
+      let lastAt = 0;
+      const run = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const now = performance.now();
+        if (now - lastAt < 250) return;
+        lastAt = now;
+        onPress();
+      };
+      btn.addEventListener('pointerdown', run, { passive: false });
+    };
+
+    const bindHold = (id, onDown, onUp) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      let held = false;
+      const start = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (held) return;
+        held = true;
+        onDown();
+      };
+      const end = (e) => {
+        if (!held) return;
+        held = false;
+        e.preventDefault();
+        onUp();
+      };
+      btn.addEventListener('pointerdown', start, { passive: false });
+      btn.addEventListener('pointerup', end);
+      btn.addEventListener('pointercancel', end);
+      btn.addEventListener('pointerleave', end);
     };
 
     this.moveJoystick = new VirtualJoystick(
@@ -258,23 +283,28 @@ class Game {
       },
     );
 
-    bindBtn('mb-fire', () => {
+    bindHold('mb-fire', () => {
       this.audio.resume();
       this.mouseDown = true;
     }, () => { this.mouseDown = false; });
 
-    bindBtn('mb-reload', () => {
+    bindPress('mb-reload', () => {
       if (this.running) this._tryStartReload(performance.now() / 1000);
-    }, () => {});
+    });
 
-    bindBtn('mb-gun', () => { if (this.running) this.player?.setWeaponSlot('gun'); }, () => {});
-    bindBtn('mb-knife', () => { if (this.running) this.player?.setWeaponSlot('melee'); }, () => {});
+    bindPress('mb-gun', () => { if (this.running) this.player?.setWeaponSlot('gun'); });
+    bindPress('mb-knife', () => { if (this.running) this.player?.setWeaponSlot('melee'); });
 
-    bindBtn('mb-interact', () => {}, () => {});
+    bindPress('mb-interact', () => {
+      if (this.running) {
+        this.audio.resume();
+        this._tryOpenNearbyChest();
+      }
+    });
 
-    bindBtn('mb-inventory', () => {
+    bindPress('mb-inventory', () => {
       if (this.running) this.inventoryUI.toggle();
-    }, () => {});
+    });
 
     if (this.mobile) {
       this.el.mobileControls.classList.remove('hidden');
@@ -437,6 +467,15 @@ class Game {
     };
   }
 
+  /** World Z at sprite feet — used for depth sort vs foliage bases. */
+  _feetSortZ(wx, wz, nativePx, scale) {
+    return wz + spriteFeetOffset(nativePx, scale) / PPU;
+  }
+
+  _playerSortZ() {
+    return this._feetSortZ(this.player.x, this.player.z, CHAR_NATIVE_PX, SPRITE_PLAYER);
+  }
+
   start() {
     this.el.startBtn.disabled = true;
     this.el.restartBtn.disabled = true;
@@ -529,14 +568,15 @@ class Game {
         moveX = (moveX / len) * speed * dt * analog;
         moveZ = (moveZ / len) * speed * dt * analog;
         const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
+        const moveShape = this.player.getMoveCollider(PPU);
         const r = moveWithEntityCollision(
           this.world,
           this.player.x,
           this.player.z,
           moveX,
           moveZ,
-          this.player.radius,
-          this.player.radius,
+          moveShape,
+          moveShape,
           targets,
           this.player,
         );
@@ -625,7 +665,7 @@ class Game {
             r.meleeDamage * 0.55,
           ));
         }
-      });
+      }, (r, angle, damage) => this._enemyShoot(r, angle, damage));
       if (robot.emerging) {
         robot.groundSpewAcc += dt;
         const spewRate = 0.035;
@@ -652,17 +692,29 @@ class Game {
         }
       }
 
-      if (robot.alive && robot.moving && !robot.emerging && !(robot.jump?.active || robot.jump?.charging)) {
-        const step = Math.floor(robot.walkPhase / 2);
+      if (robot.alive && robot.moving && !robot.emerging
+        && !(robot.jump?.active || robot.jump?.charging)
+        && robot.shoot?.phase !== 'charging' && robot.shoot?.phase !== 'firing') {
+        const step = Math.floor(robot.walkPhase / (robot.type === 'scout' ? 1 : 2));
         if (step !== robot._audioStep) {
           robot._audioStep = step;
           if (step > 0) {
             const dist = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
-            this.audio.enemyFootstep(dist);
+            if (robot.type === 'scout') this.audio.scoutStomp(dist);
+            else this.audio.enemyFootstep(dist);
           }
         }
       } else {
         robot._audioStep = -1;
+      }
+
+      if (robot.type === 'scout' && robot.shoot) {
+        const phase = robot.shoot.phase;
+        if (phase === 'charging' && robot._prevShootPhase !== 'charging') {
+          const dist = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
+          this.audio.scoutChargeStart(dist);
+        }
+        robot._prevShootPhase = phase;
       }
     }
     const breathTarget = getPlayerIdleBreathY(this.player, time);
@@ -670,6 +722,20 @@ class Game {
     updateParticles(this.particles, dt, this.world, {
       onCasingLand: () => this.audio.casingLand(),
     });
+  }
+
+  _enemyShoot(robot, angle, damage = 10) {
+    if (!robot?.alive || robot.emerging) return;
+    const spread = robot.shoot?.bulletSpread ?? 0.28;
+    this.bullets.spawn(
+      robot.x,
+      robot.z,
+      angle,
+      { damage, bulletSpeed: 72, spread },
+      false,
+      this.world,
+    );
+    this.audio.enemyShot();
   }
 
   _damageRobot(robot, damage, fromX, fromZ, bullet = null) {
@@ -688,6 +754,21 @@ class Game {
     return this._worldToScreen(chest.x, chest.z);
   }
 
+  _getNearbyChest() {
+    if (!this.chests?.chests?.length) return null;
+    const chest = this.chests.getNearby(this.player);
+    if (!chest || !this.chests.isInInteractRange(this.player, chest)) return null;
+    return chest;
+  }
+
+  _tryOpenNearbyChest() {
+    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    const chest = this._getNearbyChest();
+    if (!chest) return false;
+    this.inventoryUI.openChest(chest);
+    return true;
+  }
+
   _getChestUnderCursor() {
     const chest = this._getHoveredChest();
     if (!chest) return null;
@@ -697,8 +778,8 @@ class Game {
 
   _getHoveredChest() {
     if (!this.chests?.chests?.length) return null;
-    const halfW = Math.round(16 * SPRITE_CHEST * 0.5);
-    const halfH = Math.round(16 * SPRITE_CHEST * 0.45);
+    const halfW = Math.round(CHEST_OPAQUE_HALF_W * SPRITE_CHEST);
+    const halfH = Math.round(CHEST_OPAQUE_HALF_H * SPRITE_CHEST);
     let best = null;
     let bestD = Infinity;
     for (const chest of this.chests.chests) {
@@ -770,14 +851,15 @@ class Game {
     }
     const recoil = this.player.applyShootRecoil();
     const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
+    const moveShape = this.player.getMoveCollider(PPU);
     const rk = moveWithEntityCollision(
       this.world,
       this.player.x,
       this.player.z,
       recoil.x,
       recoil.z,
-      this.player.radius,
-      this.player.radius,
+      moveShape,
+      moveShape,
       targets,
       this.player,
     );
@@ -821,6 +903,7 @@ class Game {
   }
 
   _onBulletHit(bullet) {
+    const time = performance.now() / 1000;
     if (bullet.fromPlayer) {
       for (const robot of this.robots) {
         if (!robot.alive) continue;
@@ -833,7 +916,27 @@ class Game {
           return;
         }
       }
+      return;
     }
+
+    if (!this.player?.alive) return;
+    const dx = bullet.x - this.player.x;
+    const dz = bullet.z - this.player.z;
+    const hitR = this.player.radius + 0.45;
+    if (dx * dx + dz * dz >= hitR * hitR) return;
+    if (this.player.takeDamage(bullet.damage, time, { perBullet: true })) {
+      this.audio.playerHurt();
+      this.el.damageFlash.classList.add('active');
+      setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
+      this.particles.push(...createBloodSplatter(
+        this.player.x,
+        this.player.z,
+        bullet.x - bullet.vx * 0.02,
+        bullet.z - bullet.vz * 0.02,
+        bullet.damage * 0.55,
+      ));
+    }
+    bullet.active = false;
   }
 
   _getCursorSprite() {
@@ -1013,58 +1116,71 @@ class Game {
     }
 
     const drawList = [];
-    const canopy = this.world.collectCanopyFoliage(
+    const ysortFoliage = this.world.collectYsortFoliage(
       cam.x - viewHalfW,
       cam.x + viewHalfW,
       cam.z - viewHalfH,
       cam.z + viewHalfH,
     );
-    for (const f of canopy) {
-      const tileOx = Math.floor(f.x / TILE) * TILE;
-      const tileOz = Math.floor(f.z / TILE) * TILE;
-      const jx = Math.round((f.x - tileOx) * PPU);
-      const jz = Math.round((f.z - tileOz) * PPU);
-      const half = tilePx * 0.5;
+    for (const f of ysortFoliage) {
       drawList.push({
         z: f.sortZ ?? f.z,
+        sortBias: 0,
         draw: () => {
-          const anchor = this._worldToScreen(tileOx, tileOz);
+          const s = this._worldToScreen(f.x, f.z);
+          const size = tilePx * (f.drawSize ?? 1);
           const tint = f.tintKey ? unpackTintGradient(f.tintKey) : null;
-          this.sprites.drawTile(
-            ctx,
-            f.sprite,
-            anchor.x + jx - half,
-            anchor.y + jz - half,
-            tilePx,
-            tint,
-          );
+          const drawX = Math.round(s.x - size * 0.5);
+          const drawY = Math.round(s.y - size);
+          this.sprites.drawTile(ctx, f.sprite, drawX, drawY, size, tint);
         },
       });
     }
     for (const chest of this.chests.chests) {
-      drawList.push({ z: chest.z, draw: () => {
+      drawList.push({ z: chest.z, sortBias: 1, draw: () => {
         const s = this._chestScreenPos(chest);
-        this.sprites.draw(ctx, chestSpriteName(chest.variant), s.x, s.y, SPRITE_CHEST);
+        this.sprites.draw(
+          ctx,
+          chestSpriteName(chest.variant),
+          s.x,
+          s.y,
+          SPRITE_CHEST,
+          0,
+          false,
+          CHEST_DRAW_PIVOT,
+        );
       }});
     }
     for (const robot of this.robots) {
       if (!robot.alive && !robot.emerging) continue;
-      drawList.push({ z: robot.z, draw: () => {
+      const enemyNativePx = getEnemyNativePx(robot.type);
+      const enemyDrawScale = getEnemyDrawScale(robot.type);
+      const robotSortZ = this._feetSortZ(robot.x, robot.z, enemyNativePx, enemyDrawScale);
+      drawList.push({ z: robotSortZ, sortBias: 1, draw: () => {
+        const drawTime = performance.now() / 1000;
         const emerge = robot.getEmergeT();
         const shake = robot.getEmergeShake();
         const s = this._worldToScreen(robot.x, robot.z);
         const bury = (1 - emerge) * 32;
-        const scale = SPRITE_ENEMY * (0.15 + emerge * 0.85);
+        const scale = enemyDrawScale * (0.15 + emerge * 0.85);
         const chargeShake = robot.jump?.charging
-          ? Math.sin(performance.now() * 0.028) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
+          ? Math.sin(drawTime * 28) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
           : 0;
-        const drawX = Math.round(s.x + shake.x + chargeShake);
-        const robotFlip = getFlipXFromAngle(robot.angle);
-        const robotBounce = getWalkBounceY(robot.walkPhase, robot.moving && !robot.emerging && !robot.jump?.active && !robot.jump?.charging);
+        const drawX = s.x + shake.x + chargeShake;
+        const shootPhase = robot.shoot?.phase ?? null;
+        const robotMoving = robot.moving && !robot.emerging
+          && shootPhase !== 'charging' && shootPhase !== 'firing';
+        const canWalkBounce = robotMoving
+          && !robot.jump?.active && !robot.jump?.charging;
+        const walkBounce = robot.type === 'scout'
+          ? getScoutWalkBounceY(drawTime, canWalkBounce)
+          : getWalkBounceY(robot.walkPhase, canWalkBounce);
         const jumpBob = robot.jump?.active ? -(robot.bob || 0) * 16 : 0;
         const chargeBob = robot.jump?.charging ? (robot.bob || 0) * 14 : 0;
         const emergeBob = robot.emerging ? (robot.bob || 0) * 3 : 0;
-        const drawY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob + robotBounce);
+        const anchorY = s.y - bury + shake.y + emergeBob + jumpBob + chargeBob;
+        const drawY = anchorY + walkBounce;
+        const feetY = anchorY + spriteFeetOffset(enemyNativePx, scale);
         if (robot.emerging) {
           const hole = 1 - emerge;
           ctx.fillStyle = `rgba(18, 14, 10, ${0.55 * hole})`;
@@ -1073,25 +1189,27 @@ class Game {
           ctx.fill();
         }
         ctx.globalAlpha = 0.3 + emerge * 0.7;
-        const feetY = Math.round(drawY + spriteFeetOffset(CHAR_NATIVE_PX, scale));
+        const isScout = robot.type === 'scout';
+        const shadowLift = isScout ? 4 : 0;
+        const shadowRx = (isScout ? 15 : 10) * emerge;
+        const shadowRy = (isScout ? 5.5 : 4) * emerge;
         ctx.fillStyle = 'rgba(0,0,0,0.35)';
         ctx.beginPath();
-        ctx.ellipse(drawX, feetY, 10 * emerge, 4 * emerge, 0, 0, Math.PI * 2);
+        ctx.ellipse(drawX, feetY - shadowLift, shadowRx, shadowRy, 0, 0, Math.PI * 2);
         ctx.fill();
-        const robotMoving = robot.moving && !robot.emerging;
-        const walkSheet = getWalkSheet(robot.type, robotMoving);
-        const walkAnim = getWalkAnim(robotMoving, performance.now() / 1000);
+        const bodySheet = getEnemyBodySheet(robot.type, robotMoving, shootPhase);
+        const bodyAnim = getEnemyBodyAnim(robot.type, robotMoving, shootPhase, drawTime, robot.shoot?.animStart);
         this.sprites.draw(
           ctx,
-          walkSheet,
+          bodySheet,
           drawX,
           drawY,
           scale,
           0,
-          robotFlip,
+          getFlipXFromAngle(robot.angle),
           'center',
           0,
-          walkAnim,
+          bodyAnim,
         );
         ctx.globalAlpha = 1;
       }});
@@ -1102,7 +1220,8 @@ class Game {
     const playerBounce = getPlayerBounceY(this.player, drawTime);
     const idleBreath = this._weaponBreathY ?? 0;
     const playerAnim = getPlayerAnim(this.player, drawTime);
-    drawList.push({ z: this.player.z - 0.01, draw: () => {
+    const playerSortZ = this._playerSortZ();
+    drawList.push({ z: playerSortZ, sortBias: 1, draw: () => {
       const s = this._worldToScreen(this.player.x, this.player.z);
       const feetY = Math.round(s.y + playerBounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -1111,7 +1230,7 @@ class Game {
       ctx.fill();
       this.sprites.draw(ctx, playerSheet, s.x, Math.round(s.y + playerBounce), SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim);
     }});
-    drawList.push({ z: this.player.z + 0.01, draw: () => {
+    drawList.push({ z: playerSortZ + 0.02, sortBias: 1, draw: () => {
       const lunge = this.player.getMeleeSwingLunge(drawTime);
       const playerGs = this._worldToScreen(this.player.x, this.player.z);
       const weaponDraw = this.player.getWeaponDraw(drawTime);
@@ -1180,9 +1299,9 @@ class Game {
     }});
     for (const p of this.particles) {
       const zBias = (p.kind === 'blood' || p.kind === 'spark' || p.kind === 'scrape') ? 0.2 : 0.05;
-      drawList.push({ z: p.z - zBias, draw: () => this._drawParticle(ctx, p) });
+      drawList.push({ z: p.z - zBias, sortBias: 1, draw: () => this._drawParticle(ctx, p) });
     }
-    drawList.sort((a, b) => a.z - b.z);
+    drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();
 
     for (const b of this.bullets.bullets) {
@@ -1267,18 +1386,32 @@ class Game {
     this.el.powerupStatus.classList.toggle('active', !!power);
 
     const hoveredChest = this._getHoveredChest();
-    const canOpenChest = !this.inventoryUI.open
+    const nearbyChest = this._getNearbyChest();
+    const canOpenChestDesktop = !this.inventoryUI.open
+      && !this.mobile
       && hoveredChest
       && this.chests.isInInteractRange(this.player, hoveredChest);
+    const canOpenChestMobile = !this.inventoryUI.open && this.mobile && nearbyChest;
+    const canOpenChest = canOpenChestDesktop || canOpenChestMobile;
+    const mbInteract = document.getElementById('mb-interact');
+    mbInteract?.classList.toggle('mb-nearby', canOpenChestMobile);
     this.el.interactPrompt.classList.toggle('hidden', !canOpenChest);
     if (canOpenChest) {
-      const mx = this.mouse.clientX;
-      const my = this.mouse.clientY;
-      this.el.interactPrompt.textContent = 'RMB to open';
-      this.el.interactPrompt.style.left = `${mx}px`;
-      this.el.interactPrompt.style.top = `${my - 28}px`;
-      this.el.interactPrompt.style.bottom = 'auto';
-      this.el.interactPrompt.style.transform = 'translate(-50%, -100%)';
+      if (this.mobile) {
+        this.el.interactPrompt.textContent = 'E to open';
+        this.el.interactPrompt.style.left = '';
+        this.el.interactPrompt.style.top = '';
+        this.el.interactPrompt.style.bottom = '';
+        this.el.interactPrompt.style.transform = '';
+      } else {
+        const mx = this.mouse.clientX;
+        const my = this.mouse.clientY;
+        this.el.interactPrompt.textContent = 'RMB to open';
+        this.el.interactPrompt.style.left = `${mx}px`;
+        this.el.interactPrompt.style.top = `${my - 28}px`;
+        this.el.interactPrompt.style.bottom = 'auto';
+        this.el.interactPrompt.style.transform = 'translate(-50%, -100%)';
+      }
     } else {
       this.el.interactPrompt.style.left = '';
       this.el.interactPrompt.style.top = '';

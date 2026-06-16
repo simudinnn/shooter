@@ -36,6 +36,7 @@ export class InventoryUI {
     this._hoverTooltipText = null;
     this._onDragMove = (e) => this._handleDragMove(e);
     this._onDragEnd = (e) => this._handleDragEnd(e);
+    this._dragListenerOpts = { capture: true };
     this._onInvPointerMove = (e) => this._moveInvCursor(e);
     this.root = document.getElementById('inventory');
     this.panel = document.getElementById('inventory-panel');
@@ -75,6 +76,7 @@ export class InventoryUI {
   _onDocumentPointerDown(e) {
     if (!this._contextMenuEl || this._contextMenuEl.classList.contains('hidden')) return;
     if (e.target.closest('.inv-context-menu')) return;
+    if (e.target.closest('.inv-context-btn')) return;
     if (e.target.closest('.inv-item-slot, .inv-chest-slot') === this._contextAnchorEl) return;
     this._hideContextMenu();
   }
@@ -357,6 +359,7 @@ export class InventoryUI {
   }
 
   _onContextMenuPointerLeave(e) {
+    if (this.game.mobile) return;
     if (!this._contextSlot || this._contextMenuEl?.classList.contains('hidden')) return;
     const next = e.relatedTarget;
     if (next && (next === this._contextAnchorEl || this._contextAnchorEl?.contains(next))) return;
@@ -364,10 +367,20 @@ export class InventoryUI {
   }
 
   _onContextSlotPointerLeave(e) {
+    if (this.game.mobile) return;
     if (!this._contextSlot || this._contextAnchorEl !== e.currentTarget) return;
     const next = e.relatedTarget;
     if (next?.closest?.('.inv-context-menu')) return;
     this._hideContextMenu();
+  }
+
+  _bindContextAction(btn, handler) {
+    const run = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      handler();
+    };
+    btn.addEventListener('pointerup', run);
   }
 
   _hideContextMenu() {
@@ -427,8 +440,7 @@ export class InventoryUI {
         equipBtn.type = 'button';
         equipBtn.className = 'inv-context-btn';
         equipBtn.textContent = 'Equip';
-        equipBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
+        this._bindContextAction(equipBtn, () => {
           this._contextEquipWeapon(index, container);
         });
         actions.appendChild(equipBtn);
@@ -440,8 +452,7 @@ export class InventoryUI {
         ammoBtn.type = 'button';
         ammoBtn.className = 'inv-context-btn';
         ammoBtn.textContent = 'Take ammo';
-        ammoBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
+        this._bindContextAction(ammoBtn, () => {
           this._contextTakeAmmo(index, container);
         });
         actions.appendChild(ammoBtn);
@@ -452,8 +463,7 @@ export class InventoryUI {
         btn.type = 'button';
         btn.className = 'inv-context-btn';
         btn.textContent = 'Equip';
-        btn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
+        this._bindContextAction(btn, () => {
           this._contextEquipMelee(index, container);
         });
         actions.appendChild(btn);
@@ -463,8 +473,7 @@ export class InventoryUI {
       btn.type = 'button';
       btn.className = 'inv-context-btn';
       btn.textContent = 'Use';
-      btn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
+      this._bindContextAction(btn, () => {
         if (container === 'item') this._useConsumable(this.game.player, index);
         this._hideContextMenu();
         this.render();
@@ -539,27 +548,15 @@ export class InventoryUI {
     });
     slot.addEventListener('pointerleave', (e) => this._onContextSlotPointerLeave(e));
     if (this.game.mobile) {
-      let pressTimer = null;
-      let pressStart = null;
-      slot.addEventListener('pointerdown', (e) => {
-        if (slot.disabled || this.drag) return;
-        pressStart = { x: e.clientX, y: e.clientY };
-        pressTimer = setTimeout(() => {
-          pressTimer = null;
-          this._showContextMenu(e, container, index, slot);
-        }, 450);
-      });
-      const cancelPress = () => {
-        if (pressTimer != null) {
-          clearTimeout(pressTimer);
-          pressTimer = null;
-        }
-      };
-      slot.addEventListener('pointerup', cancelPress);
-      slot.addEventListener('pointercancel', cancelPress);
-      slot.addEventListener('pointermove', (e) => {
-        if (!pressTimer || !pressStart) return;
-        if (Math.hypot(e.clientX - pressStart.x, e.clientY - pressStart.y) > 8) cancelPress();
+      slot.addEventListener('click', (e) => {
+        if (slot.disabled || this._skipClick || this.drag) return;
+        const item = container === 'chest'
+          ? this.chest?.slots[index]
+          : this.game.player?.itemSlots[index];
+        if (!item) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this._showContextMenu(e, container, index, slot);
       });
     }
   }
@@ -654,8 +651,8 @@ export class InventoryUI {
       this.drag.stashedItem = item;
       player.itemSlots[fromIndex] = null;
     }
+    this.drag?.sourceEl?.classList.add('inv-drag-source');
     this.game.audio?.inventoryMove();
-    this.render();
   }
 
   _restoreDragItem() {
@@ -677,7 +674,7 @@ export class InventoryUI {
       if (!this._slotItemAt(container, index, player)) return;
       e.preventDefault();
       slot.setPointerCapture?.(e.pointerId);
-      this._beginDrag(e, container, index, player);
+      this._beginDrag(e, container, index, player, slot);
     });
   }
 
@@ -686,7 +683,7 @@ export class InventoryUI {
     return player?.itemSlots[index] ?? null;
   }
 
-  _beginDrag(e, fromType, index, player) {
+  _beginDrag(e, fromType, index, player, sourceEl) {
     this._cancelDrag();
     this._hoverTooltipText = null;
     this._hideTooltip();
@@ -694,6 +691,8 @@ export class InventoryUI {
       fromType,
       fromIndex: index,
       player,
+      sourceEl,
+      pointerId: e.pointerId,
       stashedItem: null,
       startX: e.clientX,
       startY: e.clientY,
@@ -701,9 +700,9 @@ export class InventoryUI {
       ghost: null,
       dropTarget: null,
     };
-    document.addEventListener('pointermove', this._onDragMove);
-    document.addEventListener('pointerup', this._onDragEnd);
-    document.addEventListener('pointercancel', this._onDragEnd);
+    document.addEventListener('pointermove', this._onDragMove, this._dragListenerOpts);
+    document.addEventListener('pointerup', this._onDragEnd, this._dragListenerOpts);
+    document.addEventListener('pointercancel', this._onDragEnd, this._dragListenerOpts);
   }
 
   _handleDragMove(e) {
@@ -746,18 +745,27 @@ export class InventoryUI {
     this.drag.ghost = ghost;
   }
 
-  _updateDropTarget(e) {
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    let next = null;
-    const main = el?.closest('.inv-weapon-slot.inv-primary[data-drop-zone="main"]');
-    const melee = el?.closest('.inv-weapon-slot.inv-secondary[data-drop-zone="melee"]');
-    const item = el?.closest('.inv-item-slot[data-slot-index]:not(.inv-locked)');
-    const chest = el?.closest('.inv-chest-slot[data-slot-index]');
+  _dropTargetFromElement(el) {
+    if (!el?.closest) return null;
+    const main = el.closest('.inv-weapon-slot.inv-primary[data-drop-zone="main"]');
+    if (main && this._canDropOnMain()) return main;
+    const melee = el.closest('.inv-weapon-slot.inv-secondary[data-drop-zone="melee"]');
+    if (melee && this._canDropOnMelee()) return melee;
+    const item = el.closest('.inv-item-slot[data-slot-index]:not(.inv-locked)');
+    if (item) return item;
+    const chest = el.closest('.inv-chest-slot[data-slot-index]');
+    if (chest) return chest;
+    return null;
+  }
 
-    if (main && this._canDropOnMain()) next = main;
-    else if (melee && this._canDropOnMelee()) next = melee;
-    else if (item) next = item;
-    else if (chest) next = chest;
+  _updateDropTarget(e) {
+    const stack = document.elementsFromPoint(e.clientX, e.clientY);
+    let next = null;
+    for (const el of stack) {
+      if (el.classList?.contains('inv-drag-ghost')) continue;
+      next = this._dropTargetFromElement(el);
+      if (next) break;
+    }
 
     if (this.drag.dropTarget === next) return;
     this.drag.dropTarget?.classList.remove('inv-drop-target');
@@ -934,9 +942,13 @@ export class InventoryUI {
 
   _handleDragEnd() {
     if (!this.drag) return;
-    document.removeEventListener('pointermove', this._onDragMove);
-    document.removeEventListener('pointerup', this._onDragEnd);
-    document.removeEventListener('pointercancel', this._onDragEnd);
+    document.removeEventListener('pointermove', this._onDragMove, this._dragListenerOpts);
+    document.removeEventListener('pointerup', this._onDragEnd, this._dragListenerOpts);
+    document.removeEventListener('pointercancel', this._onDragEnd, this._dragListenerOpts);
+    const { pointerId, sourceEl } = this.drag;
+    if (sourceEl?.hasPointerCapture?.(pointerId)) {
+      sourceEl.releasePointerCapture(pointerId);
+    }
 
     const { fromType, fromIndex, player, moved, dropTarget, stashedItem } = this.drag;
     this._clearDragVisuals();
@@ -1016,6 +1028,7 @@ export class InventoryUI {
 
   _clearDragVisuals() {
     this.drag?.ghost?.remove();
+    this.drag?.sourceEl?.classList.remove('inv-drag-source');
     this.root?.querySelectorAll('.inv-drop-target').forEach((el) => {
       el.classList.remove('inv-drop-target');
     });
@@ -1023,9 +1036,13 @@ export class InventoryUI {
 
   _cancelDrag() {
     if (!this.drag) return;
-    document.removeEventListener('pointermove', this._onDragMove);
-    document.removeEventListener('pointerup', this._onDragEnd);
-    document.removeEventListener('pointercancel', this._onDragEnd);
+    document.removeEventListener('pointermove', this._onDragMove, this._dragListenerOpts);
+    document.removeEventListener('pointerup', this._onDragEnd, this._dragListenerOpts);
+    document.removeEventListener('pointercancel', this._onDragEnd, this._dragListenerOpts);
+    const { pointerId, sourceEl } = this.drag;
+    if (sourceEl?.hasPointerCapture?.(pointerId)) {
+      sourceEl.releasePointerCapture(pointerId);
+    }
     const moved = this.drag.moved;
     this._restoreDragItem();
     this._clearDragVisuals();
@@ -1081,6 +1098,8 @@ export class InventoryUI {
     this.chestEl.innerHTML = '';
     for (let i = 0; i < CHEST_SLOT_COUNT; i++) {
       const slot = this._makeSlot('inv-chest-slot');
+      slot.dataset.slotIndex = String(i);
+      slot.dataset.slotContainer = 'chest';
       const data = this.chest.slots[i];
       if (this.selectedChestSlot === i) slot.classList.add('inv-selected');
       if (data) {
@@ -1112,6 +1131,7 @@ export class InventoryUI {
   render() {
     const player = this.game.player;
     if (!player || !this.weaponsEl || !this.equipmentEl || !this.itemsEl) return;
+    if (this.drag?.moved) return;
 
     this._hideContextMenu();
     this._hoverTooltipText = null;
@@ -1165,6 +1185,11 @@ export class InventoryUI {
       const unlocked = player.isItemSlotUnlocked(i);
       const slot = this._makeSlot('inv-item-slot', unlocked ? '' : 'inv-locked');
       const data = player.itemSlots[i];
+
+      if (unlocked) {
+        slot.dataset.slotIndex = String(i);
+        slot.dataset.slotContainer = 'item';
+      }
 
       if (this.selectedSlot === i) slot.classList.add('inv-selected');
 

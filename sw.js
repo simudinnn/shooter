@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v95';
+const CACHE = 'robot-ruins-v111';
 
 function playerSprites() {
   // Only precache sprites that exist in assets/player/.
@@ -27,7 +27,11 @@ const WEAPON_SPRITES = weaponSprites();
 
 function worldSprites() {
   const floors = ['floor_grass', 'floor_dirt', 'floor_rock'];
-  const foliage = ['foliage_grass', 'foliage_grass_tall', 'foliage_rock', 'foliage_tree', 'foliage_stump'];
+  const foliage = [
+    'foliage_grass', 'foliage_grass2', 'foliage_grass3', 'foliage_grass4',
+    'foliage_grass_tall', 'foliage_pebble', 'foliage_rock',
+    'foliage_bush', 'foliage_tree', 'foliage_tree2', 'foliage_tree3', 'foliage_stump',
+  ];
   return [
     './assets/world/wall.png',
     ...floors.map((n) => `./assets/world/${n}.png`),
@@ -80,6 +84,9 @@ const ASSETS = [
   ...WORLD_SPRITES,
   './assets/enemies/spider.png',
   './assets/enemies/spider_walk.png',
+  './assets/enemies/scout.png',
+  './assets/enemies/scout_walk.png',
+  './assets/enemies/charge.png',
   './assets/items/ammo.png',
   './assets/items/pistol_ammo.png',
   './assets/items/rifle_ammo.png',

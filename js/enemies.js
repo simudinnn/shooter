@@ -1,6 +1,8 @@
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
 
 /** Base robot enemy — `type` selects sprite sheet (spider, walker, scout, …). */
+export const SCOUT_SPAWN_SHARE = 1 / 3;
+
 export class Robot {
   constructor(x, z, wave = 1, type = 'spider') {
     this.type = type;
@@ -9,7 +11,7 @@ export class Robot {
     this.spawnWave = wave;
     this.angle = Math.random() * Math.PI * 2;
     const waveScale = 1 + (wave - 1) * 0.1;
-    this.health = Math.floor(45 * waveScale);
+    this.health = Math.floor(65 * waveScale);
     this.maxHealth = this.health;
     this.alive = true;
     this.baseSpeed = (10 + Math.random() * 2.2) * (1 + (wave - 1) * 0.05);
@@ -91,7 +93,7 @@ export class Robot {
     const len = Math.hypot(dx, dz) || 1;
     const nx = dx / len;
     const nz = dz / len;
-    const knockMult = opts.fromBullet ? 1.1 : 1;
+    const knockMult = (opts.knockMult ?? 1) * (opts.fromBullet ? 1.1 : 1);
 
     const mr = this.moveRadius;
     const instantPush = damage * 0.035 * knockMult;
@@ -111,7 +113,7 @@ export class Robot {
       this.alive = false;
       this.jump.active = false;
       this.jump.charging = false;
-    } else if (this.type === 'spider') {
+    } else {
       this.chasing = true;
       this.aggroByHit = true;
     }
@@ -125,14 +127,16 @@ export class Robot {
       return false;
     }
     const targets = collectCollisionTargets({ player, robots, exclude: this });
+    const body = { kind: 'circle', radius: this.radius };
+    const feet = { kind: 'circle', radius: this.moveRadius };
     const r = moveWithEntityCollision(
       world,
       this.x,
       this.z,
       this.knockVX * dt,
       this.knockVZ * dt,
-      this.radius,
-      this.moveRadius,
+      body,
+      feet,
       targets,
       this,
     );
@@ -156,14 +160,16 @@ export class Robot {
     const stepX = (vx / len) * this.speed * speedMult * dt;
     const stepZ = (vz / len) * this.speed * speedMult * dt;
     const targets = collectCollisionTargets({ player, robots, exclude: this });
+    const body = { kind: 'circle', radius: this.radius };
+    const feet = { kind: 'circle', radius: this.moveRadius };
     const r = moveWithEntityCollision(
       world,
       this.x,
       this.z,
       stepX,
       stepZ,
-      this.radius,
-      this.moveRadius,
+      body,
+      feet,
       targets,
       this,
     );
@@ -228,14 +234,16 @@ export class Robot {
     }
 
     const targets = collectCollisionTargets({ player, robots, exclude: this });
+    const body = { kind: 'circle', radius: this.radius };
+    const feet = { kind: 'circle', radius: this.moveRadius };
     const r = moveWithEntityCollision(
       world,
       prevX,
       prevZ,
       stepX,
       stepZ,
-      this.radius,
-      this.moveRadius,
+      body,
+      feet,
       targets,
       this,
     );
@@ -261,7 +269,7 @@ export class Robot {
     this.walkPhase += dt * 14;
   }
 
-  update(dt, player, world, robots, onMeleeHit) {
+  update(dt, player, world, robots, onMeleeHit, onShoot = null) {
     if (!this.alive) return;
     this.meleeCooldown -= dt;
     this.jumpCooldown -= dt;
@@ -308,7 +316,7 @@ export class Robot {
     const dz = player.z - this.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     const stealth = player.getStealthMult?.() ?? 1;
-    const detectRange = (this.type === 'spider' ? 26 : 48) * stealth;
+    const detectRange = (this.type === 'spider' ? 20 : 48) * stealth;
     const chaseRange = (this.type === 'spider' ? 36 : 58) * stealth;
     const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
 
@@ -399,6 +407,185 @@ export class Robot {
       const dz = z - other.z;
       return dx * dx + dz * dz >= minSep;
     });
+  }
+}
+
+/** Larger ranged robot — charges, fires a burst, then reloads while walking. */
+export class Scout extends Robot {
+  constructor(x, z, wave = 1) {
+    super(x, z, wave, 'scout');
+    const waveScale = 1 + (wave - 1) * 0.1;
+    this.health = Math.floor(280 * waveScale);
+    this.maxHealth = this.health;
+    this.baseSpeed = (4 + Math.random() * 1.0) * (1 + (wave - 1) * 0.04);
+    this.speed = this.baseSpeed;
+    this.radius = 1.6;
+    this.moveRadius = 0.78;
+    this.meleeDamage = Math.floor((18 + Math.random() * 14) * (1 + (wave - 1) * 0.07));
+    this.meleeRange = 3;
+    this.attackRate = Math.max(0.5, 0.8 + Math.random() * 0.35 - (wave - 1) * 0.02);
+    this.shoot = {
+      phase: 'ready',
+      chargeLeft: 0,
+      reloadLeft: 0,
+      burstLeft: 0,
+      burstTimer: 0,
+      animStart: null,
+      chargeDuration: 2,
+      reloadDuration: 4,
+      burstCount: 10,
+      burstInterval: 0.10,
+      bulletDamage: 8,
+      /** Radians — random ±spread/2 per shot in the burst (shotgun-style cone). */
+      bulletSpread: 0.32,
+    };
+  }
+
+  static createEmerging(x, z, wave, world) {
+    const scout = new Scout(x, z, wave);
+    scout.emerging = true;
+    scout.emergeTime = 0;
+    scout.emergeDuration = 0.9 + Math.random() * 0.28;
+    scout.groundSpewAcc = 0;
+    scout.alive = true;
+    return scout;
+  }
+
+  applyHit(damage, fromX, fromZ, world, opts = {}) {
+    return super.applyHit(damage, fromX, fromZ, world, { ...opts, knockMult: 0.28 });
+  }
+
+  _abortShoot(force = false) {
+    if (!force && (this.shoot.phase === 'charging' || this.shoot.phase === 'firing')) return;
+    this.shoot.phase = 'ready';
+    this.shoot.chargeLeft = 0;
+    this.shoot.burstLeft = 0;
+    this.shoot.burstTimer = 0;
+    this.shoot.animStart = null;
+    this.bob = 0;
+  }
+
+  _beginBurst(onShoot) {
+    this.shoot.phase = 'firing';
+    this.shoot.burstLeft = this.shoot.burstCount;
+    this.shoot.burstTimer = 0;
+    this._fireBurstShot(onShoot);
+  }
+
+  _fireBurstShot(onShoot) {
+    if (this.shoot.burstLeft <= 0 || !onShoot) return;
+    onShoot(this, this.angle, this.shoot.bulletDamage);
+    this.shoot.burstLeft -= 1;
+    this.shoot.burstTimer = this.shoot.burstInterval;
+  }
+
+  update(dt, player, world, robots, onMeleeHit, onShoot = null) {
+    if (!this.alive) return;
+    this.meleeCooldown -= dt;
+
+    if (this.emerging) {
+      this.emergeTime += dt;
+      if (this.emergeTime >= this.emergeDuration) this.emerging = false;
+      this.moving = false;
+      const shakeAmt = (1 - this.getEmergeT()) * 0.22;
+      this.bob = Math.sin(this.emergeTime * 18) * shakeAmt;
+      return;
+    }
+
+    if (this.stagger > 0) {
+      this.stagger -= dt;
+      this._applyKnockback(dt, world, player, robots);
+      this.moving = false;
+      this.bob = 0;
+      return;
+    }
+
+    let moving = false;
+
+    if (!player.alive) {
+      this.chasing = false;
+      this.aggroByHit = false;
+      this._abortShoot(true);
+      this.bob = 0;
+      this.moving = false;
+      return;
+    }
+
+    const dx = player.x - this.x;
+    const dz = player.z - this.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const stealth = player.getStealthMult?.() ?? 1;
+    const detectRange = 20 * stealth;
+    const chaseRange = 36 * stealth;
+    const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
+    const meleeDist = this.meleeRange + player.radius;
+    const inAttack = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';
+
+    if (hasLOS || (this.chasing && dist < chaseRange) || this.aggroByHit || inAttack) {
+      this.chasing = true;
+      this.angle = Math.atan2(dx, dz);
+
+      if (inAttack) {
+        if (this.shoot.phase === 'charging') {
+          this.shoot.chargeLeft -= dt;
+          this.bob = 0;
+          if (this.shoot.chargeLeft <= 0) this._beginBurst(onShoot);
+        } else {
+          this.shoot.burstTimer -= dt;
+          while (this.shoot.burstTimer <= 0 && this.shoot.burstLeft > 0) {
+            this._fireBurstShot(onShoot);
+          }
+          if (this.shoot.burstLeft <= 0) {
+            this.shoot.phase = 'ready';
+            this.shoot.reloadLeft = this.shoot.reloadDuration;
+            this.shoot.animStart = null;
+            this.bob = 0;
+          }
+        }
+      } else if (dist < meleeDist) {
+        this._abortShoot();
+        const steer = this.angle + (Math.random() - 0.5) * 0.08;
+        this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+        moving = true;
+        if (this.meleeCooldown <= 0) {
+          onMeleeHit(this);
+          this.meleeCooldown = this.attackRate;
+        }
+      } else if (hasLOS && dist < detectRange && onShoot) {
+        if (this.shoot.reloadLeft > 0) {
+          this.shoot.reloadLeft -= dt;
+          this._abortShoot();
+          const steer = this.angle + (Math.random() - 0.5) * 0.08;
+          this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+          moving = true;
+        } else if (this.shoot.phase === 'ready') {
+          this.shoot.phase = 'charging';
+          this.shoot.chargeLeft = this.shoot.chargeDuration;
+          this.shoot.animStart = performance.now() / 1000;
+        }
+      } else {
+        this._abortShoot();
+        const steer = this.angle + (Math.random() - 0.5) * 0.08;
+        this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+        moving = true;
+      }
+    } else if (!this.chasing) {
+      this._abortShoot();
+      this.wanderTimer -= dt;
+      if (this.wanderTimer <= 0) {
+        this.wanderAngle += (Math.random() - 0.5) * 2.2;
+        this.wanderTimer = 2 + Math.random() * 3;
+      }
+      this._move(dt, world, player, robots, Math.sin(this.wanderAngle), Math.cos(this.wanderAngle), 0.45);
+      this.angle = this.wanderAngle;
+      moving = true;
+    } else if (dist > chaseRange + 4 && !this.aggroByHit && !inAttack) {
+      this.chasing = false;
+      this._abortShoot();
+    }
+
+    this.walkPhase += dt * (moving ? 6 : 0);
+    this.moving = moving;
   }
 }
 

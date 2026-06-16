@@ -1,4 +1,4 @@
-import { Robot, createGroundErupt } from './enemies.js';
+import { Robot, Scout, createGroundErupt, SCOUT_SPAWN_SHARE } from './enemies.js';
 
 export class WaveManager {
   constructor(world, game) {
@@ -29,7 +29,10 @@ export class WaveManager {
       if (this.queue[i].timer <= 0) {
         const { x, z } = this.queue[i];
         this.queue.splice(i, 1);
-        const robot = Robot.createEmerging(x, z, this.wave, this.world, 'spider');
+        const useScout = Math.random() < SCOUT_SPAWN_SHARE;
+        const robot = useScout
+          ? Scout.createEmerging(x, z, this.wave, this.world)
+          : Robot.createEmerging(x, z, this.wave, this.world, 'spider');
         this.game.robots.push(robot);
         this.game.particles.push(...createGroundErupt(x, z));
       }
