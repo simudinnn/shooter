@@ -34,6 +34,8 @@ export class InventoryUI {
     this._contextAnchorEl = null;
     this._cursorEl = null;
     this._hoverTooltipText = null;
+    this._stackTapKey = null;
+    this._stackTapAt = 0;
     this._onDragMove = (e) => this._handleDragMove(e);
     this._onDragEnd = (e) => this._handleDragEnd(e);
     this._dragListenerOpts = { capture: true };
@@ -160,6 +162,9 @@ export class InventoryUI {
     this.root?.classList.remove('hidden');
     this._enableInvCursor();
     this.render();
+    this._prewarmInventoryIcons().then(() => {
+      if (this.open && !this.drag?.moved) this.render();
+    });
     requestAnimationFrame(() => {
       this.root?.classList.add('open');
       setTimeout(() => { this.animating = false; }, ANIM_MS);
@@ -224,15 +229,50 @@ export class InventoryUI {
   _slotIcon(src) {
     const bank = this.game.sprites;
     const cached = bank?.getImageByPath?.(src);
-    const img = (cached?.complete && cached.naturalWidth > 0)
-      ? cached.cloneNode(false)
-      : document.createElement('img');
+    const img = document.createElement('img');
     img.className = 'inv-slot-icon';
-    if (!img.src) img.src = src;
     img.alt = '';
     img.draggable = false;
+    img.loading = 'eager';
+    img.decoding = 'async';
+    const ready = cached?.complete && cached.naturalWidth > 0;
+    img.src = ready ? (cached.currentSrc || src) : src;
+    if (ready && img.decode) img.decode().catch(() => {});
     img.onerror = () => { img.style.visibility = 'hidden'; };
     return img;
+  }
+
+  _collectInventoryIconPaths() {
+    const paths = new Set([INV_LOCK_SRC]);
+    const player = this.game.player;
+    if (!player) return paths;
+    if (player.weaponKey) {
+      paths.add(weaponItemSpritePath(WEAPONS[player.weaponKey]?.sprite ?? player.weaponKey));
+    }
+    if (player.meleeKey) {
+      paths.add(weaponItemSpritePath(MELEE_WEAPONS[player.meleeKey]?.sprite ?? player.meleeKey));
+    }
+    for (const item of player.itemSlots) {
+      if (item) {
+        const src = getItemIconSrc(item);
+        if (src) paths.add(src);
+      }
+    }
+    if (this.chest?.slots) {
+      for (const item of this.chest.slots) {
+        if (item) {
+          const src = getItemIconSrc(item);
+          if (src) paths.add(src);
+        }
+      }
+    }
+    return paths;
+  }
+
+  async _prewarmInventoryIcons() {
+    const bank = this.game.sprites;
+    if (!bank?.ready) return;
+    await bank.decodePaths(this._collectInventoryIconPaths());
   }
 
   _appendStackCount(slot, amount) {
@@ -626,12 +666,34 @@ export class InventoryUI {
 
   _bindStackDoubleClick(slot, container, index, item) {
     if (!this._isStackableItem(item)) return;
-    slot.addEventListener('dblclick', (e) => {
+
+    const group = (e) => {
       e.preventDefault();
       e.stopPropagation();
+      this._stackTapKey = null;
+      this._hideContextMenu();
       this._groupStacksInContainer(container, index);
       this.render();
+    };
+
+    slot.addEventListener('dblclick', (e) => {
+      if (this.game.mobile) return;
+      group(e);
     });
+
+    if (this.game.mobile) {
+      const tapKey = `${container}:${index}`;
+      slot.addEventListener('click', (e) => {
+        if (slot.disabled || this._skipClick || this.drag) return;
+        const now = performance.now();
+        if (this._stackTapKey === tapKey && now - this._stackTapAt < 400) {
+          group(e);
+          return;
+        }
+        this._stackTapKey = tapKey;
+        this._stackTapAt = now;
+      }, true);
+    }
   }
 
   _contextEquipWeapon(index, container) {
@@ -1361,7 +1423,6 @@ export class InventoryUI {
       slot.dataset.slotIndex = String(i);
       slot.dataset.slotContainer = 'chest';
       const data = this.chest.slots[i];
-      if (this.selectedChestSlot === i) slot.classList.add('inv-selected');
       if (data) {
         slot.appendChild(this._itemIcon(data));
         this._appendStackCount(slot, this._stackAmount(data));
@@ -1406,7 +1467,6 @@ export class InventoryUI {
     primary.classList.add('inv-primary');
     primary.dataset.dropZone = 'main';
     if (player.weaponKey) {
-      if (!player.isMeleeActive()) primary.classList.add('inv-active');
       const weaponItem = { kind: 'weapon', key: player.weaponKey, ammo: player.weapon?.ammo };
       const cfg = WEAPONS[player.weaponKey];
       primary.appendChild(this._weaponIcon(cfg.sprite));
@@ -1432,7 +1492,6 @@ export class InventoryUI {
     const secondary = this._makeSlot('inv-weapon-slot');
     secondary.classList.add('inv-secondary');
     secondary.dataset.dropZone = 'melee';
-    if (player.isMeleeActive()) secondary.classList.add('inv-active');
     if (player.meleeKey) {
       const meleeItem = { kind: 'melee', key: player.meleeKey };
       const meleeCfg = MELEE_WEAPONS[player.meleeKey];
@@ -1472,8 +1531,6 @@ export class InventoryUI {
         slot.dataset.slotIndex = String(i);
         slot.dataset.slotContainer = 'item';
       }
-
-      if (this.selectedSlot === i) slot.classList.add('inv-selected');
 
       if (!unlocked) {
         slot.disabled = true;

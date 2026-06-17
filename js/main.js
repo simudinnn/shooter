@@ -14,6 +14,7 @@ import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHit
 import { VirtualJoystick } from './joystick.js';
 import { InventoryUI } from './inventory.js';
 import { getWeaponAmmoType, AMMO_TYPES } from './ammo.js';
+import { DayNightCycle, applyNightOverlay } from './dayNight.js';
 import { snapCamLean, worldToScreen, camPixelsFromPlayer, leanPixelsFromOffset, drawPixelEllipseShadow, PPU, INTERNAL_W, INTERNAL_H, RENDER_SCALE } from './renderConfig.js';
 
 const SPRITE_PLAYER = 1.50;
@@ -106,6 +107,7 @@ class Game {
       ammoIcon: document.getElementById('ammo-icon'),
       reloadIndicator: document.getElementById('reload-indicator'),
       zoneLabel: document.getElementById('zone-label'),
+      gameClock: document.getElementById('game-clock'),
       damageFlash: document.getElementById('damage-flash'),
       startBtn: document.getElementById('start-btn'),
       restartBtn: document.getElementById('restart-btn'),
@@ -586,6 +588,7 @@ class Game {
     this.audio.resume();
 
     await this.sprites.loadAll();
+    await this.sprites.decodeItemIcons();
 
     rollWorldSeed();
     this.world = new World();
@@ -602,6 +605,7 @@ class Game {
     this.items = new ItemManager(this.world);
     this.chests = new ChestManager(this.world);
     this.particles = [];
+    this.dayNight = new DayNightCycle();
     this._weaponBreathY = 0;
     this.camOffset = { x: 0, z: 0 };
     this._camPxX = 0;
@@ -629,6 +633,7 @@ class Game {
 
   _update(dt, time) {
     const inventoryOpen = this.inventoryUI?.isOpen();
+    this.dayNight?.update(dt);
 
     if (!inventoryOpen) {
       this.player.updateMobility(time);
@@ -1123,6 +1128,100 @@ class Game {
     ctx.restore();
   }
 
+  _isShotFlashFrame(drawTime, weaponDraw) {
+    if (this.player.isMeleeActive() || drawTime >= this.player.shotFlashUntil) return false;
+    const cfg = WEAPONS[this.player.weaponKey];
+    return !!(cfg?.shotSprite && weaponDraw.sheet === cfg.shotSprite);
+  }
+
+  _getGunScreenPose(drawTime) {
+    const playerGs = this._worldToScreen(this.player.x, this.player.z);
+    const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
+    const idleBreath = Math.round(this._weaponBreathY ?? 0);
+    const lunge = this.player.getMeleeSwingLunge(drawTime);
+    const weaponDraw = this.player.getWeaponDraw(drawTime);
+    const weaponAnim = weaponDraw.frame != null
+      ? { frame: weaponDraw.frame }
+      : weaponDraw.elapsed != null
+        ? { elapsed: weaponDraw.elapsed }
+        : null;
+    const reloadPose = getReloadPoseBlend(this.player, drawTime);
+
+    if (this.player.isMeleeActive()) {
+      const drop = this.player.getMeleeSwingDrop(drawTime);
+      const bladeTilt = this.player.getMeleeBladeTilt(drawTime);
+      const meleePose = getMeleeHoldPose(this.player, lunge);
+      const meleeOffX = Math.round((meleePose.worldX - this.player.x) * PPU);
+      const meleeOffY = Math.round((meleePose.worldZ - this.player.z) * PPU);
+      return {
+        isMelee: true,
+        isShotFlash: false,
+        sx: playerGs.x + meleeOffX,
+        sy: playerGs.y + meleeOffY + drop + playerBounce + idleBreath,
+        aimAngle: meleePose.angle,
+        aimFlip: meleePose.flipX,
+        pivot: 'shoulder',
+        tilt: bladeTilt,
+        weaponDraw,
+        weaponAnim,
+      };
+    }
+
+    const gunAim = gunAimTransform(this.player.angle);
+    const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
+    const holdOffX = Math.round(Math.sin(this.player.angle) * holdDist * PPU);
+    const holdOffY = Math.round(Math.cos(this.player.angle) * holdDist * PPU);
+    const normalSx = playerGs.x + holdOffX;
+    const normalSy = playerGs.y + holdOffY;
+    let sx;
+    let sy;
+    let aimAngle;
+    let aimFlip;
+    if (reloadPose) {
+      const b = reloadPose.blend;
+      const normalY = normalSy + playerBounce + idleBreath;
+      const centerY = playerGs.y + playerBounce + idleBreath;
+      const holdX = getReloadHoldScreenX(playerGs.x, reloadPose.flipX);
+      sx = normalSx + Math.round((holdX - normalSx) * b);
+      sy = normalY + Math.round((centerY - normalY) * b);
+      aimAngle = reloadPose.angle;
+      aimFlip = reloadPose.flipX;
+    } else {
+      sx = normalSx;
+      sy = normalSy + playerBounce + idleBreath;
+      aimAngle = gunAim.angle - this.player.gunKick;
+      aimFlip = gunAim.flipX;
+    }
+
+    return {
+      isMelee: false,
+      isShotFlash: this._isShotFlashFrame(drawTime, weaponDraw),
+      sx,
+      sy,
+      aimAngle,
+      aimFlip,
+      pivot: 'shoulder',
+      tilt: 0,
+      weaponDraw,
+      weaponAnim,
+    };
+  }
+
+  _drawWeaponSprite(ctx, pose) {
+    this.sprites.draw(
+      ctx,
+      pose.weaponDraw.sheet,
+      pose.sx,
+      pose.sy,
+      SPRITE_GUN,
+      pose.aimAngle,
+      pose.aimFlip,
+      pose.pivot,
+      pose.tilt,
+      pose.weaponAnim,
+    );
+  }
+
   _drawParticle(ctx, p) {
     const s = this._worldToScreen(p.x, p.z);
     const groundY = Math.round(p.groundDrop ?? 0);
@@ -1175,6 +1274,7 @@ class Game {
 
   _draw() {
     const ctx = this.ctx;
+    const nightFactor = this.dayNight?.getNightFactor() ?? 0;
     this._syncCamPixels();
     ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
     ctx.imageSmoothingEnabled = false;
@@ -1215,6 +1315,7 @@ class Game {
     }
 
     const drawList = [];
+    const brightParticles = [];
     const ysortFoliage = this.world.collectYsortFoliage(
       cam.x - viewHalfW,
       cam.x + viewHalfW,
@@ -1304,7 +1405,8 @@ class Game {
           ctx.fill();
         }
         ctx.globalAlpha = 0.3 + emerge * 0.7;
-        const shadowLift = isScout ? 4 : 0;
+        const isSpider = robot.type === 'spider';
+        const shadowLift = isScout ? 4 : (isSpider ? 4 : 0);
         const shadowRx = (isScout ? 15 : 10) * emerge;
         const shadowRy = (isScout ? 5.5 : 4) * emerge;
         if (shadowRx >= 2 && shadowRy >= 2) {
@@ -1348,75 +1450,15 @@ class Game {
       this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim);
     }});
     drawList.push({ z: playerSortZ + 0.02, sortBias: 1, draw: () => {
-      const lunge = this.player.getMeleeSwingLunge(drawTime);
-      const playerGs = this._worldToScreen(this.player.x, this.player.z);
-      const weaponDraw = this.player.getWeaponDraw(drawTime);
-      const weaponAnim = weaponDraw.frame != null
-        ? { frame: weaponDraw.frame }
-        : weaponDraw.elapsed != null
-          ? { elapsed: weaponDraw.elapsed }
-          : null;
-      const reloadPose = getReloadPoseBlend(this.player, drawTime);
-
-      if (this.player.isMeleeActive()) {
-        const drop = this.player.getMeleeSwingDrop(drawTime);
-        const bladeTilt = this.player.getMeleeBladeTilt(drawTime);
-        const meleePose = getMeleeHoldPose(this.player, lunge);
-        const meleeOffX = Math.round((meleePose.worldX - this.player.x) * PPU);
-        const meleeOffY = Math.round((meleePose.worldZ - this.player.z) * PPU);
-        this.sprites.draw(
-          ctx,
-          weaponDraw.sheet,
-          playerGs.x + meleeOffX,
-          playerGs.y + meleeOffY + drop + playerBounce + idleBreath,
-          SPRITE_GUN,
-          meleePose.angle,
-          meleePose.flipX,
-          'shoulder',
-          bladeTilt,
-          weaponAnim,
-        );
-      } else {
-        const gunAim = gunAimTransform(this.player.angle);
-        const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
-        const holdOffX = Math.round(Math.sin(this.player.angle) * holdDist * PPU);
-        const holdOffY = Math.round(Math.cos(this.player.angle) * holdDist * PPU);
-        const normalSx = playerGs.x + holdOffX;
-        const normalSy = playerGs.y + holdOffY;
-        let sx;
-        let sy;
-        let aimAngle;
-        let aimFlip;
-        if (reloadPose) {
-          const b = reloadPose.blend;
-          const normalY = normalSy + playerBounce + idleBreath;
-          const centerY = playerGs.y + playerBounce + idleBreath;
-          const holdX = getReloadHoldScreenX(playerGs.x, reloadPose.flipX);
-          sx = normalSx + Math.round((holdX - normalSx) * b);
-          sy = normalY + Math.round((centerY - normalY) * b);
-          aimAngle = reloadPose.angle;
-          aimFlip = reloadPose.flipX;
-        } else {
-          sx = normalSx;
-          sy = normalSy + playerBounce + idleBreath;
-          aimAngle = gunAim.angle - this.player.gunKick;
-          aimFlip = gunAim.flipX;
-        }
-        this.sprites.draw(
-          ctx,
-          weaponDraw.sheet,
-          sx,
-          sy,
-          SPRITE_GUN,
-          aimAngle,
-          aimFlip,
-          'shoulder',
-          0,
-          weaponAnim,
-        );
-      }
+      const pose = this._getGunScreenPose(drawTime);
+      if (pose.isShotFlash) return;
+      this._drawWeaponSprite(ctx, pose);
     }});
     for (const p of this.particles) {
+      if (p.kind === 'fire') {
+        brightParticles.push({ z: p.z - 0.05, p });
+        continue;
+      }
       let sortZ = p.z;
       if (p.kind === 'spark' || p.kind === 'scrape') {
         sortZ = this._inFrontOfEnemySortZ(p.x, p.z);
@@ -1430,19 +1472,32 @@ class Game {
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();
 
+    this._drawPlayerCooldown(ctx, performance.now() / 1000);
+
+    applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);
+
+    const gunPose = this._getGunScreenPose(drawTime);
+    if (gunPose.isShotFlash) {
+      this._drawWeaponSprite(ctx, gunPose);
+    }
+
+    brightParticles.sort((a, b) => a.z - b.z);
+    for (const { p } of brightParticles) {
+      this._drawParticle(ctx, p);
+    }
+
     for (const b of this.bullets.bullets) {
       if (!b.active) continue;
       this._drawBulletTrail(ctx, b);
       const s = this._worldToScreen(b.x, b.z);
       const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
-      this.sprites.draw(ctx, 'bullet', s.x, s.y, bScale, velToSpriteAngle(b.vx, b.vz));
+      const bAngle = velToSpriteAngle(b.vx, b.vz);
+      this.sprites.draw(ctx, 'bullet', s.x, s.y, bScale, bAngle);
     }
 
     if (this.running && !this.inventoryUI?.isOpen()) {
       this.sprites.draw(ctx, this._getCursorSprite(), this.mouse.sx, this.mouse.sy, SPRITE_CURSOR);
     }
-
-    this._drawPlayerCooldown(ctx, performance.now() / 1000);
   }
 
   _drawPlayerCooldown(ctx, time) {
@@ -1539,6 +1594,10 @@ class Game {
     const zoneNames = { base: 'Base', meadow: 'Meadow', forest: 'Forest', scrub: 'Scrub', rock: 'Rock' };
     if (this.el.zoneLabel) {
       this.el.zoneLabel.textContent = zoneNames[biome] || biome;
+    }
+
+    if (this.el.gameClock && this.dayNight) {
+      this.el.gameClock.textContent = this.dayNight.formatClock();
     }
 
     if (this.items.pickupMsg) {

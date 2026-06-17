@@ -1120,6 +1120,21 @@ export class SpriteBank {
     return this._pathImages[path] ?? null;
   }
 
+  async decodePaths(paths) {
+    const list = paths instanceof Set ? [...paths] : paths;
+    await Promise.all(list.map((path) => {
+      const img = this._pathImages[path];
+      if (!img?.decode) return Promise.resolve();
+      return img.decode().catch(() => {});
+    }));
+  }
+
+  /** Pre-decode all inventory item icons (16×16) for instant UI on mobile. */
+  async decodeItemIcons() {
+    const paths = Object.values(ASSET_PATHS).filter((p) => p.startsWith('assets/items/'));
+    await this.decodePaths(paths);
+  }
+
   async loadAll() {
     const entries = Object.entries(ASSET_PATHS);
     await Promise.all(entries.map(([name, path]) => this._loadOne(name, path)));
