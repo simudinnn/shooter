@@ -1,6 +1,6 @@
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
-import { unpackTintGradient, getBiome, rollWorldSeed } from './worldGen.js';
+import { unpackTintGradient, getBiome, isTreeFoliage, rollWorldSeed } from './worldGen.js';
 import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
 import { createExplosion, createGroundSpew, updateParticles } from './enemies.js';
 import { SoundManager } from './audio.js';
@@ -10,15 +10,11 @@ import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_
 import { chestSpriteName } from './loot.js';
 import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
-import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, PARTICLE_SIZE_UNIT } from './particles.js';
+import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
 import { InventoryUI } from './inventory.js';
+import { snapCamLean, worldToScreen, camPixelsFromPlayer, leanPixelsFromOffset, drawPixelEllipseShadow, PPU, INTERNAL_W, INTERNAL_H, RENDER_SCALE } from './renderConfig.js';
 
-const INTERNAL_W = 480;
-const INTERNAL_H = 270;
-/** Supersample the internal buffer for sharper fullscreen upscale. */
-const RENDER_SCALE = 2;
-const PPU = 8;
 const SPRITE_PLAYER = 1.50;
 const SPRITE_CHEST = CHEST_DRAW_SCALE;
 const SPRITE_CRATE = 2.2;
@@ -55,6 +51,10 @@ class Game {
     this.sprites = new SpriteBank();
     this.mouse = { sx: INTERNAL_W / 2, sy: INTERNAL_H / 2, wx: 0, wz: 0, clientX: 0, clientY: 0 };
     this.camOffset = { x: 0, z: 0 };
+    this._camPxX = 0;
+    this._camPxZ = 0;
+    this._camLeanPxX = 0;
+    this._camLeanPxZ = 0;
     this.touchMove = { x: 0, z: 0 };
     this.mobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
@@ -451,6 +451,31 @@ class Game {
     }
     this.camOffset.x += (tx - this.camOffset.x) * decay;
     this.camOffset.z += (tz - this.camOffset.z) * decay;
+    this.camOffset.x = snapCamLean(this.camOffset.x);
+    this.camOffset.z = snapCamLean(this.camOffset.z);
+  }
+
+  _syncCamPixels() {
+    if (!this.player) {
+      this._camPxX = 0;
+      this._camPxZ = 0;
+      this._camLeanPxX = 0;
+      this._camLeanPxZ = 0;
+      return;
+    }
+    const cp = camPixelsFromPlayer(this.player.x, this.player.z);
+    this._camPxX = cp.x;
+    this._camPxZ = cp.z;
+    const lean = leanPixelsFromOffset(this.camOffset.x, this.camOffset.z);
+    this._camLeanPxX = lean.x;
+    this._camLeanPxZ = lean.z;
+  }
+
+  _camTranslate() {
+    return {
+      x: -this._camPxX - this._camLeanPxX + (INTERNAL_W >> 1),
+      y: -this._camPxZ - this._camLeanPxZ + (INTERNAL_H >> 1),
+    };
   }
 
   _camera() {
@@ -481,19 +506,14 @@ class Game {
   }
 
   _worldToScreen(wx, wz) {
-    const cam = this._camera();
-    return {
-      x: Math.round((wx - cam.x) * PPU + INTERNAL_W / 2),
-      y: Math.round((wz - cam.z) * PPU + INTERNAL_H / 2),
-    };
+    return worldToScreen(wx, wz, this._camPxX, this._camPxZ, this._camLeanPxX, this._camLeanPxZ);
   }
 
   /** Inverse of _worldToScreen — world point under a screen pixel. */
   _screenToWorld(sx, sy) {
-    const cam = this._camera();
     return {
-      x: cam.x + (sx - INTERNAL_W / 2) / PPU,
-      z: cam.z + (sy - INTERNAL_H / 2) / PPU,
+      x: (sx - (INTERNAL_W >> 1) + this._camPxX + this._camLeanPxX) / PPU,
+      z: (sy - (INTERNAL_H >> 1) + this._camPxZ + this._camLeanPxZ) / PPU,
     };
   }
 
@@ -535,6 +555,15 @@ class Game {
     return this._feetSortZ(this.player.x, this.player.z, CHAR_NATIVE_PX, SPRITE_PLAYER);
   }
 
+  /** Depth in front of enemy sprites — sparks sort at body center but enemies use feet Z. */
+  _inFrontOfEnemySortZ(wx, wz) {
+    let z = wz;
+    for (const type of ['spider', 'scout']) {
+      z = Math.max(z, this._feetSortZ(wx, wz, getEnemyNativePx(type), getEnemyDrawScale(type)));
+    }
+    return z + 0.04;
+  }
+
   start() {
     this.el.startBtn.disabled = true;
     this.el.restartBtn.disabled = true;
@@ -574,6 +603,10 @@ class Game {
     this.particles = [];
     this._weaponBreathY = 0;
     this.camOffset = { x: 0, z: 0 };
+    this._camPxX = 0;
+    this._camPxZ = 0;
+    this._camLeanPxX = 0;
+    this._camLeanPxZ = 0;
     this._lastWalkStep = -1;
     this._lastBounceLand = -1;
     this.kills = 0;
@@ -806,7 +839,9 @@ class Game {
     if (!robot.alive) {
       this.kills++;
       this.audio.explosion();
+      const spread = robot.radius * 1.35;
       this.particles.push(...createExplosion(robot.x, robot.z));
+      this.particles.push(...createRobotDeathFx(robot.x, robot.z, spread));
     }
   }
 
@@ -1138,25 +1173,27 @@ class Game {
 
   _draw() {
     const ctx = this.ctx;
+    this._syncCamPixels();
     ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#2a3a32';
     ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
 
     const cam = this._camera();
+    const camT = this._camTranslate();
     const viewHalfW = INTERNAL_W / PPU / 2 + TILE;
     const viewHalfH = INTERNAL_H / PPU / 2 + TILE;
     const tilePx = TILE * PPU;
     this.world.drawGroundLayer(
       ctx,
-      cam.x,
-      cam.z,
+      camT.x,
+      camT.y,
       viewHalfW,
       viewHalfH,
       PPU,
       this.sprites,
-      INTERNAL_W,
-      INTERNAL_H,
+      cam.x,
+      cam.z,
     );
 
     for (const d of this.world.decor) {
@@ -1189,6 +1226,18 @@ class Game {
         draw: () => {
           const s = this._worldToScreen(f.x, f.z);
           const size = tilePx * (f.drawSize ?? 1);
+          const feetX = Math.round(s.x);
+          const feetY = Math.round(s.y);
+          if (isTreeFoliage(f.kind)) {
+            drawPixelEllipseShadow(
+              ctx,
+              feetX,
+              feetY,
+              size * 0.36,
+              size * 0.13,
+              tilePx,
+            );
+          }
           const tint = f.tintKey ? unpackTintGradient(f.tintKey) : null;
           const drawX = Math.round(s.x - size * 0.5);
           const drawY = Math.round(s.y - size);
@@ -1226,7 +1275,7 @@ class Game {
         const chargeShake = robot.jump?.charging
           ? Math.sin(drawTime * 28) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
           : 0;
-        const drawX = s.x + shake.x + chargeShake;
+        const drawX = Math.round(s.x + shake.x + chargeShake);
         const shootPhase = robot.shoot?.phase ?? null;
         const robotMoving = robot.moving && !robot.emerging
           && shootPhase !== 'charging' && shootPhase !== 'firing';
@@ -1235,12 +1284,13 @@ class Game {
         const walkBounce = robot.type === 'scout'
           ? getScoutWalkBounceY(drawTime, canWalkBounce)
           : getWalkBounceY(robot.walkPhase, canWalkBounce);
-        const jumpBob = robot.jump?.active ? -(robot.bob || 0) * 16 : 0;
-        const chargeBob = robot.jump?.charging ? (robot.bob || 0) * 14 : 0;
-        const emergeBob = robot.emerging ? (robot.bob || 0) * 3 : 0;
-        const anchorY = s.y - bury + shake.y + emergeBob + jumpBob + chargeBob;
-        const drawY = anchorY + walkBounce;
-        const feetY = anchorY + spriteFeetOffset(enemyNativePx, scale);
+        const walkBouncePx = Math.round(walkBounce);
+        const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
+        const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
+        const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
+        const anchorY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob);
+        const drawY = anchorY + walkBouncePx;
+        const feetY = Math.round(anchorY + spriteFeetOffset(enemyNativePx, scale));
         if (robot.emerging) {
           const hole = 1 - emerge;
           ctx.fillStyle = `rgba(18, 14, 10, ${0.55 * hole})`;
@@ -1253,10 +1303,9 @@ class Game {
         const shadowLift = isScout ? 4 : 0;
         const shadowRx = (isScout ? 15 : 10) * emerge;
         const shadowRy = (isScout ? 5.5 : 4) * emerge;
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.beginPath();
-        ctx.ellipse(drawX, feetY - shadowLift, shadowRx, shadowRy, 0, 0, Math.PI * 2);
-        ctx.fill();
+        if (shadowRx >= 2 && shadowRy >= 2) {
+          drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx);
+        }
         const bodySheet = getEnemyBodySheet(robot.type, robotMoving, shootPhase);
         const bodyAnim = getEnemyBodyAnim(robot.type, robotMoving, shootPhase, drawTime, robot.shoot?.animStart);
         this.sprites.draw(
@@ -1277,18 +1326,15 @@ class Game {
     const drawTime = performance.now() / 1000;
     const playerSheet = getPlayerSheet(this.player, drawTime);
     const playerFlip = getPlayerFlipX(this.player);
-    const playerBounce = getPlayerBounceY(this.player, drawTime);
-    const idleBreath = this._weaponBreathY ?? 0;
+    const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
+    const idleBreath = Math.round(this._weaponBreathY ?? 0);
     const playerAnim = getPlayerAnim(this.player, drawTime);
     const playerSortZ = this._playerSortZ();
     drawList.push({ z: playerSortZ, sortBias: 1, draw: () => {
       const s = this._worldToScreen(this.player.x, this.player.z);
       const feetY = Math.round(s.y + playerBounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.beginPath();
-      ctx.ellipse(s.x, feetY, 10, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      this.sprites.draw(ctx, playerSheet, s.x, Math.round(s.y + playerBounce), SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim);
+      drawPixelEllipseShadow(ctx, s.x, feetY, 10, 4, tilePx);
+      this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim);
     }});
     drawList.push({ z: playerSortZ + 0.02, sortBias: 1, draw: () => {
       const lunge = this.player.getMeleeSwingLunge(drawTime);
@@ -1358,8 +1404,15 @@ class Game {
       }
     }});
     for (const p of this.particles) {
-      const zBias = (p.kind === 'blood' || p.kind === 'spark' || p.kind === 'scrape') ? 0.2 : 0.05;
-      drawList.push({ z: p.z - zBias, sortBias: 1, draw: () => this._drawParticle(ctx, p) });
+      let sortZ = p.z;
+      if (p.kind === 'spark' || p.kind === 'scrape') {
+        sortZ = this._inFrontOfEnemySortZ(p.x, p.z);
+      } else if (p.kind === 'blood') {
+        sortZ = p.z - 0.2;
+      } else {
+        sortZ = p.z - 0.05;
+      }
+      drawList.push({ z: sortZ, sortBias: 1, draw: () => this._drawParticle(ctx, p) });
     }
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();

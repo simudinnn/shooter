@@ -516,6 +516,52 @@ export function createRobotFire(x, z, spread = 0.95) {
 
 
 
+/** Burst of smoke + flame when a robot is destroyed. */
+export function createRobotDeathFx(x, z, spread = 1.2) {
+  const particles = [];
+  const smokeColors = ['#404850', '#585860', '#383c44', '#6a7078', '#505860'];
+  const smokeCount = 7 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < smokeCount; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * spread * 1.15;
+    particles.push(withFxAnim({
+      x: x + Math.sin(a) * r,
+      z: z + Math.cos(a) * r,
+      vx: rng(-1.3, 1.3),
+      vz: rng(-1.3, 1.3),
+      life: rng(1.5, 3.4),
+      color: smokeColors[i % smokeColors.length],
+      size: rng(0.2, 0.42),
+      drag: rng(0.9, 0.97),
+      screenRise: rng(-12, 12),
+      screenRiseVel: -rng(16, 36),
+      sprite: 'particle_smoke',
+      kind: 'smoke',
+    }));
+  }
+  const fireColors = ['#ff5020', '#ff9038', '#ffc040', '#ff2818', '#ff6830'];
+  const fireCount = 5 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < fireCount; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * spread;
+    particles.push(withFxAnim({
+      x: x + Math.sin(a) * r,
+      z: z + Math.cos(a) * r,
+      vx: rng(-1.5, 1.5),
+      vz: rng(-1.5, 1.5),
+      life: rng(0.4, 1.15),
+      color: fireColors[i % fireColors.length],
+      size: rng(0.14, 0.3),
+      drag: rng(0.88, 0.96),
+      screenRise: rng(-10, 10),
+      screenRiseVel: -rng(22, 48),
+      sprite: 'particle_fire',
+      kind: 'fire',
+    }));
+  }
+  return particles;
+}
+
 export function updateParticles(particles, dt, world = null, callbacks = null) {
 
   for (let i = particles.length - 1; i >= 0; i--) {

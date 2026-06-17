@@ -39,8 +39,8 @@ const WORLD_FLOOR_SPRITES = ['floor_grass', 'floor_dirt', 'floor_rock'];
 
 const WORLD_FOLIAGE_SPRITES = [
   'foliage_grass', 'foliage_grass2', 'foliage_grass3', 'foliage_grass4',
-  'foliage_grass_tall', 'foliage_pebble', 'foliage_rock',
-  'foliage_bush', 'foliage_tree', 'foliage_tree2', 'foliage_tree3', 'foliage_stump',
+  'foliage_grass_tall', 'foliage_grass_tall2', 'foliage_pebble', 'foliage_pebble2', 'foliage_rock',
+  'foliage_bush', 'foliage_bush2', 'foliage_tree', 'foliage_tree2', 'foliage_tree3', 'foliage_stump',
 ];
 
 const WORLD_ASSET_PATHS = Object.fromEntries([
@@ -1246,7 +1246,7 @@ export class SpriteBank {
     const oy = Math.round(pivotY * scale);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    ctx.translate(Math.round(sx), sy);
+    ctx.translate(Math.round(sx), Math.round(sy));
     if (flipX) ctx.scale(-1, 1);
     if (angle) ctx.rotate(angle);
     if (chopTilt) ctx.rotate(chopTilt);
@@ -1269,9 +1269,43 @@ export class SpriteBank {
     if (tint.a && tint.b) {
       const ka = ((tint.a.r >> 4) << 8) | ((tint.a.g >> 4) << 4) | (tint.a.b >> 4);
       const kb = ((tint.b.r >> 4) << 8) | ((tint.b.g >> 4) << 4) | (tint.b.b >> 4);
+      if (ka === kb) return ka;
       return (ka << 12) | kb;
     }
     return ((tint.r >> 4) << 8) | ((tint.g >> 4) << 4) | (tint.b >> 4);
+  }
+
+  _applyTintToTile(nc, img, srcSize, tint) {
+    const a = tint.a || tint;
+    const b = tint.b || tint;
+    const c = tint.c || a;
+    const flat = a.r === b.r && a.g === b.g && a.b === b.b
+      && c.r === a.r && c.g === a.g && c.b === a.b;
+    if (flat) {
+      nc.fillStyle = `rgb(${a.r},${a.g},${a.b})`;
+      nc.fillRect(0, 0, srcSize, srcSize);
+      nc.globalCompositeOperation = 'destination-in';
+      nc.drawImage(img, 0, 0, srcSize, srcSize);
+      nc.globalCompositeOperation = 'multiply';
+      nc.drawImage(img, 0, 0, srcSize, srcSize);
+      return;
+    }
+    const grad = nc.createLinearGradient(0, 0, srcSize, 0);
+    const stops = 5;
+    for (let i = 0; i <= stops; i++) {
+      const t = i / stops;
+      const u = t * t * (3 - 2 * t);
+      const r = Math.round(a.r + (b.r - a.r) * u);
+      const g = Math.round(a.g + (b.g - a.g) * u);
+      const bl = Math.round(a.b + (b.b - a.b) * u);
+      grad.addColorStop(t, `rgb(${r},${g},${bl})`);
+    }
+    nc.fillStyle = grad;
+    nc.fillRect(0, 0, srcSize, srcSize);
+    nc.globalCompositeOperation = 'destination-in';
+    nc.drawImage(img, 0, 0, srcSize, srcSize);
+    nc.globalCompositeOperation = 'multiply';
+    nc.drawImage(img, 0, 0, srcSize, srcSize);
   }
 
   _cacheTileBitmap(key, canvas) {
@@ -1291,8 +1325,9 @@ export class SpriteBank {
     if (!img) return null;
 
     const srcSize = img.naturalWidth || img.width || 16;
-    const scale = Math.max(1, Math.round(px / srcSize));
-    const outPx = srcSize * scale;
+    const outPx = Math.round(px);
+    const scale = Math.max(1, Math.round(outPx / srcSize));
+    const bakedPx = srcSize * scale;
     const tintKey = this._tintKey(tint);
     const key = `${name}:${outPx}:${tintKey}`;
     const hit = this._tileBitmapCache.get(key);
@@ -1305,17 +1340,7 @@ export class SpriteBank {
     nc.imageSmoothingEnabled = false;
     nc.drawImage(img, 0, 0, srcSize, srcSize);
     if (tint) {
-      const a = tint.a || tint;
-      const b = tint.b || tint;
-      const grad = nc.createLinearGradient(0, 0, srcSize, 0);
-      grad.addColorStop(0, `rgb(${a.r},${a.g},${a.b})`);
-      grad.addColorStop(1, `rgb(${b.r},${b.g},${b.b})`);
-      nc.fillStyle = grad;
-      nc.fillRect(0, 0, srcSize, srcSize);
-      nc.globalCompositeOperation = 'destination-in';
-      nc.drawImage(img, 0, 0, srcSize, srcSize);
-      nc.globalCompositeOperation = 'multiply';
-      nc.drawImage(img, 0, 0, srcSize, srcSize);
+      this._applyTintToTile(nc, img, srcSize, tint);
     }
 
     const canvas = document.createElement('canvas');
@@ -1323,7 +1348,11 @@ export class SpriteBank {
     canvas.height = outPx;
     const c = canvas.getContext('2d');
     c.imageSmoothingEnabled = false;
-    c.drawImage(native, 0, 0, outPx, outPx);
+    if (bakedPx === outPx) {
+      c.drawImage(native, 0, 0, outPx, outPx);
+    } else {
+      c.drawImage(native, 0, 0, bakedPx, bakedPx, 0, 0, outPx, outPx);
+    }
     return this._cacheTileBitmap(key, canvas);
   }
 

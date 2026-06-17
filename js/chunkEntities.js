@@ -100,6 +100,11 @@ export class ChunkEntityManager {
     return (x - player.x) * fx + (z - player.z) * fz >= minAhead;
   }
 
+  _offScreenForSpawn(x, z) {
+    if (typeof this.game.isWorldPointOnScreen !== 'function') return true;
+    return !this.game.isWorldPointOnScreen(x, z, 10);
+  }
+
   _despawnFar(player) {
     const d2 = this._despawnDist2();
     const clearedSpiderChunks = new Set();
@@ -207,7 +212,11 @@ export class ChunkEntityManager {
       this.world,
       player,
       () => this._countNearbyChests(player) < MAX_NEARBY_CHESTS,
-      { fx, fz },
+      {
+        fx,
+        fz,
+        isOffScreen: (x, z) => this._offScreenForSpawn(x, z),
+      },
     );
   }
 
@@ -249,6 +258,7 @@ export class ChunkEntityManager {
     const tryPoint = (requireAhead) => {
       for (const [x, z] of tries) {
         if (isInBase(x, z)) continue;
+        if (!this._offScreenForSpawn(x, z)) continue;
         if (requireAhead && !this._isAheadOfPlayer(player, x, z, fx, fz)) continue;
         if (Robot._isValidSpawn(
           this.world,

@@ -1,7 +1,7 @@
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
 
 /** Base robot enemy — `type` selects sprite sheet (spider, walker, scout, …). */
-export const SCOUT_SPAWN_SHARE = 1 / 3;
+export const SCOUT_SPAWN_SHARE = 0.12;
 
 export class Robot {
   constructor(x, z, wave = 1, type = 'spider') {
@@ -317,7 +317,7 @@ export class Robot {
     const dist = Math.sqrt(dx * dx + dz * dz);
     const stealth = player.getStealthMult?.() ?? 1;
     const detectRange = (this.type === 'spider' ? 20 : 48) * stealth;
-    const chaseRange = (this.type === 'spider' ? 36 : 58) * stealth;
+    const chaseRange = (this.type === 'spider' ? 58 : 58) * stealth;
     const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
 
     if (hasLOS || (this.chasing && dist < chaseRange) || this.aggroByHit) {
@@ -495,8 +495,7 @@ export class Scout extends Robot {
     if (this.stagger > 0) {
       this.stagger -= dt;
       this._applyKnockback(dt, world, player, robots);
-      this.moving = false;
-      this.bob = 0;
+      if (this.moving) this.walkPhase += dt * 6;
       return;
     }
 
@@ -516,7 +515,7 @@ export class Scout extends Robot {
     const dist = Math.sqrt(dx * dx + dz * dz);
     const stealth = player.getStealthMult?.() ?? 1;
     const detectRange = 20 * stealth;
-    const chaseRange = 36 * stealth;
+    const chaseRange = 58 * stealth;
     const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
     const meleeDist = this.meleeRange + player.radius;
     const inAttack = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';

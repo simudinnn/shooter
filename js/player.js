@@ -10,8 +10,8 @@ export const SNEAK_MULT = 0.52;
 export const GUN_HOLD_OFFSET = 1.1;
 /** Extra distance from gun hold point to barrel tip (world units). */
 export const BARREL_TIP_OFFSET = 0.55;
-/** Lifts spawn point on screen toward the gun barrel (pixels, screen-up). */
-export const BARREL_SCREEN_RAISE = 8;
+/** Screen-up lift for player bullet spawn (pixels at PPU 8). */
+export const BULLET_SPAWN_RAISE_PX = 6;
 
 /** 24px diameter damage / melee hit circle at PPU 8. */
 export const PLAYER_HIT_RADIUS = 1.5;
@@ -1284,24 +1284,19 @@ export class Player {
 export function findBulletSpawn(world, px, pz, angle) {
   const sin = Math.sin(angle);
   const cos = Math.cos(angle);
-  const aim = gunAimTransform(angle);
-  const hold = GUN_HOLD_OFFSET + gunPivotHoldOffset(aim.angle);
-  const gunX = px + sin * hold;
-  const gunZ = pz + cos * hold;
-  const raiseZ = BARREL_SCREEN_RAISE / SCREEN_PPU;
-  const maxD = BARREL_TIP_OFFSET;
-  const minD = 0.06;
-
-  for (let d = maxD; d >= minD; d -= 0.04) {
-    const x = gunX + sin * d;
-    const z = gunZ + cos * d - raiseZ;
-    if (world.checkCollision(x, z, BULLET_RADIUS)) continue;
-    const fromX = px + sin * (PLAYER_RADIUS * 0.65);
-    const fromZ = pz + cos * (PLAYER_RADIUS * 0.65) - raiseZ * 0.35;
-    if (world.segmentBlocked(fromX, fromZ, x, z, BULLET_RADIUS)) continue;
-    return { x, z };
+  const dist = 0.12;
+  const raiseZ = BULLET_SPAWN_RAISE_PX / 8;
+  const x = px + sin * dist;
+  const z = pz + cos * dist - raiseZ;
+  if (world.checkCollision(x, z, BULLET_RADIUS)) {
+    return { x: px, z: pz - raiseZ };
   }
-  return null;
+  const fromX = px - sin * 0.08;
+  const fromZ = pz - cos * 0.08 - raiseZ * 0.35;
+  if (world.segmentBlocked(fromX, fromZ, x, z, BULLET_RADIUS)) {
+    return { x: px, z: pz - raiseZ };
+  }
+  return { x, z };
 }
 
 export const BULLET_MAX_DIST = 48;
@@ -1320,7 +1315,7 @@ export class BulletPool {
   spawn(x, z, angle, weapon, fromPlayer = true, world = null) {
     const b = this.bullets.find((b) => !b.active);
     if (!b) return null;
-    const spread = weapon.spread || 0.02;
+    const spread = weapon.spread || 0.04;
     const a = angle + (Math.random() - 0.5) * spread;
     const speed = weapon.bulletSpeed || 80;
 
@@ -1332,9 +1327,9 @@ export class BulletPool {
       sx = spawn.x;
       sz = spawn.z;
     } else {
-      const dist = fromPlayer ? BARREL_TIP_OFFSET : 0.8;
+      const dist = fromPlayer ? 0.12 : 0.8;
       sx = x + Math.sin(a) * dist;
-      sz = z + Math.cos(a) * dist - (fromPlayer ? BARREL_SCREEN_RAISE / SCREEN_PPU : 0);
+      sz = z + Math.cos(a) * dist;
     }
 
     b.active = true;

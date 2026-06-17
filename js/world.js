@@ -11,6 +11,7 @@ import {
   unpackTintGradient,
   isTintedFoliage,
   isYsortFoliage,
+  foliageIntersectsRect,
   isCanopyFoliage,
 } from './worldGen.js';
 
@@ -19,7 +20,7 @@ export const MAP_SIZE = 999999;
 export const PLAYER_RADIUS = 0.6;
 export const BULLET_RADIUS = 0.15;
 
-const BAKE_VERSION = 15;
+const BAKE_VERSION = 24;
 const MAX_CACHED_CHUNKS = 256;
 
 export class World {
@@ -115,7 +116,7 @@ export class World {
       return chunk.bakedLayer;
     }
 
-    const px = Math.round(tilePx);
+    const px = tilePx;
     const size = CHUNK_TILES * px;
     if (!chunk._bakeCanvas) {
       chunk._bakeCanvas = document.createElement('canvas');
@@ -149,17 +150,15 @@ export class World {
 
     const originX = chunk.cx * CHUNK_WORLD;
     const originZ = chunk.cz * CHUNK_WORLD;
+    const ppu = px / TILE;
     const half = px * 0.5;
-    const toPx = px / TILE;
+    const originPxX = originX * ppu;
+    const originPxZ = originZ * ppu;
     for (const f of chunk.foliage) {
       if (isYsortFoliage(f.kind)) continue;
       const fTint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
-      const tileWx = Math.floor(f.x / TILE) * TILE;
-      const tileWz = Math.floor(f.z / TILE) * TILE;
-      const localX = Math.round((f.x - tileWx) * toPx);
-      const localZ = Math.round((f.z - tileWz) * toPx);
-      const fx = (tileWx - originX) * toPx + localX - half;
-      const fz = (tileWz - originZ) * toPx + localZ - half;
+      const fx = Math.round(f.x * ppu) - originPxX - half;
+      const fz = Math.round(f.z * ppu) - originPxZ - half;
       sprites.stampTile(ctx, f.sprite, fx, fz, px, fTint);
     }
 
@@ -169,11 +168,9 @@ export class World {
     return canvas;
   }
 
-  drawGroundLayer(ctx, camX, camZ, viewHalfW, viewHalfH, ppu, sprites, screenW, screenH) {
-    const tilePx = Math.round(TILE * ppu);
+  drawGroundLayer(ctx, camTx, camTy, viewHalfW, viewHalfH, ppu, sprites, camX, camZ) {
+    const tilePx = TILE * ppu;
     const chunkPx = CHUNK_TILES * tilePx;
-    const camPxX = Math.round(-camX * ppu + screenW / 2);
-    const camPxY = Math.round(-camZ * ppu + screenH / 2);
     const minTX = Math.floor((camX - viewHalfW) / TILE);
     const maxTX = Math.ceil((camX + viewHalfW) / TILE);
     const minTZ = Math.floor((camZ - viewHalfH) / TILE);
@@ -185,14 +182,12 @@ export class World {
 
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    ctx.translate(camPxX, camPxY);
+    ctx.translate(camTx, camTy);
     for (let cz = minCZ; cz <= maxCZ; cz++) {
       for (let cx = minCX; cx <= maxCX; cx++) {
         const chunk = this.getChunk(cx, cz);
         const layer = this._bakeChunkGround(chunk, sprites, tilePx);
-        const wx = cx * CHUNK_WORLD;
-        const wz = cz * CHUNK_WORLD;
-        ctx.drawImage(layer, Math.round(wx * ppu), Math.round(wz * ppu), chunkPx, chunkPx);
+        ctx.drawImage(layer, Math.round(cx * CHUNK_WORLD * ppu), Math.round(cz * CHUNK_WORLD * ppu), chunkPx, chunkPx);
       }
     }
     ctx.restore();
@@ -211,15 +206,16 @@ export class World {
   }
 
   collectYsortFoliage(minX, maxX, minZ, maxZ) {
-    const minTX = Math.floor(minX / TILE);
-    const maxTX = Math.ceil(maxX / TILE);
-    const minTZ = Math.floor(minZ / TILE);
-    const maxTZ = Math.ceil(maxZ / TILE);
+    const pad = TILE * 4;
+    const minTX = Math.floor((minX - pad) / TILE);
+    const maxTX = Math.ceil((maxX + pad) / TILE);
+    const minTZ = Math.floor((minZ - pad) / TILE);
+    const maxTZ = Math.ceil((maxZ + pad) / TILE);
     const out = [];
     this.forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, (chunk) => {
       for (const f of chunk.foliage) {
         if (!isYsortFoliage(f.kind)) continue;
-        if (f.x >= minX && f.x <= maxX && f.z >= minZ && f.z <= maxZ) out.push(f);
+        if (foliageIntersectsRect(f, minX, maxX, minZ, maxZ)) out.push(f);
       }
     });
     return out;

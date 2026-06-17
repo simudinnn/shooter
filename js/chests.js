@@ -134,6 +134,7 @@ export class ChestManager {
       if (requireAhead && spawnBias) {
         if ((x - player.x) * fx + (z - player.z) * fz < 3) return false;
       }
+      if (spawnBias?.isOffScreen && !spawnBias.isOffScreen(x, z)) return false;
       if (world.checkCollision(x, z, CHEST_COLLISION_RADIUS)) return false;
       if (player) {
         const pdx = x - player.x;
