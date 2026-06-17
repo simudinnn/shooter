@@ -94,6 +94,7 @@ export class ChestManager {
       x: chest.x,
       z: chest.z,
       radius: CHEST_COLLISION_RADIUS,
+      blocksBullets: false,
     };
     this.world.addDynamicObstacle(chest.obstacle);
   }

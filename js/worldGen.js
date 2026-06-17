@@ -391,13 +391,6 @@ function pickPebbleVariant(tx, tz, salt = 0) {
   return hash01(tx * 187 + salt, tz * 191 + salt) < 0.5 ? 'pebble' : 'pebble2';
 }
 
-function pickTreeVariant(tx, tz, salt = 0) {
-  const h = hash01(tx * 241 + salt, tz * 251 + salt * 5);
-  if (h < 0.34) return 'tree';
-  if (h < 0.67) return 'tree2';
-  return 'tree3';
-}
-
 /** Patch noise — values above threshold form clustered spawn regions. */
 function inFoliagePatch(tx, tz, freq, offsetX, offsetZ, threshold) {
   const v = fbm(tx * freq + offsetX, tz * freq + offsetZ, 2);

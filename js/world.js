@@ -30,7 +30,6 @@ export class World {
     this.obstacles = [];
     this.decor = [];
     this.dynamicObstacles = [];
-    this.imageMap = null;
   }
 
   addDynamicObstacle(obs) {
@@ -48,10 +47,6 @@ export class World {
 
   get halfH() {
     return MAP_SIZE;
-  }
-
-  usesImageMap() {
-    return false;
   }
 
   async build() {
@@ -289,8 +284,9 @@ export class World {
     return { x: px + dx * push, z: pz + dz * push };
   }
 
-  _checkObstacleCollision(x, z, radius, obstacles) {
+  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false) {
     for (const obs of obstacles) {
+      if (forBullets && obs.blocksBullets === false) continue;
       if (obs.kind === 'circle' && this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
         return true;
       }
@@ -357,7 +353,7 @@ export class World {
       const t = i / steps;
       const x = x0 + (x1 - x0) * t;
       const z = z0 + (z1 - z0) * t;
-      if (this._checkObstacleCollision(x, z, radius, obstacles)) return true;
+      if (this._checkObstacleCollision(x, z, radius, obstacles, true)) return true;
     }
     return false;
   }

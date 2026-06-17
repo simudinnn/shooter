@@ -67,6 +67,7 @@ const CORE_ASSETS = {
   shotgun_ammo: 'assets/items/shotgun_ammo.png',
   sniper_ammo: 'assets/items/sniper_ammo.png',
   bandage: 'assets/items/bandage.png',
+  inv_lock: 'assets/items/lock.png',
   mystery: 'assets/items/mystery.png',
   mystery_weapon: 'assets/items/mystery_weapon.png',
   bullet: 'assets/items/bullet.png',
@@ -1078,12 +1079,13 @@ export function getEnemyBodySheet(type, moving, shootPhase = null) {
 }
 
 /** Flipbook timing for enemy body sheets. */
-export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null) {
+export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null, opts = {}) {
   if (type === 'scout' && (shootPhase === 'charging' || shootPhase === 'firing')) {
     const elapsed = chargeAnimStart != null ? Math.max(0, time - chargeAnimStart) : 0;
     return { elapsed };
   }
-  return getWalkAnim(moving, time);
+  const walkSpeedMult = opts.walkSpeedMult ?? 1;
+  return getWalkAnim(moving, time * walkSpeedMult);
 }
 
 /** Time-based flipbook anim for walk sheets (respects SPRITE_ANIM fps). */
@@ -1106,11 +1108,16 @@ export function velToSpriteAngle(vx, vz) {
 export class SpriteBank {
   constructor() {
     this.images = {};
+    this._pathImages = {};
     this.flipbooks = {};
     this.ready = false;
     this._tileBitmapCache = new Map();
     this._tileBitmapOrder = [];
     this._tileBitmapMax = 384;
+  }
+
+  getImageByPath(path) {
+    return this._pathImages[path] ?? null;
   }
 
   async loadAll() {
@@ -1192,16 +1199,23 @@ export class SpriteBank {
   _loadOne(name, path) {
     return new Promise((resolve) => {
       const img = new Image();
-      img.onload = () => {
+      img.decoding = 'async';
+      const finish = () => {
         this.images[name] = img;
+        this._pathImages[path] = img;
         this._parseFlipbook(name, img);
         resolve();
+      };
+      img.onload = () => {
+        if (img.decode) img.decode().then(finish).catch(finish);
+        else finish();
       };
       img.onerror = () => {
         if (!name.startsWith('floor_') && !name.startsWith('foliage_')) {
           const fallback = buildFallback(name);
           if (fallback) {
             this.images[name] = fallback;
+            this._pathImages[path] = fallback;
             this._parseFlipbook(name, fallback);
           }
         }

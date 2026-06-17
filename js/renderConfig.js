@@ -61,7 +61,7 @@ const _shadowStampCache = new Map();
 const _shadowStampOrder = [];
 const SHADOW_STAMP_MAX = 48;
 const SHADOW_BANDS = 4;
-const SHADOW_BAND_ALPHA = [72, 52, 34, 18];
+const SHADOW_BAND_ALPHA = [108, 82, 58, 36];
 
 function _getShadowStamp(rx, ry) {
   const key = `${rx},${ry}`;

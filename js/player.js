@@ -30,7 +30,7 @@ export const WEAPONS = {
   glock: {
     name: 'Glock',
     magSize: 12,
-    damage: 12,
+    damage: 10,
     fireRate: 0,
     reloadTime: 1.6,
     bulletSpeed: 150,
@@ -45,7 +45,7 @@ export const WEAPONS = {
   m16: {
     name: 'M16',
     magSize: 30,
-    damage: 15,
+    damage: 12,
     fireRate: 0.09,
     automatic: true,
     reloadTime: 2.0,
@@ -61,7 +61,7 @@ export const WEAPONS = {
   m870: {
     name: '870',
     magSize: 6,
-    damage: 14,
+    damage: 12,
     fireRate: 0.9,
     reloadTime: 2.6,
     reloadStyle: 'incremental',
@@ -77,7 +77,7 @@ export const WEAPONS = {
   m24: {
     name: 'M24',
     magSize: 5,
-    damage: 95,
+    damage: 75,
     fireRate: 1.15,
     reloadTime: 2.8,
     reloadStyle: 'incremental',
@@ -109,7 +109,7 @@ export const WEAPONS = {
   revolver: {
     name: 'Revolver',
     magSize: 6,
-    damage: 32,
+    damage: 30,
     fireRate: 0.48,
     reloadTime: 2,
     bulletSpeed: 150,
@@ -123,7 +123,7 @@ export const WEAPONS = {
   famas: {
     name: 'Famas',
     magSize: 25,
-    damage: 14,
+    damage: 10,
     fireRate: 0.07,
     automatic: true,
     reloadTime: 2.1,
@@ -139,7 +139,7 @@ export const WEAPONS = {
   fal: {
     name: 'FAL',
     magSize: 20,
-    damage: 22,
+    damage: 18,
     fireRate: 0.14,
     automatic: true,
     reloadTime: 2.3,
@@ -166,7 +166,7 @@ export const MELEE_WEAPONS = {
     swingDownRatio: 0.34,
     swingAngle: Math.PI / 2.4,
     maxChargeTime: 0.75,
-    minDamageMult: 0.35,
+    minDamageMult: 0.,
     maxDamageMult: 1.0,
     maxRaiseAngle: Math.PI / 2.8,
     sprite: 'knife',
@@ -421,6 +421,51 @@ export class Player {
     return true;
   }
 
+  suspendMainWeaponForDrag() {
+    const item = this._weaponItemFromEquipped();
+    if (!item) return null;
+    this._cancelActiveReload();
+    this.weaponKey = null;
+    this.weapon = null;
+    return item;
+  }
+
+  restoreMainWeapon(item) {
+    if (!item || item.kind !== 'weapon' || !WEAPONS[item.key]) return;
+    this.weaponKey = item.key;
+    this.weapon = this._buildWeaponRuntime(item.key, item.ammo ?? 0);
+    this.weaponSlot = 'gun';
+  }
+
+  suspendMeleeForDrag() {
+    const item = this._meleeItemFromEquipped();
+    if (!item) return null;
+    this._abortReloadForMeleeSwitch();
+    if (this.weaponSlot === 'melee') this.weaponSlot = 'gun';
+    this.meleeKey = null;
+    return item;
+  }
+
+  restoreMeleeWeapon(item) {
+    if (!item || item.kind !== 'melee' || !MELEE_WEAPONS[item.key]) return;
+    this.meleeKey = item.key;
+    this.weaponSlot = 'melee';
+    this.melee.charging = false;
+  }
+
+  hasEquippedMelee() {
+    return !!this.meleeKey;
+  }
+
+  /** Unload the equipped gun's magazine into inventory ammo stacks. */
+  takeAmmoFromEquippedGun() {
+    const item = this._weaponItemFromEquipped();
+    if (!item) return { ok: false, taken: 0 };
+    const result = this.takeLoadedAmmoFromWeapon(item);
+    if (result.ok && this.weapon) this.weapon.ammo = item.ammo;
+    return result;
+  }
+
   /** Unload a stored gun's magazine into inventory ammo stacks. */
   takeLoadedAmmoFromWeapon(item) {
     if (!item || item.kind !== 'weapon' || !WEAPONS[item.key]) {
@@ -582,7 +627,8 @@ export class Player {
   }
 
   getActiveMelee() {
-    return MELEE_WEAPONS[this.meleeKey] || MELEE_WEAPONS.knife;
+    if (!this.meleeKey) return null;
+    return MELEE_WEAPONS[this.meleeKey] ?? null;
   }
 
   equipMelee(key) {
@@ -595,7 +641,10 @@ export class Player {
   }
 
   getWeaponDraw(time = 0) {
-    if (this.isMeleeActive()) return { sheet: this.getActiveMelee().sprite };
+    if (this.isMeleeActive()) {
+      const melee = this.getActiveMelee();
+      if (melee) return { sheet: melee.sprite };
+    }
     const cfg = WEAPONS[this.weaponKey];
     if (!cfg) return { sheet: 'm16' };
 
@@ -743,6 +792,7 @@ export class Player {
 
   setWeaponSlot(slot) {
     if (slot !== 'gun' && slot !== 'melee') return false;
+    if (slot === 'melee' && !this.meleeKey) return false;
     if (slot === 'melee') {
       this._abortReloadForMeleeSwitch();
       if (this.weaponSlot === 'gun') {
@@ -811,7 +861,8 @@ export class Player {
   }
 
   getDisplayWeapon() {
-    if (this.weaponSlot === 'melee') return this.getActiveMelee();
+    const melee = this.getActiveMelee();
+    if (this.isMeleeActive() && melee) return melee;
     return this.weapon;
   }
 

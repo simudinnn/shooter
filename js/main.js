@@ -13,6 +13,7 @@ import { collectCollisionTargets, moveWithEntityCollision } from './collision.js
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
 import { InventoryUI } from './inventory.js';
+import { getWeaponAmmoType, AMMO_TYPES } from './ammo.js';
 import { snapCamLean, worldToScreen, camPixelsFromPlayer, leanPixelsFromOffset, drawPixelEllipseShadow, PPU, INTERNAL_W, INTERNAL_H, RENDER_SCALE } from './renderConfig.js';
 
 const SPRITE_PLAYER = 1.50;
@@ -61,7 +62,6 @@ class Game {
     this._initCanvas();
     this._initUI();
     this._bindEvents();
-    this._minimapTick = 0;
   }
 
   _initCanvas() {
@@ -103,6 +103,7 @@ class Game {
       weaponName: document.getElementById('weapon-name'),
       ammoCurrent: document.getElementById('ammo-current'),
       ammoReserve: document.getElementById('ammo-reserve'),
+      ammoIcon: document.getElementById('ammo-icon'),
       reloadIndicator: document.getElementById('reload-indicator'),
       zoneLabel: document.getElementById('zone-label'),
       damageFlash: document.getElementById('damage-flash'),
@@ -972,8 +973,9 @@ class Game {
 
   _updateMeleeStrike(time) {
     if (!this.player.isMeleeStrikeFrame(time)) return;
-    this.player.melee.hitApplied = true;
     const melee = this.player.getActiveMelee();
+    if (!melee) return;
+    this.player.melee.hitApplied = true;
     const charge = this.player.melee.swingCharge;
     const dmg = melee.damage * this.player.getMeleeDamageMult(charge) * this.player.getDamageMult(time);
     const range = melee.range + this.player.radius;
@@ -1277,12 +1279,15 @@ class Game {
           : 0;
         const drawX = Math.round(s.x + shake.x + chargeShake);
         const shootPhase = robot.shoot?.phase ?? null;
+        const isScout = robot.type === 'scout';
         const robotMoving = robot.moving && !robot.emerging
           && shootPhase !== 'charging' && shootPhase !== 'firing';
         const canWalkBounce = robotMoving
           && !robot.jump?.active && !robot.jump?.charging;
-        const walkBounce = robot.type === 'scout'
-          ? getScoutWalkBounceY(drawTime, canWalkBounce)
+        const scoutChaseWalk = isScout && robot.chasing && robotMoving;
+        const scoutWalkMult = scoutChaseWalk ? 1.75 : 1;
+        const walkBounce = isScout
+          ? getScoutWalkBounceY(drawTime * scoutWalkMult, canWalkBounce)
           : getWalkBounceY(robot.walkPhase, canWalkBounce);
         const walkBouncePx = Math.round(walkBounce);
         const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
@@ -1299,7 +1304,6 @@ class Game {
           ctx.fill();
         }
         ctx.globalAlpha = 0.3 + emerge * 0.7;
-        const isScout = robot.type === 'scout';
         const shadowLift = isScout ? 4 : 0;
         const shadowRx = (isScout ? 15 : 10) * emerge;
         const shadowRy = (isScout ? 5.5 : 4) * emerge;
@@ -1307,7 +1311,14 @@ class Game {
           drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx);
         }
         const bodySheet = getEnemyBodySheet(robot.type, robotMoving, shootPhase);
-        const bodyAnim = getEnemyBodyAnim(robot.type, robotMoving, shootPhase, drawTime, robot.shoot?.animStart);
+        const bodyAnim = getEnemyBodyAnim(
+          robot.type,
+          robotMoving,
+          shootPhase,
+          drawTime,
+          robot.shoot?.animStart,
+          { walkSpeedMult: scoutWalkMult },
+        );
         this.sprites.draw(
           ctx,
           bodySheet,
@@ -1351,12 +1362,13 @@ class Game {
         const drop = this.player.getMeleeSwingDrop(drawTime);
         const bladeTilt = this.player.getMeleeBladeTilt(drawTime);
         const meleePose = getMeleeHoldPose(this.player, lunge);
-        const meleeGs = this._worldToScreen(meleePose.worldX, meleePose.worldZ);
+        const meleeOffX = Math.round((meleePose.worldX - this.player.x) * PPU);
+        const meleeOffY = Math.round((meleePose.worldZ - this.player.z) * PPU);
         this.sprites.draw(
           ctx,
           weaponDraw.sheet,
-          meleeGs.x,
-          meleeGs.y + drop + playerBounce + idleBreath,
+          playerGs.x + meleeOffX,
+          playerGs.y + meleeOffY + drop + playerBounce + idleBreath,
           SPRITE_GUN,
           meleePose.angle,
           meleePose.flipX,
@@ -1367,25 +1379,26 @@ class Game {
       } else {
         const gunAim = gunAimTransform(this.player.angle);
         const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
-        const gunWorldX = this.player.x + Math.sin(this.player.angle) * holdDist;
-        const gunWorldZ = this.player.z + Math.cos(this.player.angle) * holdDist;
-        const normalGs = this._worldToScreen(gunWorldX, gunWorldZ);
+        const holdOffX = Math.round(Math.sin(this.player.angle) * holdDist * PPU);
+        const holdOffY = Math.round(Math.cos(this.player.angle) * holdDist * PPU);
+        const normalSx = playerGs.x + holdOffX;
+        const normalSy = playerGs.y + holdOffY;
         let sx;
         let sy;
         let aimAngle;
         let aimFlip;
         if (reloadPose) {
           const b = reloadPose.blend;
-          const normalY = normalGs.y + playerBounce + idleBreath;
+          const normalY = normalSy + playerBounce + idleBreath;
           const centerY = playerGs.y + playerBounce + idleBreath;
           const holdX = getReloadHoldScreenX(playerGs.x, reloadPose.flipX);
-          sx = Math.round(normalGs.x + (holdX - normalGs.x) * b);
-          sy = normalY + (centerY - normalY) * b;
+          sx = normalSx + Math.round((holdX - normalSx) * b);
+          sy = normalY + Math.round((centerY - normalY) * b);
           aimAngle = reloadPose.angle;
           aimFlip = reloadPose.flipX;
         } else {
-          sx = normalGs.x;
-          sy = normalGs.y + playerBounce + idleBreath;
+          sx = normalSx;
+          sy = normalSy + playerBounce + idleBreath;
           aimAngle = gunAim.angle - this.player.gunKick;
           aimFlip = gunAim.flipX;
         }
@@ -1458,6 +1471,46 @@ class Game {
     if (fillW > 0) ctx.fillRect(bx, by, fillW, barH);
   }
 
+  _positionInteractPromptAbovePlayer() {
+    if (!this.player || !this.el.interactPrompt) return;
+    this._syncCamPixels();
+    const ps = this._worldToScreen(this.player.x, this.player.z);
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = rect.width / INTERNAL_W;
+    const scaleY = rect.height / INTERNAL_H;
+    const clientX = rect.left + ps.x * scaleX;
+    const feetLift = (spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER) + CHAR_NATIVE_PX * SPRITE_PLAYER) * scaleY;
+    const clientY = rect.top + ps.y * scaleY - feetLift;
+    this.el.interactPrompt.style.left = `${clientX}px`;
+    this.el.interactPrompt.style.top = `${clientY}px`;
+    this.el.interactPrompt.style.bottom = 'auto';
+    this.el.interactPrompt.style.transform = 'translate(-50%, -100%)';
+  }
+
+  _drawAmmoHudIcon(ammoType) {
+    const canvas = this.el.ammoIcon;
+    if (!canvas) return;
+    const srcPx = 16;
+    const scale = 2;
+    const outPx = srcPx * scale;
+    if (canvas.width !== outPx) {
+      canvas.width = outPx;
+      canvas.height = outPx;
+    }
+    if (!ammoType) {
+      canvas.classList.add('hidden');
+      return;
+    }
+    canvas.classList.remove('hidden');
+    const spriteName = AMMO_TYPES[ammoType]?.sprite ?? 'pistol_ammo';
+    const img = this.sprites?.images[spriteName];
+    if (!img) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, outPx, outPx);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, srcPx, srcPx, 0, 0, outPx, outPx);
+  }
+
   _updateHUD() {
     const w = this.player.getDisplayWeapon();
     const time = performance.now() / 1000;
@@ -1470,6 +1523,7 @@ class Game {
       this.el.ammoReserve.textContent = '—';
       this.el.ammoCurrent.style.color = '#e8e4dc';
       this.el.reloadIndicator.classList.add('hidden');
+      this._drawAmmoHudIcon(null);
     } else {
       const gun = this.player.getWeapon();
       const reserve = this.player.getReserveAmmo();
@@ -1478,6 +1532,7 @@ class Game {
       this.el.ammoCurrent.style.color = gun.ammo === 0 ? '#ff4040' : '#e8e4dc';
       this.el.ammoReserve.style.color = reserve > 0 ? '#8899aa' : '#556066';
       this.el.reloadIndicator.classList.toggle('hidden', !gun.reloading);
+      this._drawAmmoHudIcon(getWeaponAmmoType(this.player.weaponKey));
     }
 
     const biome = getBiome(this.player.x, this.player.z);
@@ -1489,9 +1544,10 @@ class Game {
     if (this.items.pickupMsg) {
       this.el.pickupStatus.textContent = this.items.pickupMsg;
       this.el.pickupStatus.classList.add('active');
+      this.el.pickupStatus.classList.toggle('error', this.items.pickupMsgError);
     } else {
       this.el.pickupStatus.textContent = '';
-      this.el.pickupStatus.classList.remove('active');
+      this.el.pickupStatus.classList.remove('active', 'error');
     }
 
     const power = this.player.getActivePowerUpLabel(time);
@@ -1512,10 +1568,7 @@ class Game {
     if (canOpenChest) {
       if (this.mobile) {
         this.el.interactPrompt.textContent = 'E to open';
-        this.el.interactPrompt.style.left = '';
-        this.el.interactPrompt.style.top = '';
-        this.el.interactPrompt.style.bottom = '';
-        this.el.interactPrompt.style.transform = '';
+        this._positionInteractPromptAbovePlayer();
       } else {
         const mx = this.mouse.clientX;
         const my = this.mouse.clientY;
@@ -1532,10 +1585,7 @@ class Game {
       this.el.interactPrompt.style.transform = '';
     }
 
-    this._minimapTick++;
-    if ((this._minimapTick & 3) === 0) {
-      this.minimap.render(this.player, this.robots, this.world, this.chests);
-    }
+    this.minimap.render(this.player, this.robots, this.world, this.chests);
   }
 
   _checkGameOver() {
@@ -1548,8 +1598,7 @@ class Game {
     this.audio.lose();
     this.el.gameOverTitle.textContent = 'Mission failed';
     this.el.gameOverTitle.style.color = '#f05030';
-    const wave = this.waves?.wave || 0;
-    this.el.gameOverStats.textContent = `Wave ${wave} · Kills: ${this.kills} · Time: ${elapsed}s · HP: ${Math.ceil(this.player.health)}`;
+    this.el.gameOverStats.textContent = `Kills: ${this.kills} · Time: ${elapsed}s · HP: ${Math.ceil(this.player.health)}`;
     this.el.gameOver.classList.remove('hidden');
     this.el.hud.classList.add('hidden');
     document.body.classList.remove('game-active');

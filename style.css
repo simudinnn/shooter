@@ -241,6 +241,11 @@ button:active {
   text-shadow: 0 0 8px rgba(80, 208, 128, 0.5);
 }
 
+#pickup-status.active.error {
+  color: #ff5050;
+  text-shadow: 0 0 8px rgba(255, 64, 64, 0.45);
+}
+
 #powerup-status {
   font-size: var(--hud-xs);
   letter-spacing: 0;
@@ -309,10 +314,25 @@ button:active {
 }
 
 #ammo-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: var(--hud-lg);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
+}
+
+#ammo-icon {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  flex-shrink: 0;
+}
+
+#ammo-icon.hidden {
+  display: none;
 }
 
 .ammo-sep {
@@ -326,7 +346,7 @@ button:active {
 }
 
 #reload-indicator {
-  color: #f05030;
+  color: #d1d1d1;
   font-size: var(--hud-xs);
   letter-spacing: 0;
   margin-top: 6px;
@@ -547,18 +567,6 @@ body.inv-custom-cursor * {
   cursor: pointer;
 }
 
-.inv-chest-slot:hover {
-  filter: brightness(1.12);
-}
-
-.inv-chest-slot.inv-selected::after {
-  content: '';
-  position: absolute;
-  inset: 1px;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 2px #f0a030;
-}
-
 :root {
   --inv-slot-art: 18px;
 }
@@ -618,12 +626,6 @@ body.inv-custom-cursor * {
   letter-spacing: 0;
 }
 
-.inv-weapon-slot:hover:not(:disabled),
-.inv-item-slot:not(.inv-locked):hover:not(:disabled) {
-  filter: brightness(1.12);
-}
-
-.inv-item-slot.inv-selected::after,
 .inv-weapon-slot.inv-active::after {
   content: '';
   position: absolute;
@@ -632,17 +634,8 @@ body.inv-custom-cursor * {
   box-shadow: inset 0 0 0 2px #70d090;
 }
 
-.inv-item-slot.inv-selected::after {
-  box-shadow: inset 0 0 0 2px #f0a030;
-}
-
-.inv-weapon-slot.inv-active,
-.inv-item-slot.inv-active {
+.inv-weapon-slot.inv-active {
   filter: none;
-}
-
-.inv-item-slot.inv-selected {
-  filter: brightness(1.08);
 }
 
 .inv-item-slot.inv-drag-source {
@@ -762,7 +755,8 @@ body.inv-custom-cursor * {
   font-size: 16px;
   letter-spacing: 0;
   pointer-events: none;
-  white-space: nowrap;
+  white-space: pre-line;
+  max-width: min(280px, 90vw);
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.1s ease;
@@ -954,10 +948,6 @@ body.game-active.mobile-ui #health-bar-wrap {
 
 body.game-active.mobile-ui #interact-prompt {
   z-index: 70;
-  bottom: max(200px, calc(env(safe-area-inset-bottom, 0px) + 188px));
-  left: 50%;
-  right: auto;
-  transform: translateX(-50%);
 }
 
 body.game-active.mobile-ui .joystick-base {

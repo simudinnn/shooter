@@ -77,7 +77,7 @@ export class InventoryUI {
     if (!this._contextMenuEl || this._contextMenuEl.classList.contains('hidden')) return;
     if (e.target.closest('.inv-context-menu')) return;
     if (e.target.closest('.inv-context-btn')) return;
-    if (e.target.closest('.inv-item-slot, .inv-chest-slot') === this._contextAnchorEl) return;
+    if (e.target.closest('.inv-item-slot, .inv-chest-slot, .inv-weapon-slot') === this._contextAnchorEl) return;
     this._hideContextMenu();
   }
 
@@ -222,9 +222,13 @@ export class InventoryUI {
   }
 
   _slotIcon(src) {
-    const img = document.createElement('img');
+    const bank = this.game.sprites;
+    const cached = bank?.getImageByPath?.(src);
+    const img = (cached?.complete && cached.naturalWidth > 0)
+      ? cached.cloneNode(false)
+      : document.createElement('img');
     img.className = 'inv-slot-icon';
-    img.src = src;
+    if (!img.src) img.src = src;
     img.alt = '';
     img.draggable = false;
     img.onerror = () => { img.style.visibility = 'hidden'; };
@@ -416,9 +420,17 @@ export class InventoryUI {
   }
 
   _showContextMenu(e, container, index, anchorEl) {
-    const item = container === 'chest'
-      ? this.chest?.slots[index]
-      : this.game.player?.itemSlots[index];
+    const player = this.game.player;
+    let item;
+    if (container === 'main') {
+      item = player?._weaponItemFromEquipped?.();
+    } else if (container === 'melee') {
+      item = player?._meleeItemFromEquipped?.();
+    } else if (container === 'chest') {
+      item = this.chest?.slots[index];
+    } else {
+      item = player?.itemSlots[index];
+    }
     if (!item || !anchorEl) return;
 
     e.preventDefault();
@@ -447,13 +459,24 @@ export class InventoryUI {
       }
 
       const magAmmo = Math.max(0, Math.floor(item.ammo ?? 0));
-      if (magAmmo > 0) {
+      if (magAmmo > 0 && (container === 'item' || container === 'chest' || container === 'main')) {
         const ammoBtn = document.createElement('button');
         ammoBtn.type = 'button';
         ammoBtn.className = 'inv-context-btn';
         ammoBtn.textContent = 'Take ammo';
         this._bindContextAction(ammoBtn, () => {
-          this._contextTakeAmmo(index, container);
+          if (container === 'main') {
+            const result = player.takeAmmoFromEquippedGun();
+            if (result.ok) {
+              this.game.items.setPickupMsg(`+${result.taken} ammo`);
+              this.game.audio.pickup();
+            }
+          } else {
+            this._contextTakeAmmo(index, container);
+            return;
+          }
+          this._hideContextMenu();
+          this.render();
         });
         actions.appendChild(ammoBtn);
       }
@@ -468,17 +491,32 @@ export class InventoryUI {
         });
         actions.appendChild(btn);
       }
-    } else if (item.kind === 'bandage') {
+    } else if (item.kind === 'bandage' && container === 'item') {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'inv-context-btn';
       btn.textContent = 'Use';
       this._bindContextAction(btn, () => {
-        if (container === 'item') this._useConsumable(this.game.player, index);
+        this._useConsumable(this.game.player, index);
         this._hideContextMenu();
         this.render();
       });
       actions.appendChild(btn);
+    }
+
+    if (this._canSplitStack(item) && (container === 'item' || container === 'chest')) {
+      const splitBtn = document.createElement('button');
+      splitBtn.type = 'button';
+      splitBtn.className = 'inv-context-btn';
+      splitBtn.textContent = 'Split';
+      this._bindContextAction(splitBtn, () => {
+        if (!this._splitStack(container, index)) {
+          this.game.items.setPickupMsg('No empty slot', { error: true });
+        }
+        this._hideContextMenu();
+        this.render();
+      });
+      actions.appendChild(splitBtn);
     }
 
     this._positionContextMenu(anchorEl);
@@ -490,6 +528,110 @@ export class InventoryUI {
     this._cursorEl.style.visibility = 'visible';
     this._cursorEl.style.left = `${clientX}px`;
     this._cursorEl.style.top = `${clientY}px`;
+  }
+
+  _isStackableItem(item) {
+    return item?.kind === 'ammo' || item?.kind === 'bandage';
+  }
+
+  _groupStacksInContainer(container, focusIndex) {
+    const slots = container === 'chest' ? this.chest?.slots : this.game.player?.itemSlots;
+    if (!slots) return;
+    const focus = slots[focusIndex];
+    if (!this._isStackableItem(focus)) return;
+
+    let total = focus.kind === 'bandage' ? (focus.amount ?? 1) : (focus.amount ?? 0);
+    for (let i = 0; i < slots.length; i++) {
+      if (i === focusIndex) continue;
+      const s = slots[i];
+      const matches = focus.kind === 'bandage'
+        ? bandageItemsMatch(s, focus)
+        : ammoItemsMatch(s, focus);
+      if (!matches) continue;
+      total += focus.kind === 'bandage' ? (s.amount ?? 1) : (s.amount ?? 0);
+      slots[i] = null;
+    }
+
+    const stackMax = focus.kind === 'bandage' ? BANDAGE_STACK_MAX : AMMO_STACK_MAX;
+    const inFocus = Math.min(stackMax, total);
+    if (focus.kind === 'bandage') {
+      slots[focusIndex] = { kind: 'bandage', amount: inFocus };
+    } else {
+      slots[focusIndex] = { kind: 'ammo', ammoType: focus.ammoType, amount: inFocus };
+    }
+    total -= inFocus;
+
+    while (total > 0) {
+      const empty = this._findEmptySlot(slots, container, -1);
+      if (empty < 0) break;
+      const add = Math.min(stackMax, total);
+      if (focus.kind === 'bandage') {
+        slots[empty] = { kind: 'bandage', amount: add };
+      } else {
+        slots[empty] = { kind: 'ammo', ammoType: focus.ammoType, amount: add };
+      }
+      total -= add;
+    }
+
+    this.game.audio?.inventoryMove();
+  }
+
+  _stackAmountForSplit(item) {
+    if (item?.kind === 'ammo') return item.amount ?? 0;
+    if (item?.kind === 'bandage') return item.amount ?? 1;
+    return 0;
+  }
+
+  _canSplitStack(item) {
+    return this._isStackableItem(item) && this._stackAmountForSplit(item) > 1;
+  }
+
+  _findEmptySlot(slots, container, skipIndex) {
+    const player = this.game.player;
+    for (let i = 0; i < slots.length; i++) {
+      if (i === skipIndex || slots[i] != null) continue;
+      if (container === 'item' && !player?.isItemSlotUnlocked(i)) continue;
+      return i;
+    }
+    return -1;
+  }
+
+  _splitStack(container, index) {
+    const slots = container === 'chest' ? this.chest?.slots : this.game.player?.itemSlots;
+    if (!slots) return false;
+    const item = slots[index];
+    if (!this._canSplitStack(item)) return false;
+
+    const total = this._stackAmountForSplit(item);
+    const keep = Math.ceil(total / 2);
+    const splitOff = total - keep;
+    if (splitOff <= 0) return false;
+
+    const emptyIdx = this._findEmptySlot(slots, container, index);
+    if (emptyIdx < 0) return false;
+
+    if (item.kind === 'ammo') {
+      slots[index] = { kind: 'ammo', ammoType: item.ammoType, amount: keep };
+      slots[emptyIdx] = { kind: 'ammo', ammoType: item.ammoType, amount: splitOff };
+    } else if (item.kind === 'bandage') {
+      slots[index] = { kind: 'bandage', amount: keep };
+      slots[emptyIdx] = { kind: 'bandage', amount: splitOff };
+    } else {
+      return false;
+    }
+
+    this.game.audio?.inventoryMove();
+    return true;
+  }
+
+  _bindStackDoubleClick(slot, container, index, item) {
+    if (!this._isStackableItem(item)) return;
+    slot.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._groupStacksInContainer(container, index);
+      this.render();
+    });
   }
 
   _contextEquipWeapon(index, container) {
@@ -533,8 +675,7 @@ export class InventoryUI {
     if (!item) return;
     const result = player.takeLoadedAmmoFromWeapon(item);
     if (result.ok) {
-      this.game.items.pickupMsg = `+${result.taken} ammo`;
-      this.game.items.pickupMsgTimer = 2;
+      this.game.items.setPickupMsg(`+${result.taken} ammo`);
       this.game.audio.pickup();
     }
     this._hideContextMenu();
@@ -544,15 +685,21 @@ export class InventoryUI {
   _bindContextMenu(slot, container, index) {
     slot.addEventListener('contextmenu', (e) => {
       if (slot.disabled) return;
+      const player = this.game.player;
+      if (container === 'main' && !player?.weaponKey) return;
+      if (container === 'melee' && !player?.meleeKey) return;
       this._showContextMenu(e, container, index, slot);
     });
     slot.addEventListener('pointerleave', (e) => this._onContextSlotPointerLeave(e));
     if (this.game.mobile) {
       slot.addEventListener('click', (e) => {
         if (slot.disabled || this._skipClick || this.drag) return;
-        const item = container === 'chest'
-          ? this.chest?.slots[index]
-          : this.game.player?.itemSlots[index];
+        const player = this.game.player;
+        let item;
+        if (container === 'main') item = player?._weaponItemFromEquipped?.();
+        else if (container === 'melee') item = player?._meleeItemFromEquipped?.();
+        else if (container === 'chest') item = this.chest?.slots[index];
+        else item = player?.itemSlots[index];
         if (!item) return;
         e.preventDefault();
         e.stopPropagation();
@@ -567,16 +714,14 @@ export class InventoryUI {
     if (item.kind === 'ammo') return false;
     if (item.kind === 'bandage') {
       if (player.health >= player.maxHealth) {
-        this.game.items.pickupMsg = 'Already at full health';
-        this.game.items.pickupMsgTimer = 2;
+        this.game.items.setPickupMsg('Already at full health', { error: true });
         return false;
       }
       if (!player.heal(30)) return false;
       const left = (item.amount ?? 1) - 1;
       if (left <= 0) player.itemSlots[index] = null;
       else player.itemSlots[index] = { kind: 'bandage', amount: left };
-      this.game.items.pickupMsg = '+30 HP';
-      this.game.items.pickupMsgTimer = 2;
+      this.game.items.setPickupMsg('+30 HP');
       this.game.audio.pickup();
       return true;
     }
@@ -640,7 +785,15 @@ export class InventoryUI {
 
   _pickUpDragItem() {
     const { fromType, fromIndex, player } = this.drag ?? {};
-    if (fromType === 'chest') {
+    if (fromType === 'main') {
+      const item = player?.suspendMainWeaponForDrag();
+      if (!item) return;
+      this.drag.stashedItem = item;
+    } else if (fromType === 'melee') {
+      const item = player?.suspendMeleeForDrag();
+      if (!item) return;
+      this.drag.stashedItem = item;
+    } else if (fromType === 'chest') {
       const item = this.chest?.slots[fromIndex];
       if (!item) return;
       this.drag.stashedItem = item;
@@ -658,11 +811,26 @@ export class InventoryUI {
   _restoreDragItem() {
     const { fromType, fromIndex, player, stashedItem } = this.drag ?? {};
     if (!stashedItem) return;
-    if (fromType === 'chest') {
+    if (fromType === 'main') {
+      if (!player?.weaponKey) player.restoreMainWeapon(stashedItem);
+    } else if (fromType === 'melee') {
+      if (!player?.meleeKey) player?.restoreMeleeWeapon(stashedItem);
+    } else if (fromType === 'chest') {
       if (this.chest?.slots[fromIndex] == null) this.chest.slots[fromIndex] = stashedItem;
     } else if (player && fromIndex != null && player.itemSlots[fromIndex] == null) {
       player.itemSlots[fromIndex] = stashedItem;
     }
+  }
+
+  _bindWeaponSlotDrag(slot, zone, player) {
+    slot.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (zone === 'main' && !player.weaponKey) return;
+      if (zone === 'melee' && !player.meleeKey) return;
+      e.preventDefault();
+      slot.setPointerCapture?.(e.pointerId);
+      this._beginDrag(e, zone, -1, player, slot);
+    });
   }
 
   _bindItemSlotDrag(slot, index, player, container = 'item') {
@@ -940,6 +1108,91 @@ export class InventoryUI {
     this.render();
   }
 
+  _placeDragFromMain(dropTarget, item, player) {
+    if (dropTarget.dataset.dropZone === 'main') {
+      player.restoreMainWeapon(item);
+      return true;
+    }
+    if (dropTarget.classList.contains('inv-item-slot')) {
+      const toIndex = Number(dropTarget.dataset.slotIndex);
+      if (!player.isItemSlotUnlocked(toIndex)) return false;
+      const displaced = player.itemSlots[toIndex];
+      player.itemSlots[toIndex] = player._normalizeWeaponItem(item);
+      if (displaced?.kind === 'weapon') {
+        player.restoreMainWeapon(displaced);
+      } else if (displaced) {
+        const empty = player.itemSlots.findIndex((s, i) => player.isItemSlotUnlocked(i) && s == null);
+        if (empty < 0) {
+          player.itemSlots[toIndex] = displaced;
+          player.restoreMainWeapon(item);
+          return false;
+        }
+        player.itemSlots[empty] = displaced;
+      }
+      return true;
+    }
+    if (dropTarget.classList.contains('inv-chest-slot') && this.chest) {
+      const toIndex = Number(dropTarget.dataset.slotIndex);
+      const displaced = this._placeInSlot('chest', toIndex, player._normalizeWeaponItem(item));
+      if (displaced?.kind === 'weapon') {
+        player.restoreMainWeapon(displaced);
+      } else if (displaced) {
+        const empty = player.itemSlots.findIndex((s, i) => player.isItemSlotUnlocked(i) && s == null);
+        if (empty < 0) {
+          this.chest.slots[toIndex] = displaced;
+          player.restoreMainWeapon(item);
+          return false;
+        }
+        player.itemSlots[empty] = displaced;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  _placeDragFromMelee(dropTarget, item, player) {
+    if (dropTarget.dataset.dropZone === 'melee') {
+      player.restoreMeleeWeapon(item);
+      return true;
+    }
+    if (dropTarget.dataset.dropZone === 'main') return false;
+    if (dropTarget.classList.contains('inv-item-slot')) {
+      const toIndex = Number(dropTarget.dataset.slotIndex);
+      if (!player.isItemSlotUnlocked(toIndex)) return false;
+      const displaced = player.itemSlots[toIndex];
+      player.itemSlots[toIndex] = item;
+      if (displaced?.kind === 'melee') {
+        player.restoreMeleeWeapon(displaced);
+      } else if (displaced) {
+        const empty = player.itemSlots.findIndex((s, i) => player.isItemSlotUnlocked(i) && s == null);
+        if (empty < 0) {
+          player.itemSlots[toIndex] = displaced;
+          player.restoreMeleeWeapon(item);
+          return false;
+        }
+        player.itemSlots[empty] = displaced;
+      }
+      return true;
+    }
+    if (dropTarget.classList.contains('inv-chest-slot') && this.chest) {
+      const toIndex = Number(dropTarget.dataset.slotIndex);
+      const displaced = this._placeInSlot('chest', toIndex, item);
+      if (displaced?.kind === 'melee') {
+        player.restoreMeleeWeapon(displaced);
+      } else if (displaced) {
+        const empty = player.itemSlots.findIndex((s, i) => player.isItemSlotUnlocked(i) && s == null);
+        if (empty < 0) {
+          this.chest.slots[toIndex] = displaced;
+          player.restoreMeleeWeapon(item);
+          return false;
+        }
+        player.itemSlots[empty] = displaced;
+      }
+      return true;
+    }
+    return false;
+  }
+
   _handleDragEnd() {
     if (!this.drag) return;
     document.removeEventListener('pointermove', this._onDragMove, this._dragListenerOpts);
@@ -955,7 +1208,13 @@ export class InventoryUI {
     let placed = false;
 
     if (moved && dropTarget && stashedItem) {
-      if (dropTarget.dataset.dropZone === 'main' && stashedItem.kind === 'weapon' && WEAPONS[stashedItem.key]) {
+      if (fromType === 'main') {
+        placed = this._placeDragFromMain(dropTarget, stashedItem, player);
+        if (placed) this._skipClick = true;
+      } else if (fromType === 'melee') {
+        placed = this._placeDragFromMelee(dropTarget, stashedItem, player);
+        if (placed) this._skipClick = true;
+      } else if (dropTarget.dataset.dropZone === 'main' && stashedItem.kind === 'weapon' && WEAPONS[stashedItem.key]) {
         if (fromType === 'item' && fromIndex != null) {
           placed = player.equipWeaponIntoSlot(fromIndex, stashedItem);
         } else if (fromType === 'chest' && fromIndex != null && this.chest) {
@@ -1056,6 +1315,7 @@ export class InventoryUI {
     this._bindTooltip(slot, getItemDisplayName(data));
     this._bindItemSlotDrag(slot, index, player, 'item');
     this._bindContextMenu(slot, 'item', index);
+    this._bindStackDoubleClick(slot, 'item', index, data);
 
     if (data.kind === 'weapon') {
       slot.addEventListener('click', (e) => {
@@ -1108,6 +1368,7 @@ export class InventoryUI {
         this._bindTooltip(slot, getItemDisplayName(data));
         this._bindItemSlotDrag(slot, i, this.game.player, 'chest');
         this._bindContextMenu(slot, 'chest', i);
+        this._bindStackDoubleClick(slot, 'chest', i, data);
         slot.addEventListener('click', (e) => {
           if (this._skipClick) { this._skipClick = false; return; }
           if (!e.shiftKey) return;
@@ -1146,15 +1407,21 @@ export class InventoryUI {
     primary.dataset.dropZone = 'main';
     if (player.weaponKey) {
       if (!player.isMeleeActive()) primary.classList.add('inv-active');
+      const weaponItem = { kind: 'weapon', key: player.weaponKey, ammo: player.weapon?.ammo };
       const cfg = WEAPONS[player.weaponKey];
       primary.appendChild(this._weaponIcon(cfg.sprite));
-      this._bindTooltip(primary, cfg.name);
+      this._bindTooltip(primary, getItemDisplayName(weaponItem));
+      this._bindWeaponSlotDrag(primary, 'main', player);
+      this._bindContextMenu(primary, 'main', -1);
     } else {
       primary.classList.add('inv-empty-slot');
       primary.textContent = 'Main';
       this._bindTooltip(primary, 'Main weapon');
+      this._bindWeaponSlotDrag(primary, 'main', player);
     }
-    primary.addEventListener('click', () => {
+    primary.addEventListener('click', (e) => {
+      if (this._skipClick) { this._skipClick = false; return; }
+      if (this.game.mobile && player.weaponKey) return;
       if (player.weaponKey) {
         player.setWeaponSlot('gun');
         this.render();
@@ -1166,11 +1433,26 @@ export class InventoryUI {
     secondary.classList.add('inv-secondary');
     secondary.dataset.dropZone = 'melee';
     if (player.isMeleeActive()) secondary.classList.add('inv-active');
-    secondary.appendChild(this._weaponIcon(player.getActiveMelee().sprite));
-    this._bindTooltip(secondary, player.getActiveMelee().name);
-    secondary.addEventListener('click', () => {
-      player.equipMelee(player.meleeKey);
-      this.render();
+    if (player.meleeKey) {
+      const meleeItem = { kind: 'melee', key: player.meleeKey };
+      const meleeCfg = MELEE_WEAPONS[player.meleeKey];
+      secondary.appendChild(this._weaponIcon(meleeCfg.sprite));
+      this._bindTooltip(secondary, getItemDisplayName(meleeItem));
+      this._bindWeaponSlotDrag(secondary, 'melee', player);
+      this._bindContextMenu(secondary, 'melee', -1);
+    } else {
+      secondary.classList.add('inv-empty-slot');
+      secondary.textContent = 'Melee';
+      this._bindTooltip(secondary, 'Melee weapon');
+      this._bindWeaponSlotDrag(secondary, 'melee', player);
+    }
+    secondary.addEventListener('click', (e) => {
+      if (this._skipClick) { this._skipClick = false; return; }
+      if (this.game.mobile && player.meleeKey) return;
+      if (player.meleeKey) {
+        player.equipMelee(player.meleeKey);
+        this.render();
+      }
     });
     this.weaponsEl.appendChild(secondary);
 

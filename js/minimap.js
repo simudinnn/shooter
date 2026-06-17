@@ -14,9 +14,11 @@ export class Minimap {
 
   worldToMap(x, z, player) {
     const scale = this.size / (MINIMAP_RADIUS * 2);
+    const refX = Math.round(player.x * scale) / scale;
+    const refZ = Math.round(player.z * scale) / scale;
     return {
-      x: (x - player.x) * scale + this.size / 2,
-      y: (z - player.z) * scale + this.size / 2,
+      x: Math.round((x - refX) * scale + this.size / 2),
+      y: Math.round((z - refZ) * scale + this.size / 2),
     };
   }
 
@@ -73,7 +75,7 @@ export class Minimap {
         if (!tile) continue;
         const p = this.worldToMap(tx * TILE, tz * TILE, player);
         ctx.fillStyle = getTerrainMapColorFromTile(tile, wx, wz);
-        ctx.fillRect(p.x | 0, p.y | 0, Math.ceil(tilePx), Math.ceil(tilePx));
+        ctx.fillRect(p.x, p.y, Math.ceil(tilePx), Math.ceil(tilePx));
       }
     }
 

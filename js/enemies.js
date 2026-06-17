@@ -24,7 +24,10 @@ export class Robot {
     this.meleeCooldown = 0.3 + Math.random() * 0.5;
     this.walkPhase = Math.random() * Math.PI * 2;
     this.wanderAngle = Math.random() * Math.PI * 2;
-    this.wanderTimer = 0;
+    this.wanderPhase = Math.random() < 0.4 ? 'idle' : 'moving';
+    this.wanderTimer = this.wanderPhase === 'idle'
+      ? 0.8 + Math.random() * 2
+      : 1.2 + Math.random() * 2.5;
     this.chasing = false;
     this.aggroByHit = false;
     this.moving = false;
@@ -103,7 +106,7 @@ export class Robot {
 
     const force = damage * 0.22 * knockMult;
     const jumpCommit = this.jump.charging || this.jump.active;
-    if (!jumpCommit) {
+    if (!jumpCommit && !opts.noStagger) {
       this.knockVX = nx * force;
       this.knockVZ = nz * force;
       this.stagger = Math.min(0.22, (0.06 + damage * 0.004) * knockMult);
@@ -175,6 +178,25 @@ export class Robot {
     );
     this.x = r.x;
     this.z = r.z;
+  }
+
+  /** Idle / walk cycles while not chasing — pauses between direction changes. */
+  _updateWander(dt, world, player, robots, speedMult = 0.45) {
+    this.wanderTimer -= dt;
+    if (this.wanderTimer <= 0) {
+      if (this.wanderPhase === 'moving') {
+        this.wanderPhase = 'idle';
+        this.wanderTimer = 0.7 + Math.random() * 2.2;
+      } else {
+        this.wanderPhase = 'moving';
+        this.wanderAngle += (Math.random() - 0.5) * 2.4;
+        this.wanderTimer = 1.4 + Math.random() * 3.2;
+      }
+    }
+    if (this.wanderPhase !== 'moving') return false;
+    this._move(dt, world, player, robots, Math.sin(this.wanderAngle), Math.cos(this.wanderAngle), speedMult);
+    this.angle = this.wanderAngle;
+    return true;
   }
 
   _endJump() {
@@ -348,14 +370,7 @@ export class Robot {
         this.meleeCooldown = this.attackRate;
       }
     } else if (!this.chasing) {
-      this.wanderTimer -= dt;
-      if (this.wanderTimer <= 0) {
-        this.wanderAngle += (Math.random() - 0.5) * 2.2;
-        this.wanderTimer = 2 + Math.random() * 3;
-      }
-      this._move(dt, world, player, robots, Math.sin(this.wanderAngle), Math.cos(this.wanderAngle), 0.45);
-      this.angle = this.wanderAngle;
-      moving = true;
+      moving = this._updateWander(dt, world, player, robots, 0.45);
     } else if (dist > chaseRange + 4 && !this.aggroByHit) {
       this.chasing = false;
     }
@@ -366,20 +381,6 @@ export class Robot {
 
   static findSpawnPoint(world, existing, minPlayerDist = 14, player = null) {
     const spawnR = 0.85;
-
-    if (world.usesImageMap()) {
-      for (let i = 0; i < 300; i++) {
-        const pt = world.randomMapPoint(6);
-        if (!pt) continue;
-        if (Robot._isValidSpawn(world, pt.x, pt.z, spawnR, existing, player, minPlayerDist)) {
-          return pt;
-        }
-      }
-      const px = player?.x ?? 0;
-      const pz = player?.z ?? 0;
-      return world.imageMap.findWalkableNear(px, pz, 28);
-    }
-
     const minD = minPlayerDist;
     const maxD = 58;
     for (let i = 0; i < 200; i++) {
@@ -452,7 +453,12 @@ export class Scout extends Robot {
   }
 
   applyHit(damage, fromX, fromZ, world, opts = {}) {
-    return super.applyHit(damage, fromX, fromZ, world, { ...opts, knockMult: 0.28 });
+    const inShoot = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';
+    return super.applyHit(damage, fromX, fromZ, world, {
+      ...opts,
+      knockMult: 0.28,
+      noStagger: inShoot,
+    });
   }
 
   _abortShoot(force = false) {
@@ -570,20 +576,13 @@ export class Scout extends Robot {
       }
     } else if (!this.chasing) {
       this._abortShoot();
-      this.wanderTimer -= dt;
-      if (this.wanderTimer <= 0) {
-        this.wanderAngle += (Math.random() - 0.5) * 2.2;
-        this.wanderTimer = 2 + Math.random() * 3;
-      }
-      this._move(dt, world, player, robots, Math.sin(this.wanderAngle), Math.cos(this.wanderAngle), 0.45);
-      this.angle = this.wanderAngle;
-      moving = true;
+      moving = this._updateWander(dt, world, player, robots, 0.45);
     } else if (dist > chaseRange + 4 && !this.aggroByHit && !inAttack) {
       this.chasing = false;
       this._abortShoot();
     }
 
-    this.walkPhase += dt * (moving ? 6 : 0);
+    this.walkPhase += dt * (moving ? (this.chasing ? 10 : 6) : 0);
     this.moving = moving;
   }
 }
