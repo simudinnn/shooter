@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v136';
+const CACHE = 'robot-ruins-v144';
 
 function playerSprites() {
   // Only precache sprites that exist in assets/player/.
@@ -48,6 +48,7 @@ const SHELL = [
   './manifest.webmanifest',
   './js/font-load.js',
   './js/renderConfig.js',
+  './js/dayNight.js',
   './js/main.js',
   './js/player.js',
   './js/enemies.js',
