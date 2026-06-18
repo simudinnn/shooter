@@ -166,7 +166,7 @@ export const MELEE_WEAPONS = {
     swingDownRatio: 0.34,
     swingAngle: Math.PI / 2.4,
     maxChargeTime: 0.75,
-    minDamageMult: 0.,
+    minDamageMult: 0.1,
     maxDamageMult: 1.0,
     maxRaiseAngle: Math.PI / 2.8,
     sprite: 'knife',
@@ -179,9 +179,9 @@ export const MELEE_WEAPONS = {
     swingDuration: 0.38,
     swingDownRatio: 0.36,
     swingAngle: Math.PI / 2.0,
-    maxChargeTime: 1.0,
-    minDamageMult: 0.3,
-    maxDamageMult: 1.15,
+    maxChargeTime: 1.5,
+    minDamageMult: 0.1,
+    maxDamageMult: 1,
     maxRaiseAngle: Math.PI / 2.2,
     sprite: 'fire_axe',
   },
@@ -194,7 +194,7 @@ export const MELEE_WEAPONS = {
     swingDownRatio: 0.34,
     swingAngle: Math.PI / 2.5,
     maxChargeTime: 0.85,
-    minDamageMult: 0.4,
+    minDamageMult: 0.1,
     maxDamageMult: 1.0,
     maxRaiseAngle: Math.PI / 2.6,
     sprite: 'wooden_bat',
@@ -208,8 +208,8 @@ export const MELEE_WEAPONS = {
     swingDownRatio: 0.32,
     swingAngle: Math.PI / 2.35,
     maxChargeTime: 0.7,
-    minDamageMult: 0.38,
-    maxDamageMult: 1.05,
+    minDamageMult: 0.1,
+    maxDamageMult: 1.0,
     maxRaiseAngle: Math.PI / 2.7,
     sprite: 'crowbar',
   },
@@ -1339,7 +1339,7 @@ export function findBulletSpawn(world, px, pz, angle) {
   const raiseZ = BULLET_SPAWN_RAISE_PX / 8;
   const x = px + sin * dist;
   const z = pz + cos * dist - raiseZ;
-  if (world.checkCollision(x, z, BULLET_RADIUS)) {
+  if (world.checkCollisionShape(x, z, { kind: 'circle', radius: BULLET_RADIUS }, true)) {
     return { x: px, z: pz - raiseZ };
   }
   const fromX = px - sin * 0.08;

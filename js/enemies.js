@@ -1,4 +1,6 @@
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
+import { getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset } from './sprites.js';
+import { PPU } from './renderConfig.js';
 
 /** Base robot enemy — `type` selects sprite sheet (spider, walker, scout, …). */
 export const SCOUT_SPAWN_SHARE = 0.12;
@@ -17,7 +19,7 @@ export class Robot {
     this.baseSpeed = (10 + Math.random() * 2.2) * (1 + (wave - 1) * 0.05);
     this.speed = this.baseSpeed;
     this.radius = 1.45;
-    this.moveRadius = 0.62;
+    this.moveRadius = 0.95;
     this.meleeDamage = Math.floor((12 + Math.random() * 10) * (1 + (wave - 1) * 0.07));
     this.meleeRange = 1.7;
     this.attackRate = Math.max(0.45, 0.75 + Math.random() * 0.35 - (wave - 1) * 0.03);
@@ -59,6 +61,19 @@ export class Robot {
     return this.maxHealth > 0 ? this.health / this.maxHealth : 0;
   }
 
+  /** World wall collision — feet-centered AABB uses soft wall slices (fits door). */
+  getWorldCollider() {
+    const nativePx = getEnemyNativePx(this.type);
+    const scale = getEnemyDrawScale(this.type);
+    const feetOff = spriteFeetOffset(nativePx, scale) / PPU;
+    return {
+      kind: 'aabb',
+      zOff: feetOff * 0.48,
+      halfW: (nativePx * scale * 0.30) / PPU,
+      halfH: (nativePx * scale * 0.26) / PPU,
+    };
+  }
+
   static createEmerging(x, z, wave, world, type = 'spider') {
     const robot = new Robot(x, z, wave, type);
     robot.emerging = true;
@@ -98,9 +113,9 @@ export class Robot {
     const nz = dz / len;
     const knockMult = (opts.knockMult ?? 1) * (opts.fromBullet ? 1.1 : 1);
 
-    const mr = this.moveRadius;
+    const col = this.getWorldCollider();
     const instantPush = damage * 0.035 * knockMult;
-    const push = world.moveAxis(this.x, this.z, nx * instantPush, nz * instantPush, mr);
+    const push = world.moveAxisShape(this.x, this.z, nx * instantPush, nz * instantPush, col);
     this.x = push.x;
     this.z = push.z;
 
@@ -131,7 +146,7 @@ export class Robot {
     }
     const targets = collectCollisionTargets({ player, robots, exclude: this });
     const body = { kind: 'circle', radius: this.radius };
-    const feet = { kind: 'circle', radius: this.moveRadius };
+    const worldCol = this.getWorldCollider();
     const r = moveWithEntityCollision(
       world,
       this.x,
@@ -139,7 +154,7 @@ export class Robot {
       this.knockVX * dt,
       this.knockVZ * dt,
       body,
-      feet,
+      worldCol,
       targets,
       this,
     );
@@ -164,7 +179,7 @@ export class Robot {
     const stepZ = (vz / len) * this.speed * speedMult * dt;
     const targets = collectCollisionTargets({ player, robots, exclude: this });
     const body = { kind: 'circle', radius: this.radius };
-    const feet = { kind: 'circle', radius: this.moveRadius };
+    const worldCol = this.getWorldCollider();
     const r = moveWithEntityCollision(
       world,
       this.x,
@@ -172,7 +187,7 @@ export class Robot {
       stepX,
       stepZ,
       body,
-      feet,
+      worldCol,
       targets,
       this,
     );
@@ -247,8 +262,11 @@ export class Robot {
     const nextX = prevX + stepX;
     const nextZ = prevZ + stepZ;
 
-    if (world.segmentBlocked(prevX, prevZ, nextX, nextZ, this.moveRadius)) {
-      const wallStop = world.moveAxis(prevX, prevZ, stepX, stepZ, this.moveRadius);
+    const col = this.getWorldCollider();
+    const zOff = col.zOff ?? 0;
+    const effR = col.kind === 'aabb' ? Math.max(col.halfW, col.halfH) : col.radius;
+    if (world.segmentBlocked(prevX, prevZ + zOff, nextX, nextZ + zOff, effR, true)) {
+      const wallStop = world.moveAxisShape(prevX, prevZ, stepX, stepZ, col);
       this.x = wallStop.x;
       this.z = wallStop.z;
       this._endJump();
@@ -257,7 +275,7 @@ export class Robot {
 
     const targets = collectCollisionTargets({ player, robots, exclude: this });
     const body = { kind: 'circle', radius: this.radius };
-    const feet = { kind: 'circle', radius: this.moveRadius };
+    const worldCol = this.getWorldCollider();
     const r = moveWithEntityCollision(
       world,
       prevX,
@@ -265,7 +283,7 @@ export class Robot {
       stepX,
       stepZ,
       body,
-      feet,
+      worldCol,
       targets,
       this,
     );
@@ -380,7 +398,7 @@ export class Robot {
   }
 
   static findSpawnPoint(world, existing, minPlayerDist = 14, player = null) {
-    const spawnR = 0.85;
+    const spawnR = 1.05;
     const minD = minPlayerDist;
     const maxD = 58;
     for (let i = 0; i < 200; i++) {
@@ -421,7 +439,7 @@ export class Scout extends Robot {
     this.baseSpeed = (4 + Math.random() * 1.0) * (1 + (wave - 1) * 0.04);
     this.speed = this.baseSpeed;
     this.radius = 1.6;
-    this.moveRadius = 0.78;
+    this.moveRadius = 1.1;
     this.meleeDamage = Math.floor((18 + Math.random() * 14) * (1 + (wave - 1) * 0.07));
     this.meleeRange = 3;
     this.attackRate = Math.max(0.5, 0.8 + Math.random() * 0.35 - (wave - 1) * 0.02);

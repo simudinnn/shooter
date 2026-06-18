@@ -1,4 +1,20 @@
-const CACHE = 'robot-ruins-v144';
+const CACHE = 'robot-ruins-v174';
+
+function shackSprites() {
+  return [
+    './assets/buildings/shack/floor_wood.png',
+    './assets/buildings/shack/floor_wood_alt.png',
+    './assets/buildings/shack/wall_ns.png',
+    './assets/buildings/shack/wall_ew.png',
+    './assets/buildings/shack/wall_corner.png',
+    './assets/buildings/shack/door_mat.png',
+    './assets/buildings/shack/wall_door_top.png',
+    './assets/buildings/shack/roof_fill.png',
+    './assets/buildings/shack/roof_edge.png',
+  ];
+}
+
+const SHACK_SPRITES = shackSprites();
 
 function playerSprites() {
   // Only precache sprites that exist in assets/player/.
@@ -54,6 +70,8 @@ const SHELL = [
   './js/enemies.js',
   './js/chunkEntities.js',
   './js/chests.js',
+  './js/buildingGen.js',
+  './js/buildings.js',
   './js/loot.js',
   './js/audio.js',
   './js/minimap.js',
@@ -84,6 +102,7 @@ const ASSETS = [
   ...PLAYER_SPRITES,
   ...WEAPON_SPRITES,
   ...WORLD_SPRITES,
+  ...SHACK_SPRITES,
   './assets/enemies/spider.png',
   './assets/enemies/spider_walk.png',
   './assets/enemies/scout.png',

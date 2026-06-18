@@ -73,6 +73,17 @@ export class InventoryUI {
     });
     this.panel?.addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('pointerdown', (e) => this._onDocumentPointerDown(e));
+    const syncMods = (e) => {
+      if (!this.game.modifiers) return;
+      this.game.modifiers.shift = e.shiftKey;
+      this.game.modifiers.ctrl = e.ctrlKey;
+    };
+    this.root?.addEventListener('keydown', syncMods);
+    this.root?.addEventListener('keyup', syncMods);
+  }
+
+  _isShiftClick(e) {
+    return !!(e?.shiftKey || this.game?._isShiftHeld?.());
   }
 
   _onDocumentPointerDown(e) {
@@ -160,6 +171,8 @@ export class InventoryUI {
     this.game.mouseDown = false;
     this.game.prevMouseDown = false;
     this.root?.classList.remove('hidden');
+    this.panel?.setAttribute('tabindex', '-1');
+    this.panel?.focus({ preventScroll: true });
     this._enableInvCursor();
     this.render();
     this._prewarmInventoryIcons().then(() => {
@@ -228,16 +241,14 @@ export class InventoryUI {
 
   _slotIcon(src) {
     const bank = this.game.sprites;
-    const cached = bank?.getImageByPath?.(src);
+    const dataUrl = bank?.getIconDataUrl?.(src);
     const img = document.createElement('img');
     img.className = 'inv-slot-icon';
     img.alt = '';
     img.draggable = false;
     img.loading = 'eager';
-    img.decoding = 'async';
-    const ready = cached?.complete && cached.naturalWidth > 0;
-    img.src = ready ? (cached.currentSrc || src) : src;
-    if (ready && img.decode) img.decode().catch(() => {});
+    img.decoding = 'sync';
+    img.src = dataUrl || src;
     img.onerror = () => { img.style.visibility = 'hidden'; };
     return img;
   }
@@ -271,8 +282,8 @@ export class InventoryUI {
 
   async _prewarmInventoryIcons() {
     const bank = this.game.sprites;
-    if (!bank?.ready) return;
-    await bank.decodePaths(this._collectInventoryIconPaths());
+    if (!bank) return;
+    await bank.ensurePaths(this._collectInventoryIconPaths());
   }
 
   _appendStackCount(slot, amount) {
@@ -886,6 +897,7 @@ export class InventoryUI {
 
   _bindWeaponSlotDrag(slot, zone, player) {
     slot.addEventListener('pointerdown', (e) => {
+      if (this._isShiftClick(e)) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (zone === 'main' && !player.weaponKey) return;
       if (zone === 'melee' && !player.meleeKey) return;
@@ -899,6 +911,7 @@ export class InventoryUI {
     slot.dataset.slotIndex = String(index);
     slot.dataset.slotContainer = container;
     slot.addEventListener('pointerdown', (e) => {
+      if (this._isShiftClick(e)) return;
       if (slot.disabled) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (!this._slotItemAt(container, index, player)) return;
@@ -1105,6 +1118,39 @@ export class InventoryUI {
     return true;
   }
 
+  _runShiftClick(container, index) {
+    const player = this.game.player;
+    if (!player) return;
+
+    if (container === 'item') {
+      if (!player.isItemSlotUnlocked(index)) return;
+      const data = player.itemSlots[index];
+      if (!data) return;
+      if (data.kind === 'weapon' || data.kind === 'melee') {
+        if (!this.chestMode || !this.chest) return;
+        this._shiftInventorySlotToChest(index);
+        return;
+      }
+      if (this.chestMode && this.chest) {
+        this._shiftInventorySlotToChest(index);
+        return;
+      }
+      if (this._useConsumable(player, index)) this.render();
+      return;
+    }
+
+    if (container === 'chest' && this.chest) {
+      const data = this.chest.slots[index];
+      if (!data) return;
+      const result = player.tryStoreItem(data);
+      if (result.ok) {
+        this.chest.slots[index] = result.remainder;
+        this.game.audio?.pickup();
+      }
+      this.render();
+    }
+  }
+
   _shiftInventorySlotToChest(index) {
     const player = this.game.player;
     if (!this.chest || !player) return;
@@ -1255,17 +1301,25 @@ export class InventoryUI {
     return false;
   }
 
-  _handleDragEnd() {
+  _handleDragEnd(e) {
     if (!this.drag) return;
     document.removeEventListener('pointermove', this._onDragMove, this._dragListenerOpts);
     document.removeEventListener('pointerup', this._onDragEnd, this._dragListenerOpts);
     document.removeEventListener('pointercancel', this._onDragEnd, this._dragListenerOpts);
-    const { pointerId, sourceEl } = this.drag;
+    const { pointerId, sourceEl, fromType, fromIndex, moved } = this.drag;
     if (sourceEl?.hasPointerCapture?.(pointerId)) {
       sourceEl.releasePointerCapture(pointerId);
     }
 
-    const { fromType, fromIndex, player, moved, dropTarget, stashedItem } = this.drag;
+    if (!moved && this._isShiftClick(e) && (fromType === 'item' || fromType === 'chest')) {
+      this._clearDragVisuals();
+      this._runShiftClick(fromType, fromIndex);
+      this._skipClick = true;
+      this.drag = null;
+      return;
+    }
+
+    const { player, dropTarget, stashedItem } = this.drag;
     this._clearDragVisuals();
     let placed = false;
 
@@ -1382,7 +1436,7 @@ export class InventoryUI {
     if (data.kind === 'weapon') {
       slot.addEventListener('click', (e) => {
         if (this._skipClick) { this._skipClick = false; return; }
-        if (!e.shiftKey) return;
+        if (!this._isShiftClick(e)) return;
         if (!this.chestMode) return;
         if (!this.chest) return;
         e.preventDefault();
@@ -1391,7 +1445,7 @@ export class InventoryUI {
     } else if (data.kind === 'melee') {
       slot.addEventListener('click', (e) => {
         if (this._skipClick) { this._skipClick = false; return; }
-        if (!e.shiftKey) return;
+        if (!this._isShiftClick(e)) return;
         if (!this.chestMode) return;
         if (!this.chest) return;
         e.preventDefault();
@@ -1400,7 +1454,7 @@ export class InventoryUI {
     } else {
       slot.addEventListener('click', (e) => {
         if (this._skipClick) { this._skipClick = false; return; }
-        if (!e.shiftKey) return;
+        if (!this._isShiftClick(e)) return;
 
         // When chest UI is open, shift-click is strictly a transfer.
         if (this.chestMode && this.chest) {
@@ -1432,7 +1486,7 @@ export class InventoryUI {
         this._bindStackDoubleClick(slot, 'chest', i, data);
         slot.addEventListener('click', (e) => {
           if (this._skipClick) { this._skipClick = false; return; }
-          if (!e.shiftKey) return;
+          if (!this._isShiftClick(e)) return;
           e.preventDefault();
           const player = this.game.player;
           const result = player.tryStoreItem(data);
@@ -1481,6 +1535,7 @@ export class InventoryUI {
     }
     primary.addEventListener('click', (e) => {
       if (this._skipClick) { this._skipClick = false; return; }
+      if (this._isShiftClick(e)) return;
       if (this.game.mobile && player.weaponKey) return;
       if (player.weaponKey) {
         player.setWeaponSlot('gun');
@@ -1507,6 +1562,7 @@ export class InventoryUI {
     }
     secondary.addEventListener('click', (e) => {
       if (this._skipClick) { this._skipClick = false; return; }
+      if (this._isShiftClick(e)) return;
       if (this.game.mobile && player.meleeKey) return;
       if (player.meleeKey) {
         player.equipMelee(player.meleeKey);

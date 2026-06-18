@@ -52,7 +52,7 @@ export class Minimap {
     ctx.fill();
   }
 
-  render(player, robots, world, chests) {
+  render(player, robots, world, chests, buildings) {
     const ctx = this.ctx;
     const s = this.size;
     const scale = s / (MINIMAP_RADIUS * 2);
@@ -94,6 +94,25 @@ export class Minimap {
       if (p.x < 0 || p.x > s || p.y < 0 || p.y > s) continue;
       ctx.fillStyle = '#c87830';
       ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    }
+
+    for (const building of buildings?.buildings ?? []) {
+      const p0 = this.worldToMap(building.originX, building.originZ, player);
+      const p1 = this.worldToMap(
+        building.originX + building.footprintW,
+        building.originZ + building.footprintH,
+        player,
+      );
+      const bx = Math.min(p0.x, p1.x);
+      const by = Math.min(p0.y, p1.y);
+      const bw = Math.abs(p1.x - p0.x);
+      const bh = Math.abs(p1.y - p0.y);
+      if (bx > s || by > s || bx + bw < 0 || by + bh < 0) continue;
+      ctx.fillStyle = 'rgba(120, 90, 70, 0.75)';
+      ctx.fillRect(bx, by, Math.max(2, bw), Math.max(2, bh));
+      ctx.strokeStyle = 'rgba(200, 150, 100, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx + 0.5, by + 0.5, Math.max(2, bw) - 1, Math.max(2, bh) - 1);
     }
 
     for (const robot of robots) {

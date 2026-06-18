@@ -20,7 +20,7 @@ export const MAP_SIZE = 999999;
 export const PLAYER_RADIUS = 0.6;
 export const BULLET_RADIUS = 0.15;
 
-const BAKE_VERSION = 24;
+const BAKE_VERSION = 29;
 const MAX_CACHED_CHUNKS = 256;
 
 export class World {
@@ -104,6 +104,34 @@ export class World {
     const lz = tz - cz * CHUNK_TILES;
     if (lx < 0 || lz < 0 || lx >= CHUNK_TILES || lz >= CHUNK_TILES) return null;
     return this.getChunk(cx, cz).tiles[lz * CHUNK_TILES + lx];
+  }
+
+  /** Remove ground foliage + blocking props overlapping a world-space rectangle. */
+  clearFoliageInRect(minX, maxX, minZ, maxZ) {
+    const minCX = Math.floor(minX / CHUNK_WORLD);
+    const maxCX = Math.floor(maxX / CHUNK_WORLD);
+    const minCZ = Math.floor(minZ / CHUNK_WORLD);
+    const maxCZ = Math.floor(maxZ / CHUNK_WORLD);
+    for (let cz = minCZ; cz <= maxCZ; cz++) {
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        const chunk = this.getChunk(cx, cz);
+        const before = chunk.foliage.length;
+        chunk.foliage = chunk.foliage.filter(
+          (f) => !foliageIntersectsRect(f, minX, maxX, minZ, maxZ),
+        );
+        chunk.obstacles = chunk.obstacles.filter((obs) => {
+          if (obs.kind !== 'circle') return true;
+          const r = obs.radius ?? 0;
+          return !(
+            obs.x + r >= minX && obs.x - r <= maxX
+            && obs.z + r >= minZ && obs.z - r <= maxZ
+          );
+        });
+        if (chunk.foliage.length !== before) {
+          chunk.bakedLayer = null;
+        }
+      }
+    }
   }
 
   _bakeChunkGround(chunk, sprites, tilePx) {
@@ -284,11 +312,98 @@ export class World {
     return { x: px + dx * push, z: pz + dz * push };
   }
 
-  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false) {
+  _aabbHalfExtents(obs, soft = false) {
+    if (soft && obs.softHalfW != null) {
+      return { halfW: obs.softHalfW, halfH: obs.softHalfH };
+    }
+    return { halfW: obs.halfW, halfH: obs.halfH };
+  }
+
+  _aabbCenter(obs, soft = false) {
+    if (soft && obs.softZ != null) {
+      return { x: obs.softX ?? obs.x, z: obs.softZ };
+    }
+    return { x: obs.x, z: obs.z };
+  }
+
+  _circleAabbHit(px, pz, pr, obs, soft = false, forBullets = false) {
+    if (forBullets && obs.bulletZ != null) {
+      const halfW = obs.softHalfW ?? obs.halfW;
+      const halfH = obs.bulletHalfH ?? obs.halfH;
+      const ox = obs.softX ?? obs.x;
+      const oz = obs.bulletZ;
+      const cx = Math.max(ox - halfW, Math.min(px, ox + halfW));
+      const cz = Math.max(oz - halfH, Math.min(pz, oz + halfH));
+      const dx = px - cx;
+      const dz = pz - cz;
+      return dx * dx + dz * dz < pr * pr;
+    }
+    const { halfW, halfH } = this._aabbHalfExtents(obs, soft);
+    const { x: ox, z: oz } = this._aabbCenter(obs, soft);
+    const cx = Math.max(ox - halfW, Math.min(px, ox + halfW));
+    const cz = Math.max(oz - halfH, Math.min(pz, oz + halfH));
+    const dx = px - cx;
+    const dz = pz - cz;
+    return dx * dx + dz * dz < pr * pr;
+  }
+
+  _pushCircleFromAabb(px, pz, pr, obs, soft = false) {
+    const { halfW, halfH } = this._aabbHalfExtents(obs, soft);
+    const { x: ox, z: oz } = this._aabbCenter(obs, soft);
+    const cx = Math.max(ox - halfW, Math.min(px, ox + halfW));
+    const cz = Math.max(oz - halfH, Math.min(pz, oz + halfH));
+    const dx = px - cx;
+    const dz = pz - cz;
+    const distSq = dx * dx + dz * dz;
+    if (distSq >= pr * pr) return { x: px, z: pz };
+    if (distSq < 1e-8) {
+      const ox2 = px - ox;
+      const oz2 = pz - oz;
+      if (Math.abs(ox2) > Math.abs(oz2)) {
+        return { x: px + Math.sign(ox2 || 1) * pr, z: pz };
+      }
+      return { x: px, z: pz + Math.sign(oz2 || 1) * pr };
+    }
+    const dist = Math.sqrt(distSq);
+    const push = (pr - dist) / dist;
+    return { x: px + dx * push, z: pz + dz * push };
+  }
+
+  _aabbAabbHit(acx, acz, halfW, halfH, obs, soft = false) {
+    const ext = this._aabbHalfExtents(obs, soft);
+    const { x: ox, z: oz } = this._aabbCenter(obs, soft);
+    return Math.abs(acx - ox) < halfW + ext.halfW
+      && Math.abs(acz - oz) < halfH + ext.halfH;
+  }
+
+  _pushAabbFromAabb(acx, acz, halfW, halfH, obs, soft = false) {
+    const ext = this._aabbHalfExtents(obs, soft);
+    const { x: ox, z: oz } = this._aabbCenter(obs, soft);
+    const overlapX = halfW + ext.halfW - Math.abs(acx - ox);
+    const overlapZ = halfH + ext.halfH - Math.abs(acz - oz);
+    if (overlapX <= 0 || overlapZ <= 0) return { cx: acx, cz: acz };
+    if (overlapX < overlapZ) {
+      const dir = acx < ox ? -1 : 1;
+      return { cx: acx + dir * overlapX, cz: acz };
+    }
+    const dir = acz < oz ? -1 : 1;
+    return { cx: acx, cz: acz + dir * overlapZ };
+  }
+
+  _aabbHardEnabled(obs) {
+    return obs.halfW > 0 && obs.halfH > 0;
+  }
+
+  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false) {
     for (const obs of obstacles) {
       if (forBullets && obs.blocksBullets === false) continue;
       if (obs.kind === 'circle' && this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
         return true;
+      }
+      if (obs.kind === 'aabb') {
+        if (!soft && !this._aabbHardEnabled(obs)) continue;
+        if (soft && obs.softHalfW == null) continue;
+        if (this._circleAabbHit(x, z, radius, obs, soft, forBullets)) return true;
       }
     }
     return false;
@@ -320,9 +435,9 @@ export class World {
     return { cx: acx + (nx / dist) * overlap, cz: acz + (nz / dist) * overlap };
   }
 
-  _checkShapeCollision(px, pz, shape, obstacles) {
+  _checkShapeCollision(px, pz, shape, obstacles, soft = false) {
     if (!shape || shape.kind === 'circle') {
-      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles);
+      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles, false, soft);
     }
     const acx = px;
     const acz = pz + shape.zOff;
@@ -330,20 +445,25 @@ export class World {
       if (obs.kind === 'circle' && this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) {
         return true;
       }
+      if (obs.kind === 'aabb') {
+        if (!soft && !this._aabbHardEnabled(obs)) continue;
+        if (soft && obs.softHalfW == null) continue;
+        if (this._aabbAabbHit(acx, acz, shape.halfW, shape.halfH, obs, soft)) return true;
+      }
     }
     return false;
   }
 
-  checkCollisionShape(px, pz, shape) {
+  checkCollisionShape(px, pz, shape, soft = false) {
     const obstacles = this.collectObstaclesNear(px, pz, this._shapeReach(shape));
-    return this._checkShapeCollision(px, pz, shape, obstacles);
+    return this._checkShapeCollision(px, pz, shape, obstacles, soft);
   }
 
   checkCollision(x, z, radius) {
-    return this.checkCollisionShape(x, z, { kind: 'circle', radius });
+    return this.checkCollisionShape(x, z, { kind: 'circle', radius }, false);
   }
 
-  segmentBlocked(x0, z0, x1, z1, radius = BULLET_RADIUS) {
+  segmentBlocked(x0, z0, x1, z1, radius = BULLET_RADIUS, soft = true) {
     const dist = Math.hypot(x1 - x0, z1 - z0);
     const steps = Math.max(2, Math.ceil(dist / 0.25));
     const midX = (x0 + x1) * 0.5;
@@ -353,13 +473,13 @@ export class World {
       const t = i / steps;
       const x = x0 + (x1 - x0) * t;
       const z = z0 + (z1 - z0) * t;
-      if (this._checkObstacleCollision(x, z, radius, obstacles, true)) return true;
+      if (this._checkObstacleCollision(x, z, radius, obstacles, true, soft)) return true;
     }
     return false;
   }
 
   hasLineOfSight(x0, z0, x1, z1, radius = 0.25) {
-    return !this.segmentBlocked(x0, z0, x1, z1, radius);
+    return !this.segmentBlocked(x0, z0, x1, z1, radius, false);
   }
 
   resolveMovementShape(oldX, oldZ, newX, newZ, shape) {
@@ -373,19 +493,26 @@ export class World {
 
     for (let i = 0; i < 4; i++) {
       for (const obs of obstacles) {
-        if (obs.kind !== 'circle') continue;
         let acx = x;
         let acz = z + shape.zOff;
-        if (!this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) continue;
-        const pushed = this._pushAabbFromCircle(acx, acz, shape.halfW, shape.halfH, obs);
-        x = pushed.cx;
-        z = pushed.cz - shape.zOff;
+        if (obs.kind === 'circle') {
+          if (!this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) continue;
+          const pushed = this._pushAabbFromCircle(acx, acz, shape.halfW, shape.halfH, obs);
+          x = pushed.cx;
+          z = pushed.cz - shape.zOff;
+        } else if (obs.kind === 'aabb') {
+          if (obs.softHalfW == null) continue;
+          if (!this._aabbAabbHit(acx, acz, shape.halfW, shape.halfH, obs, true)) continue;
+          const pushed = this._pushAabbFromAabb(acx, acz, shape.halfW, shape.halfH, obs, true);
+          x = pushed.cx;
+          z = pushed.cz - shape.zOff;
+        }
       }
     }
 
-    if (!this._checkShapeCollision(x, z, shape, obstacles)) return { x, z };
-    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles)) return { x: newX, z: oldZ };
-    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles)) return { x: oldX, z: newZ };
+    if (!this._checkShapeCollision(x, z, shape, obstacles, true)) return { x, z };
+    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, true)) return { x: newX, z: oldZ };
+    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, true)) return { x: oldX, z: newZ };
     return { x: oldX, z: oldZ };
   }
 
@@ -400,6 +527,13 @@ export class World {
           const p = this._pushOutCircle(x, z, radius, obs);
           x = p.x;
           z = p.z;
+        } else if (obs.kind === 'aabb') {
+          if (!this._aabbHardEnabled(obs)) continue;
+          if (this._circleAabbHit(x, z, radius, obs)) {
+            const p = this._pushCircleFromAabb(x, z, radius, obs);
+            x = p.x;
+            z = p.z;
+          }
         }
       }
     }

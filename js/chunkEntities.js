@@ -1,6 +1,6 @@
 import { Robot, Scout, createGroundErupt, SCOUT_SPAWN_SHARE } from './enemies.js';
 import { CHUNK_WORLD, hash01, isInBase } from './worldGen.js';
-import { CHEST_CHUNK_SPAWN_RATE } from './chests.js';
+import { BUILDING_CHUNK_SPAWN_RATE, MAX_NEARBY_BUILDINGS } from './buildings.js';
 
 /** Chunks around the player that stay populated with spiders/chests. */
 export const ENTITY_CHUNK_RADIUS = 4;
@@ -12,7 +12,7 @@ export const MAX_NEARBY_SPIDERS = 18;
 export const MAX_NEARBY_CHESTS = 10;
 /** Per-chunk spawn chance when a chunk is first populated. */
 export const SPIDER_CHUNK_CHANCE = 0.28;
-export const CHEST_CHUNK_CHANCE = CHEST_CHUNK_SPAWN_RATE;
+export const BUILDING_CHUNK_CHANCE = BUILDING_CHUNK_SPAWN_RATE;
 
 export class ChunkEntityManager {
   constructor(world, game) {
@@ -109,6 +109,7 @@ export class ChunkEntityManager {
     const d2 = this._despawnDist2();
     const clearedSpiderChunks = new Set();
     const clearedChestChunks = new Set();
+    const clearedBuildingChunks = new Set();
 
     this.game.robots = this.game.robots.filter((r) => {
       if (!r.alive && !r.emerging) return false;
@@ -134,6 +135,22 @@ export class ChunkEntityManager {
     }
     this.game.chests.chests = nextChests;
 
+    const nextBuildings = [];
+    for (const building of this.game.buildings.buildings) {
+      const cx = building.originX + building.footprintW * 0.5;
+      const cz = building.originZ + building.footprintH * 0.5;
+      if (this._nearbyDist2(player, cx, cz) <= d2) {
+        nextBuildings.push(building);
+        continue;
+      }
+      if (building.homeCx !== undefined && building.homeCz !== undefined) {
+        clearedBuildingChunks.add(`${building.homeCx},${building.homeCz}`);
+      }
+      if (building.chest) this.game.chests.remove(building.chest);
+      this.game.buildings._unregisterObstacles(building);
+    }
+    this.game.buildings.buildings = nextBuildings;
+
     for (const key of clearedSpiderChunks) {
       const chunk = this.world.chunks.get(key);
       if (!chunk) continue;
@@ -151,6 +168,24 @@ export class ChunkEntityManager {
       );
       if (!hasLocal) chunk.chestsSpawned = false;
     }
+
+    for (const key of clearedBuildingChunks) {
+      const chunk = this.world.chunks.get(key);
+      if (!chunk) continue;
+      const hasLocal = this.game.buildings.buildings.some(
+        (b) => b.homeCx === chunk.cx && b.homeCz === chunk.cz,
+      );
+      if (!hasLocal) chunk.buildingsSpawned = false;
+    }
+  }
+
+  _countNearbyBuildings(player) {
+    const d2 = this._despawnDist2();
+    return this.game.buildings.buildings.filter((b) => {
+      const cx = b.originX + b.footprintW * 0.5;
+      const cz = b.originZ + b.footprintH * 0.5;
+      return this._nearbyDist2(player, cx, cz) <= d2;
+    }).length;
   }
 
   _populateNearby(player) {
@@ -170,8 +205,22 @@ export class ChunkEntityManager {
 
     for (const { chunk } of chunks) {
       if (!chunk.spidersSpawned) this._spawnChunkSpiders(chunk, player, fx, fz);
-      if (!chunk.chestsSpawned) this._spawnChunkChests(chunk, player, fx, fz);
+      if (!chunk.buildingsSpawned) this._spawnChunkBuildings(chunk, player, fx, fz);
     }
+  }
+
+  _spawnChunkBuildings(chunk, player, fx, fz) {
+    this.game.buildings.spawnInChunk(
+      chunk,
+      this.world,
+      player,
+      () => this._countNearbyBuildings(player) < MAX_NEARBY_BUILDINGS,
+      {
+        fx,
+        fz,
+        isOffScreen: (x, z) => this._offScreenForSpawn(x, z),
+      },
+    );
   }
 
   _spawnChunkSpiders(chunk, player, fx, fz) {
@@ -204,20 +253,6 @@ export class ChunkEntityManager {
     this.game.robots.push(robot);
     this.game.particles.push(...createGroundErupt(pos.x, pos.z));
     chunk.spidersSpawned = true;
-  }
-
-  _spawnChunkChests(chunk, player, fx, fz) {
-    this.game.chests.spawnInChunk(
-      chunk,
-      this.world,
-      player,
-      () => this._countNearbyChests(player) < MAX_NEARBY_CHESTS,
-      {
-        fx,
-        fz,
-        isOffScreen: (x, z) => this._offScreenForSpawn(x, z),
-      },
-    );
   }
 
   _chunkEdgePoints(chunk) {

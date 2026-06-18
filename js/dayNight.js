@@ -5,15 +5,19 @@ const START_MINUTES = 12 * 60;
 export class DayNightCycle {
   constructor() {
     this.timeMinutes = START_MINUTES;
+    this.day = 1;
   }
 
   reset() {
     this.timeMinutes = START_MINUTES;
+    this.day = 1;
   }
 
   update(dt) {
+    const prev = this.timeMinutes;
     this.timeMinutes = (this.timeMinutes + dt) % MINUTES_PER_DAY;
     if (this.timeMinutes < 0) this.timeMinutes += MINUTES_PER_DAY;
+    if (this.timeMinutes < prev) this.day += 1;
   }
 
   getHours() {
@@ -28,6 +32,10 @@ export class DayNightCycle {
     const h = this.getHours();
     const m = this.getMinutes();
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  formatDay() {
+    return `Day ${this.day}`;
   }
 
   /** 0 = daylight, 1 = deepest night. */

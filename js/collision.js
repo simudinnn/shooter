@@ -90,6 +90,6 @@ export function collectCollisionTargets({ player, robots, exclude = null }) {
 export function moveWithEntityCollision(world, x, z, dx, dz, entityShape, worldShape, targets, exclude = null) {
   const moved = world.moveAxisShape(x, z, dx, dz, worldShape);
   let pos = resolveEntityPositionShape(moved.x, moved.z, entityShape, targets, exclude);
-  if (world.checkCollisionShape(pos.x, pos.z, worldShape)) pos = moved;
+  if (world.checkCollisionShape(pos.x, pos.z, worldShape, true)) pos = moved;
   return pos;
 }

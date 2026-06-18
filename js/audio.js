@@ -152,13 +152,15 @@ export class SoundManager {
     this._tone(495, 0.06, 0.07, 'sine');
   }
 
-  footstep() {
+  footstep(sprinting = false) {
     if (!this.enabled || !this.ctx) return;
     const now = this.ctx.currentTime;
-    if (now - this._lastFootstep < 0.22) return;
+    const minGap = sprinting ? 0.09 : 0.14;
+    if (now - this._lastFootstep < minGap) return;
     this._lastFootstep = now;
-    this._noise(0.035, 0.07, 500 + Math.random() * 200);
-    this._tone(80 + Math.random() * 40, 0.03, 0.04, 'triangle');
+    const vol = sprinting ? 1.15 : 1;
+    this._noise(0.035, 0.07 * vol, 500 + Math.random() * 200);
+    this._tone(80 + Math.random() * 40, 0.03, 0.04 * vol, 'triangle');
   }
 
   enemyFootstep(distance = 0) {
@@ -196,13 +198,13 @@ export class SoundManager {
     osc.frequency.setValueAtTime(90, t);
     osc.frequency.exponentialRampToValueAtTime(280, t + 0.55);
     gain.gain.setValueAtTime(0.001, t);
-    gain.gain.linearRampToValueAtTime(0.11 * vol, t + 0.08);
+    gain.gain.linearRampToValueAtTime(0.18 * vol, t + 0.08);
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.62);
     osc.connect(gain);
     gain.connect(master);
     osc.start(t);
     osc.stop(t + 0.65);
-    this._noise(0.12, 0.08 * vol, 520);
+    this._noise(0.12, 0.13 * vol, 520);
   }
 
   casingEject() {

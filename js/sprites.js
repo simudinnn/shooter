@@ -52,6 +52,18 @@ const BUILDING_ASSET_PATHS = Object.fromEntries(
   ['chest_wood', 'chest_metal', 'chest_rust', 'chest_moss'].map((name) => [name, `assets/buildings/${name}.png`]),
 );
 
+const SHACK_ASSET_PATHS = {
+  shack_floor_wood: 'assets/buildings/shack/floor_wood.png',
+  shack_floor_wood_alt: 'assets/buildings/shack/floor_wood_alt.png',
+  shack_door_mat: 'assets/buildings/shack/door_mat.png',
+  shack_wall_ns: 'assets/buildings/shack/wall_ns.png',
+  shack_wall_ew: 'assets/buildings/shack/wall_ew.png',
+  shack_wall_corner: 'assets/buildings/shack/wall_corner.png',
+  shack_wall_door_top: 'assets/buildings/shack/wall_door_top.png',
+  shack_roof_fill: 'assets/buildings/shack/roof_fill.png',
+  shack_roof_edge: 'assets/buildings/shack/roof_edge.png',
+};
+
 const CORE_ASSETS = {
   spider: 'assets/enemies/spider.png',
   spider_walk: 'assets/enemies/spider_walk.png',
@@ -61,6 +73,7 @@ const CORE_ASSETS = {
   wall: 'assets/world/wall.png',
   ...WORLD_ASSET_PATHS,
   ...BUILDING_ASSET_PATHS,
+  ...SHACK_ASSET_PATHS,
   ammo: 'assets/items/ammo.png',
   pistol_ammo: 'assets/items/pistol_ammo.png',
   rifle_ammo: 'assets/items/rifle_ammo.png',
@@ -720,7 +733,7 @@ function buildFallback(name) {
   if (name.startsWith('item_')) {
     return buildWeaponItemFallback(name.slice(5));
   }
-  if (name.startsWith('floor_') || name.startsWith('foliage_')) return null;
+  if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('shack_')) return null;
   if (name.startsWith('player_') || name.startsWith('spider') || name.startsWith('scout')) {
     return buildCharFallback(name);
   }
@@ -1109,8 +1122,10 @@ export class SpriteBank {
   constructor() {
     this.images = {};
     this._pathImages = {};
+    this._iconDataUrlCache = new Map();
     this.flipbooks = {};
     this.ready = false;
+    this._preloadPromise = null;
     this._tileBitmapCache = new Map();
     this._tileBitmapOrder = [];
     this._tileBitmapMax = 384;
@@ -1118,6 +1133,21 @@ export class SpriteBank {
 
   getImageByPath(path) {
     return this._pathImages[path] ?? null;
+  }
+
+  getIconDataUrl(path) {
+    if (this._iconDataUrlCache.has(path)) return this._iconDataUrlCache.get(path);
+    const img = this._pathImages[path];
+    if (!img?.complete || !img.naturalWidth) return null;
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0);
+    const url = c.toDataURL('image/png');
+    this._iconDataUrlCache.set(path, url);
+    return url;
   }
 
   async decodePaths(paths) {
@@ -1129,13 +1159,53 @@ export class SpriteBank {
     }));
   }
 
-  /** Pre-decode all inventory item icons (16×16) for instant UI on mobile. */
+  _loadPathOnly(path) {
+    if (this._pathImages[path]) return Promise.resolve();
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.decoding = 'async';
+      const finish = () => {
+        this._pathImages[path] = img;
+        if (img.decode) img.decode().then(resolve).catch(resolve);
+        else resolve();
+      };
+      img.onload = finish;
+      img.onerror = () => resolve();
+      img.src = path;
+    });
+  }
+
+  async ensurePaths(paths) {
+    const list = paths instanceof Set ? [...paths] : paths;
+    const missing = list.filter((p) => !this._pathImages[p]);
+    if (missing.length) await Promise.all(missing.map((p) => this._loadPathOnly(p)));
+    await this.decodePaths(list);
+    for (const p of list) this.getIconDataUrl(p);
+  }
+
+  /** Pre-decode inventory + UI icons for instant DOM slots on mobile. */
   async decodeItemIcons() {
-    const paths = Object.values(ASSET_PATHS).filter((p) => p.startsWith('assets/items/'));
-    await this.decodePaths(paths);
+    const paths = Object.values(ASSET_PATHS).filter((p) =>
+      p.startsWith('assets/items/') || p.startsWith('assets/ui/'),
+    );
+    await this.ensurePaths(paths);
+  }
+
+  async warmInventoryIcons() {
+    await this.decodeItemIcons();
+  }
+
+  preloadAll() {
+    if (!this._preloadPromise) {
+      this._preloadPromise = this.loadAll()
+        .then(() => this.warmInventoryIcons())
+        .catch(() => {});
+    }
+    return this._preloadPromise;
   }
 
   async loadAll() {
+    if (this.ready) return;
     const entries = Object.entries(ASSET_PATHS);
     await Promise.all(entries.map(([name, path]) => this._loadOne(name, path)));
     this.ready = true;
@@ -1226,7 +1296,7 @@ export class SpriteBank {
         else finish();
       };
       img.onerror = () => {
-        if (!name.startsWith('floor_') && !name.startsWith('foliage_')) {
+        if (!name.startsWith('floor_') && !name.startsWith('foliage_') && !name.startsWith('shack_')) {
           const fallback = buildFallback(name);
           if (fallback) {
             this.images[name] = fallback;
@@ -1285,7 +1355,7 @@ export class SpriteBank {
 
   _getImage(name) {
     if (this.images[name]) return this.images[name];
-    if (name.startsWith('floor_') || name.startsWith('foliage_')) return null;
+    if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('shack_')) return null;
     const fallback = buildFallback(name);
     if (!fallback) return null;
     this.images[name] = fallback;
@@ -1350,7 +1420,7 @@ export class SpriteBank {
   }
 
   getTileBitmap(name, px, tint) {
-    const img = this._getImage(name);
+    const img = this.images[name];
     if (!img) return null;
 
     const srcSize = img.naturalWidth || img.width || 16;

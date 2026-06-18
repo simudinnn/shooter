@@ -7,6 +7,14 @@ import { SoundManager } from './audio.js';
 import { Minimap } from './minimap.js';
 import { ItemManager } from './items.js';
 import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_H, CHEST_DRAW_PIVOT } from './chests.js';
+import {
+  BuildingManager,
+  drawBuildingFloors,
+  drawBuildingWall,
+  drawBuildingDoorLintel,
+  drawBuildingRoof,
+} from './buildings.js';
+import { wallDrawsInFront, wallFrontDrawZ, wallBackDrawZ, doorLintelSortZ, buildingGunClipBounds } from './buildingGen.js';
 import { chestSpriteName } from './loot.js';
 import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
@@ -27,7 +35,10 @@ const SPRITE_CURSOR = CURSOR_DRAW_SCALE;
 const AUTO_AIM_TURN_RATE = 16;
 const AUTO_AIM_TARGET_TURN_RATE = 4.5;
 const AUTO_AIM_STICK_TURN_RATE = 12;
+const AUTO_AIM_GUN_MAX_RANGE = 52;
+const AUTO_AIM_MELEE_MAX_RANGE = 4.5;
 const AUTO_AIM_SCREEN_PAD = 28;
+const MOBILE_STICK_DEADZONE = 0.15;
 /** Subtle camera lean toward cursor (world units = px / PPU). */
 const CAM_FOLLOW_STRENGTH = 0.15;
 const CAM_FOLLOW_MAX_PX = 64;
@@ -51,6 +62,7 @@ class Game {
     this.modifiers = { ctrl: false, shift: false };
     this.audio = new SoundManager();
     this.sprites = new SpriteBank();
+    this._spritePreload = this.sprites.preloadAll();
     this.mouse = { sx: INTERNAL_W / 2, sy: INTERNAL_H / 2, wx: 0, wz: 0, clientX: 0, clientY: 0 };
     this.camOffset = { x: 0, z: 0 };
     this._camPxX = 0;
@@ -107,6 +119,7 @@ class Game {
       ammoIcon: document.getElementById('ammo-icon'),
       reloadIndicator: document.getElementById('reload-indicator'),
       zoneLabel: document.getElementById('zone-label'),
+      gameDay: document.getElementById('game-day'),
       gameClock: document.getElementById('game-clock'),
       damageFlash: document.getElementById('damage-flash'),
       startBtn: document.getElementById('start-btn'),
@@ -203,7 +216,10 @@ class Game {
 
     window.addEventListener('keydown', (e) => this._onGameKeyDown(e), true);
     window.addEventListener('keyup', (e) => this._onGameKeyUp(e), true);
-    window.addEventListener('blur', () => this._clearKeyboardInput());
+    window.addEventListener('blur', () => {
+      if (this.inventoryUI?.isOpen()) return;
+      this._clearKeyboardInput();
+    });
 
     this.canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
@@ -323,7 +339,7 @@ class Game {
     if (this.keys['KeyS'] || this.keys['ArrowDown']) moveZ += 1;
     if (this.keys['KeyW'] || this.keys['ArrowUp']) moveZ -= 1;
     const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
-    if (stickMag > 0.12) {
+    if (stickMag > MOBILE_STICK_DEADZONE) {
       moveX += this.touchMove.x;
       moveZ += this.touchMove.z;
     }
@@ -355,6 +371,9 @@ class Game {
   _findNearestRobotOnScreen() {
     let best = null;
     let bestDist = Infinity;
+    const maxRange = this.mobile && this.player?.isMeleeActive()
+      ? AUTO_AIM_MELEE_MAX_RANGE
+      : AUTO_AIM_GUN_MAX_RANGE;
 
     for (const robot of this.robots) {
       if (!robot.alive && !robot.emerging) continue;
@@ -362,6 +381,7 @@ class Game {
       const dx = robot.x - this.player.x;
       const dz = robot.z - this.player.z;
       const dist = Math.hypot(dx, dz);
+      if (dist > maxRange) continue;
       if (dist < bestDist) {
         bestDist = dist;
         best = robot;
@@ -405,7 +425,7 @@ class Game {
         turnRate = AUTO_AIM_TARGET_TURN_RATE;
       } else {
         const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
-        if (stickMag > 0.12) {
+        if (stickMag > MOBILE_STICK_DEADZONE) {
           const stickAngle = Math.atan2(this.touchMove.x, this.touchMove.z);
           const distPx = 72;
           cursorSx = INTERNAL_W / 2 + Math.sin(stickAngle) * distPx;
@@ -416,7 +436,6 @@ class Game {
           turnRate = AUTO_AIM_STICK_TURN_RATE;
         } else {
           this._setAimCursorFromAngle(this.player.angle);
-          this.player.angle = this._resolveAimAngle(this.mouse.sx, this.mouse.sy);
           return;
         }
       }
@@ -587,8 +606,7 @@ class Game {
     this.audio.init();
     this.audio.resume();
 
-    await this.sprites.loadAll();
-    await this.sprites.decodeItemIcons();
+    await this._spritePreload;
 
     rollWorldSeed();
     this.world = new World();
@@ -604,6 +622,7 @@ class Game {
     this.chunkEntities.reset();
     this.items = new ItemManager(this.world);
     this.chests = new ChestManager(this.world);
+    this.buildings = new BuildingManager(this.world, this.chests);
     this.particles = [];
     this.dayNight = new DayNightCycle();
     this._weaponBreathY = 0;
@@ -634,6 +653,7 @@ class Game {
   _update(dt, time) {
     const inventoryOpen = this.inventoryUI?.isOpen();
     this.dayNight?.update(dt);
+    this.buildings?.update(this.player, dt);
 
     if (!inventoryOpen) {
       this.player.updateMobility(time);
@@ -643,7 +663,7 @@ class Game {
       let moveZ = rawMoveZ;
 
       const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
-      const usingStick = stickMag > 0.12;
+      const usingStick = stickMag > MOBILE_STICK_DEADZONE;
 
       const sprintInput = this._isShiftHeld();
       this.player.isMoving = moveX !== 0 || moveZ !== 0;
@@ -683,6 +703,16 @@ class Game {
         const walkRate = this.player.isSprinting ? 9 : 6;
         this.player.walkPhase += dt * walkRate;
 
+        const walkStep = Math.floor(this.player.walkPhase);
+        if (walkStep > this._lastWalkStep) {
+          for (let s = Math.max(this._lastWalkStep + 1, 1); s <= walkStep; s++) {
+            if (s % 2 === 0) {
+              this.audio.footstep(this.player.isSprinting);
+            }
+          }
+          this._lastWalkStep = walkStep;
+        }
+
         const bounceLand = Math.floor(this.player.walkPhase / 2);
         if (bounceLand !== this._lastBounceLand) {
           this._lastBounceLand = bounceLand;
@@ -693,7 +723,6 @@ class Game {
             const feetX = this.player.x - mx * 0.1;
             const feetZ = this.player.z + feetOffZ - mz * 0.1;
             this.particles.push(...createStepDust(feetX, feetZ));
-            this.audio.footstep();
           }
         }
       } else {
@@ -994,6 +1023,9 @@ class Game {
       const dz = robot.z - this.player.z;
       const dist = Math.hypot(dx, dz);
       if (dist > range + robot.radius) continue;
+      if (this.world.segmentBlocked(this.player.x, this.player.z, robot.x, robot.z, 0.2, false)) {
+        continue;
+      }
       let diff = Math.atan2(dx, dz) - aim;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
@@ -1207,7 +1239,27 @@ class Game {
     };
   }
 
-  _drawWeaponSprite(ctx, pose) {
+  _drawWeaponSprite(ctx, pose, clipBounds = null) {
+    if (clipBounds) {
+      ctx.save();
+      ctx.beginPath();
+      if (clipBounds.clipXOnly) {
+        const leftS = this._worldToScreen(clipBounds.minX, 0);
+        const rightS = this._worldToScreen(clipBounds.maxX, 0);
+        const left = Math.min(leftS.x, rightS.x);
+        const right = Math.max(leftS.x, rightS.x);
+        ctx.rect(left, 0, right - left, INTERNAL_H);
+      } else {
+        const tl = this._worldToScreen(clipBounds.minX, clipBounds.minZ);
+        const br = this._worldToScreen(clipBounds.maxX, clipBounds.maxZ);
+        const left = Math.min(tl.x, br.x);
+        const right = Math.max(tl.x, br.x);
+        const top = Math.min(tl.y, br.y) - 10;
+        const bottom = Math.max(tl.y, br.y) + 2;
+        ctx.rect(left, top, right - left, bottom - top);
+      }
+      ctx.clip();
+    }
     this.sprites.draw(
       ctx,
       pose.weaponDraw.sheet,
@@ -1220,6 +1272,7 @@ class Game {
       pose.tilt,
       pose.weaponAnim,
     );
+    if (clipBounds) ctx.restore();
   }
 
   _drawParticle(ctx, p) {
@@ -1286,6 +1339,13 @@ class Game {
     const viewHalfW = INTERNAL_W / PPU / 2 + TILE;
     const viewHalfH = INTERNAL_H / PPU / 2 + TILE;
     const tilePx = TILE * PPU;
+    const viewMinX = cam.x - viewHalfW;
+    const viewMaxX = cam.x + viewHalfW;
+    const viewMinZ = cam.z - viewHalfH;
+    const viewMaxZ = cam.z + viewHalfH;
+    const visibleBuildings = this.buildings?.collectInView(viewMinX, viewMaxX, viewMinZ, viewMaxZ) ?? [];
+    const worldToScreen = (wx, wz) => this._worldToScreen(wx, wz);
+
     this.world.drawGroundLayer(
       ctx,
       camT.x,
@@ -1298,24 +1358,27 @@ class Game {
       cam.z,
     );
 
-    for (const d of this.world.decor) {
-      if (d.kind === 'crate') {
-        const s = this._worldToScreen(d.x, d.z);
-        this.sprites.draw(this.ctx, d.sprite || 'crate', s.x, s.y, SPRITE_CRATE);
-        continue;
-      }
-      const hw = d.halfW * PPU;
-      const hd = d.halfD * PPU;
-      const s = this._worldToScreen(d.x, d.z);
-      ctx.fillStyle = d.kind === 'room' ? '#6a6560' : '#8a8580';
-      ctx.fillRect(s.x - hw, s.y - hd, hw * 2, hd * 2);
-      ctx.strokeStyle = '#f0a030';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(s.x - hw + 1, s.y - hd + 1, hw * 2 - 2, hd * 2 - 2);
+    for (const building of visibleBuildings) {
+      drawBuildingFloors(ctx, building, worldToScreen, tilePx, this.sprites);
     }
 
+    const insideBuilding = this.buildings?.insideBuilding;
+
+    const playerSortZ = this._playerSortZ();
+    const playerX = this.player.x;
+    const playerZ = this.player.z;
     const drawList = [];
     const brightParticles = [];
+    for (const building of visibleBuildings) {
+      const playerInside = insideBuilding === building;
+      for (const wall of building.walls) {
+        const drawWall = () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites);
+        if (wallDrawsInFront(wall, playerSortZ, playerInside, playerX, playerZ, building)) continue;
+        const sortBias = wall.extendNorth ? 1 : 0;
+        const wallZ = wallBackDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building);
+        drawList.push({ z: wallZ, sortBias, draw: drawWall });
+      }
+    }
     const ysortFoliage = this.world.collectYsortFoliage(
       cam.x - viewHalfW,
       cam.x + viewHalfW,
@@ -1442,18 +1505,36 @@ class Game {
     const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
     const idleBreath = Math.round(this._weaponBreathY ?? 0);
     const playerAnim = getPlayerAnim(this.player, drawTime);
-    const playerSortZ = this._playerSortZ();
     drawList.push({ z: playerSortZ, sortBias: 1, draw: () => {
       const s = this._worldToScreen(this.player.x, this.player.z);
       const feetY = Math.round(s.y + playerBounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
       drawPixelEllipseShadow(ctx, s.x, feetY, 10, 4, tilePx);
       this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim);
     }});
-    drawList.push({ z: playerSortZ + 0.02, sortBias: 1, draw: () => {
+    const gunClip = insideBuilding ? buildingGunClipBounds(insideBuilding) : null;
+    drawList.push({ z: playerSortZ + 0.02, sortBias: 2, draw: () => {
       const pose = this._getGunScreenPose(drawTime);
       if (pose.isShotFlash) return;
-      this._drawWeaponSprite(ctx, pose);
+      this._drawWeaponSprite(ctx, pose, gunClip);
     }});
+    for (const building of visibleBuildings) {
+      const playerInside = insideBuilding === building;
+      for (const wall of building.walls) {
+        if (!wallDrawsInFront(wall, playerSortZ, playerInside, playerX, playerZ, building)) continue;
+        drawList.push({
+          z: wallFrontDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building),
+          sortBias: 6,
+          draw: () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites),
+        });
+      }
+    }
+    if (insideBuilding && visibleBuildings.includes(insideBuilding)) {
+      drawList.push({
+        z: doorLintelSortZ(insideBuilding) + 0.03,
+        sortBias: 7,
+        draw: () => drawBuildingDoorLintel(ctx, insideBuilding, worldToScreen, tilePx, this.sprites),
+      });
+    }
     for (const p of this.particles) {
       if (p.kind === 'fire') {
         brightParticles.push({ z: p.z - 0.05, p });
@@ -1472,13 +1553,19 @@ class Game {
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();
 
+    for (const building of visibleBuildings) {
+      const alpha = this.buildings?.roofAlphaFor(building) ?? 1;
+      drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, this.sprites);
+    }
+
     this._drawPlayerCooldown(ctx, performance.now() / 1000);
 
     applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);
 
     const gunPose = this._getGunScreenPose(drawTime);
     if (gunPose.isShotFlash) {
-      this._drawWeaponSprite(ctx, gunPose);
+      const flashClip = insideBuilding ? buildingGunClipBounds(insideBuilding) : null;
+      this._drawWeaponSprite(ctx, gunPose, flashClip);
     }
 
     brightParticles.sort((a, b) => a.z - b.z);
@@ -1596,6 +1683,9 @@ class Game {
       this.el.zoneLabel.textContent = zoneNames[biome] || biome;
     }
 
+    if (this.el.gameDay && this.dayNight) {
+      this.el.gameDay.textContent = this.dayNight.formatDay();
+    }
     if (this.el.gameClock && this.dayNight) {
       this.el.gameClock.textContent = this.dayNight.formatClock();
     }
@@ -1644,7 +1734,7 @@ class Game {
       this.el.interactPrompt.style.transform = '';
     }
 
-    this.minimap.render(this.player, this.robots, this.world, this.chests);
+    this.minimap.render(this.player, this.robots, this.world, this.chests, this.buildings);
   }
 
   _checkGameOver() {

@@ -184,26 +184,50 @@ button:active {
   z-index: 50;
 }
 
-#game-clock {
+#hud-time {
   position: absolute;
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 12px;
+  background: rgba(8, 12, 16, 0.45);
+  border: 1px solid rgba(240, 160, 48, 0.28);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+#game-day {
+  font-family: var(--pixel-font);
+  font-size: var(--hud-sm);
+  color: #c8a860;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.85);
+}
+
+#game-clock {
   font-family: var(--pixel-font);
   font-size: var(--hud-md);
   color: #e8e4dc;
   letter-spacing: 0.06em;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.85), 0 0 12px rgba(0, 0, 0, 0.45);
-  padding: 4px 12px;
-  background: rgba(8, 12, 16, 0.45);
-  border: 1px solid rgba(240, 160, 48, 0.28);
-  border-radius: 3px;
+}
+
+body.game-active.mobile-ui #hud-time {
+  top: max(8px, env(safe-area-inset-top, 0px));
+  padding: 3px 10px;
+  gap: 1px;
+}
+
+body.game-active.mobile-ui #game-day {
+  font-size: 10px;
 }
 
 body.game-active.mobile-ui #game-clock {
-  top: max(8px, env(safe-area-inset-top, 0px));
   font-size: var(--hud-sm);
-  padding: 3px 10px;
 }
 
 #hud-bottom-left {
