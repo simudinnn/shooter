@@ -11,13 +11,24 @@ import {
   BuildingManager,
   drawBuildingFloors,
   drawBuildingWall,
-  drawBuildingDoorLintel,
   drawBuildingRoof,
+  drawBuildingDoor,
+  drawExteriorDimWhenInside,
 } from './buildings.js';
-import { wallDrawsInFront, wallFrontDrawZ, wallBackDrawZ, doorLintelSortZ, buildingGunClipBounds } from './buildingGen.js';
+import {
+  wallDrawsInFront,
+  wallFrontDrawZ,
+  wallBackDrawZ,
+  buildingGunClipBounds,
+  foliageOverlapsBuildingInterior,
+  doorDrawsInFront,
+  doorBackDrawZ,
+  doorFrontDrawZ,
+} from './buildingGen.js';
 import { chestSpriteName } from './loot.js';
 import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
+import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
 import { InventoryUI } from './inventory.js';
@@ -69,6 +80,7 @@ class Game {
     this._camPxZ = 0;
     this._camLeanPxX = 0;
     this._camLeanPxZ = 0;
+    this.debugCollision = false;
     this.touchMove = { x: 0, z: 0 };
     this.mobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
@@ -188,8 +200,13 @@ class Game {
     if (!this.running) return;
     if (e.repeat) return;
     if (this.inventoryUI?.isOpen()) return;
+    if (e.code === 'F3') {
+      e.preventDefault();
+      this.debugCollision = !this.debugCollision;
+      return;
+    }
     if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
-    if (e.code === 'KeyE') this._tryOpenNearbyChest();
+    if (e.code === 'KeyE') this._tryInteract();
     if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
     if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
   }
@@ -227,8 +244,10 @@ class Game {
         this.audio.resume();
         this.mouseDown = true;
       } else if (e.button === 2 && this.running && !this.inventoryUI?.isOpen()) {
-        const chest = this._getChestUnderCursor();
-        if (chest) this.inventoryUI.openChest(chest);
+        if (!this._tryToggleNearbyDoor()) {
+          const chest = this._getChestUnderCursor();
+          if (chest) this.inventoryUI.openChest(chest);
+        }
       }
     });
 
@@ -317,7 +336,7 @@ class Game {
     bindPress('mb-interact', () => {
       if (this.running) {
         this.audio.resume();
-        this._tryOpenNearbyChest();
+        this._tryInteract();
       }
     });
 
@@ -687,6 +706,7 @@ class Game {
         moveZ = (moveZ / len) * speed * dt * analog;
         const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
         const moveShape = this.player.getMoveCollider(PPU);
+        const wallSoft = this.buildings?.insideBuilding ? 'interior' : 'exterior';
         const r = moveWithEntityCollision(
           this.world,
           this.player.x,
@@ -697,6 +717,7 @@ class Game {
           moveShape,
           targets,
           this.player,
+          { wallSoft },
         );
         this.player.x = r.x;
         this.player.z = r.z;
@@ -793,7 +814,7 @@ class Game {
             r.meleeDamage * 0.55,
           ));
         }
-      }, (r, angle, damage) => this._enemyShoot(r, angle, damage));
+      }, (r, angle, damage) => this._enemyShoot(r, angle, damage), this.buildings, time);
       if (robot.emerging) {
         robot.groundSpewAcc += dt;
         const spewRate = 0.035;
@@ -882,6 +903,30 @@ class Game {
 
   _chestScreenPos(chest) {
     return this._worldToScreen(chest.x, chest.z);
+  }
+
+  _getNearbyDoor() {
+    if (!this.buildings?.buildings?.length) return null;
+    return this.buildings.getNearbyDoor(this.player);
+  }
+
+  _tryToggleNearbyDoor() {
+    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    const building = this._getNearbyDoor();
+    if (!building) return false;
+    if (!this.buildings.toggleDoor(building, this.player)) {
+      if (building.doorOpen) {
+        this.items.setPickupMsg('Clear the doorway first', { error: true, duration: 1.6 });
+      }
+      return false;
+    }
+    this.audio.doorToggle(building.doorOpen);
+    return true;
+  }
+
+  _tryInteract() {
+    if (this._tryToggleNearbyDoor()) return true;
+    return this._tryOpenNearbyChest();
   }
 
   _getNearbyChest() {
@@ -1378,13 +1423,25 @@ class Game {
         const wallZ = wallBackDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building);
         drawList.push({ z: wallZ, sortBias, draw: drawWall });
       }
+      if (!doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
+        drawList.push({
+          z: doorBackDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
+          sortBias: 0,
+          draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
+        });
+      }
     }
     const ysortFoliage = this.world.collectYsortFoliage(
       cam.x - viewHalfW,
       cam.x + viewHalfW,
       cam.z - viewHalfH,
       cam.z + viewHalfH,
-    );
+    ).filter((f) => {
+      for (const building of this.buildings.buildings) {
+        if (foliageOverlapsBuildingInterior(building, f)) return false;
+      }
+      return true;
+    });
     for (const f of ysortFoliage) {
       drawList.push({
         z: f.sortZ ?? f.z,
@@ -1527,13 +1584,13 @@ class Game {
           draw: () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites),
         });
       }
-    }
-    if (insideBuilding && visibleBuildings.includes(insideBuilding)) {
-      drawList.push({
-        z: doorLintelSortZ(insideBuilding) + 0.03,
-        sortBias: 7,
-        draw: () => drawBuildingDoorLintel(ctx, insideBuilding, worldToScreen, tilePx, this.sprites),
-      });
+      if (doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
+        drawList.push({
+          z: doorFrontDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
+          sortBias: 6,
+          draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
+        });
+      }
     }
     for (const p of this.particles) {
       if (p.kind === 'fire') {
@@ -1558,6 +1615,15 @@ class Game {
       drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, this.sprites);
     }
 
+    if (insideBuilding) {
+      const roofA = this.buildings?.roofAlpha ?? 1;
+      const dimT = Math.min(1, Math.max(0, (1 - roofA) / 0.94));
+      const dimAlpha = 0.80 * dimT;
+      if (dimAlpha > 0.02) {
+        drawExteriorDimWhenInside(ctx, insideBuilding, worldToScreen, dimAlpha);
+      }
+    }
+
     this._drawPlayerCooldown(ctx, performance.now() / 1000);
 
     applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);
@@ -1580,6 +1646,18 @@ class Game {
       const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
       const bAngle = velToSpriteAngle(b.vx, b.vz);
       this.sprites.draw(ctx, 'bullet', s.x, s.y, bScale, bAngle);
+    }
+
+    if (this.debugCollision) {
+      drawCollisionDebug(
+        ctx,
+        this.world,
+        worldToScreen,
+        viewMinX,
+        viewMaxX,
+        viewMinZ,
+        viewMaxZ,
+      );
     }
 
     if (this.running && !this.inventoryUI?.isOpen()) {
@@ -1705,23 +1783,31 @@ class Game {
 
     const hoveredChest = this._getHoveredChest();
     const nearbyChest = this._getNearbyChest();
+    const nearbyDoor = this._getNearbyDoor();
     const canOpenChestDesktop = !this.inventoryUI.open
       && !this.mobile
       && hoveredChest
       && this.chests.isInInteractRange(this.player, hoveredChest);
-    const canOpenChestMobile = !this.inventoryUI.open && this.mobile && nearbyChest;
+    const canOpenChestMobile = !this.inventoryUI.open && this.mobile && nearbyChest && !nearbyDoor;
     const canOpenChest = canOpenChestDesktop || canOpenChestMobile;
+    const canToggleDoor = !this.inventoryUI.open && nearbyDoor;
     const mbInteract = document.getElementById('mb-interact');
-    mbInteract?.classList.toggle('mb-nearby', canOpenChestMobile);
-    this.el.interactPrompt.classList.toggle('hidden', !canOpenChest);
-    if (canOpenChest) {
+    mbInteract?.classList.toggle('mb-nearby', canToggleDoor || canOpenChestMobile);
+    const showPrompt = canToggleDoor || canOpenChest;
+    this.el.interactPrompt.classList.toggle('hidden', !showPrompt);
+    if (showPrompt) {
+      const doorVerb = nearbyDoor?.doorOpen ? 'close' : 'open';
       if (this.mobile) {
-        this.el.interactPrompt.textContent = 'E to open';
+        this.el.interactPrompt.textContent = canToggleDoor
+          ? `E to ${doorVerb} door`
+          : 'E to open';
         this._positionInteractPromptAbovePlayer();
       } else {
         const mx = this.mouse.clientX;
         const my = this.mouse.clientY;
-        this.el.interactPrompt.textContent = 'RMB to open';
+        this.el.interactPrompt.textContent = canToggleDoor
+          ? `RMB to ${doorVerb} door`
+          : 'RMB to open';
         this.el.interactPrompt.style.left = `${mx}px`;
         this.el.interactPrompt.style.top = `${my - 28}px`;
         this.el.interactPrompt.style.bottom = 'auto';

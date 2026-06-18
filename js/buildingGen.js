@@ -1,6 +1,6 @@
-import { TILE, hash01 } from './worldGen.js';
+import { TILE, hash01, foliageSpriteBounds } from './worldGen.js';
 import { PPU } from './renderConfig.js';
-import { CHAR_NATIVE_PX, spriteFeetOffset } from './sprites.js';
+import { CHAR_NATIVE_PX, spriteFeetOffset, getEnemyNativePx, getEnemyDrawScale } from './sprites.js';
 
 const PLAYER_SPRITE_SCALE = 1.5;
 
@@ -20,9 +20,150 @@ export const NS_WALL_THICK = TILE;
 const WALL_COLLISION_PAD = 0.68;
 /** Tighter padding for player movement and bullets (E/W walls). */
 const WALL_SOFT_COLLISION_PAD = 0.16;
-const WALL_HALF = TILE * 0.5;
-/** N/S walls — soft collision exterior slice (thick enough to meet corners when gliding). */
-const NS_SOFT_HALF = WALL_HALF * 0.54;
+/** Floor perimeter — 25% strip inward from each exposed floor edge. */
+export const FLOOR_EDGE_FRAC = 0.25;
+
+function cellWalkable(cells, w, h, tx, tz) {
+  if (tx < 0 || tz < 0 || tx >= w || tz >= h) return false;
+  const cell = cells[tz * w + tx];
+  return cell === CELL_FLOOR || cell === CELL_DOOR;
+}
+
+function makeFloorEdgeObstacle(originX, originZ, tx, tz, dir, fpH) {
+  const tileX = originX + tx * TILE;
+  const tileZ = originZ + tz * TILE;
+  const edgeHalf = TILE * FLOOR_EDGE_FRAC * 0.5;
+  const cx = tileX + TILE * 0.5;
+  const cz = tileZ + TILE * 0.5;
+  let x;
+  let z;
+  let halfW;
+  let halfH;
+  switch (dir) {
+    case 'n':
+      // Interior lip — bottom 25% under north wall row.
+      x = cx;
+      z = tileZ + TILE - edgeHalf;
+      halfW = TILE * 0.5;
+      halfH = edgeHalf;
+      break;
+    case 's':
+      // Horizontal south edge — bottom 25% (walk behind south wall inside).
+      x = cx;
+      z = tileZ + TILE - edgeHalf;
+      halfW = TILE * 0.5;
+      halfH = edgeHalf;
+      break;
+    case 'w':
+      x = tileX + edgeHalf;
+      z = cz;
+      halfW = edgeHalf;
+      halfH = TILE * 0.5;
+      break;
+    default:
+      x = tileX + TILE - edgeHalf;
+      z = cz;
+      halfW = edgeHalf;
+      halfH = TILE * 0.5;
+      break;
+  }
+  const obs = {
+    kind: 'aabb',
+    x,
+    z,
+    halfW: halfW + WALL_COLLISION_PAD,
+    halfH: halfH + WALL_COLLISION_PAD,
+    softHalfW: halfW + WALL_SOFT_COLLISION_PAD,
+    softHalfH: halfH + WALL_SOFT_COLLISION_PAD,
+    softX: x,
+    softZ: z,
+    blocksBullets: true,
+    floorEdge: true,
+  };
+  if (dir === 's') {
+    obs.bulletZ = originZ + fpH - TILE * 0.62;
+    obs.bulletHalfH = TILE * 0.22;
+  }
+  return obs;
+}
+
+/** Full-tile north perimeter — exterior soft/hard (grass side). */
+function makeNorthExteriorObstacle(originX, originZ, tx, tz) {
+  const tileX = originX + tx * TILE;
+  const tileZ = originZ + tz * TILE;
+  const cx = tileX + TILE * 0.5;
+  const cz = tileZ + TILE * 0.5;
+  const halfW = TILE * 0.5;
+  const halfH = TILE * 0.5;
+  return {
+    kind: 'aabb',
+    x: cx,
+    z: cz,
+    halfW: halfW + WALL_COLLISION_PAD,
+    halfH: halfH + WALL_COLLISION_PAD,
+    softHalfW: halfW + WALL_SOFT_COLLISION_PAD,
+    softHalfH: halfH + WALL_SOFT_COLLISION_PAD,
+    softX: cx,
+    softZ: cz,
+    wallSoft: 'exterior',
+    blocksBullets: true,
+    floorEdge: true,
+  };
+}
+
+function pushNorthPerimeter(obstacles, originX, originZ, tx, tz, fpH) {
+  obstacles.push(makeNorthExteriorObstacle(originX, originZ, tx, tz));
+  const lip = makeFloorEdgeObstacle(originX, originZ, tx, tz, 'n', fpH);
+  lip.wallSoft = 'interior';
+  obstacles.push(lip);
+}
+
+/** Collision from floor cell edges — works for any floor shape. Skips door tile (dynamic). */
+export function buildFloorEdgeObstacles(originX, originZ, w, h, cells, doorTx) {
+  const obstacles = [];
+  const fpH = h * TILE;
+  for (let tz = 0; tz < h; tz++) {
+    for (let tx = 0; tx < w; tx++) {
+      const cell = cells[tz * w + tx];
+      if (cell !== CELL_FLOOR && cell !== CELL_DOOR) continue;
+      if (cell === CELL_DOOR && tx === doorTx) continue;
+      if (!cellWalkable(cells, w, h, tx, tz - 1)) {
+        pushNorthPerimeter(obstacles, originX, originZ, tx, tz, fpH);
+      }
+      if (!cellWalkable(cells, w, h, tx, tz + 1)) {
+        obstacles.push(makeFloorEdgeObstacle(originX, originZ, tx, tz, 's', fpH));
+      }
+      if (!cellWalkable(cells, w, h, tx - 1, tz)) {
+        obstacles.push(makeFloorEdgeObstacle(originX, originZ, tx, tz, 'w', fpH));
+      }
+      if (!cellWalkable(cells, w, h, tx + 1, tz)) {
+        obstacles.push(makeFloorEdgeObstacle(originX, originZ, tx, tz, 'e', fpH));
+      }
+    }
+  }
+  return obstacles;
+}
+
+/** Door tile edges when closed (removed entirely when open). */
+export function buildDoorTileEdgeObstacles(originX, originZ, w, h, cells, doorTx) {
+  const tz = h - 1;
+  const obstacles = [];
+  if (!cellWalkable(cells, w, h, doorTx, tz)) return obstacles;
+  const fpH = h * TILE;
+  if (!cellWalkable(cells, w, h, doorTx, tz - 1)) {
+    obstacles.push(makeFloorEdgeObstacle(originX, originZ, doorTx, tz, 'n', fpH));
+  }
+  if (!cellWalkable(cells, w, h, doorTx, tz + 1)) {
+    obstacles.push(makeFloorEdgeObstacle(originX, originZ, doorTx, tz, 's', fpH));
+  }
+  if (!cellWalkable(cells, w, h, doorTx - 1, tz)) {
+    obstacles.push(makeFloorEdgeObstacle(originX, originZ, doorTx, tz, 'w', fpH));
+  }
+  if (!cellWalkable(cells, w, h, doorTx + 1, tz)) {
+    obstacles.push(makeFloorEdgeObstacle(originX, originZ, doorTx, tz, 'e', fpH));
+  }
+  return obstacles;
+}
 
 /** Shack footprint variants [width × depth] in tiles (includes wall ring). */
 export const SHACK_SIZE_VARIANTS = [
@@ -115,18 +256,28 @@ export function playerSouthEdgeZ(px, pz) {
   return pz + spriteFeetOffset(CHAR_NATIVE_PX, PLAYER_SPRITE_SCALE) / PPU;
 }
 
+/** South edge Z for player or enemy (used for interior / door routing). */
+export function entityFeetZ(entity) {
+  if (entity?.type) {
+    const nativePx = getEnemyNativePx(entity.type);
+    const scale = getEnemyDrawScale(entity.type);
+    return entity.z + spriteFeetOffset(nativePx, scale) / PPU;
+  }
+  return playerSouthEdgeZ(entity.x, entity.z);
+}
+
 /**
  * Inside when the tile under the player's feet is floor or door, and the anchor
  * has cleared the north exterior lip (feet offset false-positives when hugging north).
  */
-export function isInsideBuilding(building, px, pz) {
+export function isInsideBuilding(building, px, pz, feetZOverride = null) {
   const { originX, originZ, w, h, cells } = building;
   const fpSouth = originZ + h * TILE;
 
   if (pz < originZ + TILE * 0.08) return false;
   if (pz > fpSouth + TILE * 0.05) return false;
 
-  const feetZ = playerSouthEdgeZ(px, pz);
+  const feetZ = feetZOverride ?? playerSouthEdgeZ(px, pz);
   if (feetZ < originZ + TILE * 0.12) return false;
   if (feetZ > fpSouth + TILE * 0.08) return false;
 
@@ -234,6 +385,210 @@ export function doorLintelSortZ(building) {
   return building.originZ + building.h * TILE;
 }
 
+export const DOOR_INTERACT_DIST = 3.5;
+
+export function getDoorWorldPos(building) {
+  const doorTx = building.doorTx ?? Math.floor(building.w / 2);
+  return {
+    x: building.originX + (doorTx + 0.5) * TILE,
+    z: building.originZ + (building.h - 0.5) * TILE,
+  };
+}
+
+export function doorSortZ(building) {
+  return building.originZ + building.h * TILE;
+}
+
+export function isNearDoor(building, px, pz, maxDist = DOOR_INTERACT_DIST) {
+  const pos = getDoorWorldPos(building);
+  return Math.hypot(px - pos.x, pz - pos.z) <= maxDist;
+}
+
+function isNearDoorOutside(px, pz, building) {
+  const doorX = building.originX + (building.doorTx + 0.5) * TILE;
+  const southZ = building.originZ + building.h * TILE;
+  const feetZ = playerSouthEdgeZ(px, pz);
+  if (Math.abs(px - doorX) >= TILE * 0.58) return false;
+  return feetZ > southZ - TILE * 0.42 && feetZ <= southZ + TILE * 0.12;
+}
+
+/** Door depth — closed: player on top outside unless hugging door; open outside: door behind player. */
+export function doorDrawsInFront(building, playerSortZ, playerInside, px, pz) {
+  const sortZ = doorSortZ(building);
+  if (playerInside) return playerSortZ >= sortZ - TILE * 0.85;
+  if (building.doorOpen) return false;
+  return isNearDoorOutside(px, pz, building);
+}
+
+/** Bottom fraction of door tile / player sprite used for doorway overlap tests. */
+export const DOOR_TILE_FOOT_FRAC = 0.2;
+/** Taller region that blocks door close when the player is in the doorway (esp. exiting). */
+export const DOOR_CLOSE_BLOCK_FRAC = 0.52;
+export const DOOR_CLOSE_SOUTH_PAD = TILE * 0.14;
+export const PLAYER_FEET_FRAC = 0.2;
+
+function shapeOverlapsSoftAabb(px, pz, shape, obs) {
+  if (!shape || obs.softHalfW == null) return false;
+  const acz = pz + (shape.zOff ?? 0);
+  const ox = obs.softX ?? obs.x;
+  const oz = obs.softZ ?? obs.z;
+  return Math.abs(px - ox) < shape.halfW + obs.softHalfW
+    && Math.abs(acz - oz) < shape.halfH + obs.softHalfH;
+}
+
+/** True if the player's move collider would hit closed-door floor edge boxes. */
+export function playerTouchesClosedDoorFloorCollision(building, player) {
+  if (!building || !player) return false;
+  const defs = buildDoorTileEdgeObstacles(
+    building.originX,
+    building.originZ,
+    building.w,
+    building.h,
+    building.cells,
+    building.doorTx,
+  );
+  const shape = player.getMoveCollider?.(PPU) ?? player.getMoveCollider();
+  for (const obs of defs) {
+    if (shapeOverlapsSoftAabb(player.x, player.z, shape, obs)) return true;
+  }
+  return false;
+}
+
+function aabbOverlap2D(a, b) {
+  return a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
+}
+
+/** Bottom 20% of the player sprite in world space (feet-anchored). */
+export function getPlayerFeetStripBounds(x, z) {
+  const feetZ = playerSouthEdgeZ(x, z);
+  const spriteH = (CHAR_NATIVE_PX * PLAYER_SPRITE_SCALE) / PPU;
+  const stripH = spriteH * PLAYER_FEET_FRAC;
+  const halfW = (CHAR_NATIVE_PX * PLAYER_SPRITE_SCALE) / PPU * 0.5;
+  return {
+    minX: x - halfW,
+    maxX: x + halfW,
+    minZ: feetZ - stripH,
+    maxZ: feetZ,
+  };
+}
+
+/** Bottom 20% of the door floor tile (south edge = tile bottom). */
+export function getDoorTileFootStrip(building) {
+  const doorTx = building.doorTx ?? Math.floor(building.w / 2);
+  const tileSouth = building.originZ + building.h * TILE;
+  const stripH = TILE * DOOR_TILE_FOOT_FRAC;
+  return {
+    minX: building.originX + doorTx * TILE,
+    maxX: building.originX + (doorTx + 1) * TILE,
+    minZ: tileSouth - stripH,
+    maxZ: tileSouth,
+  };
+}
+
+/** Close-block region — lower half+ of door tile plus a lip south (exit path). */
+export function getDoorCloseBlockRects(building) {
+  const doorTx = building.doorTx ?? Math.floor(building.w / 2);
+  const tileSouth = building.originZ + building.h * TILE;
+  const stripH = TILE * DOOR_CLOSE_BLOCK_FRAC;
+  return [{
+    minX: building.originX + doorTx * TILE,
+    maxX: building.originX + (doorTx + 1) * TILE,
+    minZ: tileSouth - stripH,
+    maxZ: tileSouth + DOOR_CLOSE_SOUTH_PAD,
+  }];
+}
+
+/** @deprecated use getDoorTileFootStrip */
+export function getDoorCloseBlockRect(building) {
+  return getDoorTileFootStrip(building);
+}
+
+/** @deprecated use getDoorTileFootStrip */
+export function getDoorGapRect(building) {
+  return getDoorTileFootStrip(building);
+}
+
+export function entityOccupiesDoorGap(building, x, z, player = null) {
+  if (player?.getMoveCollider) {
+    return playerTouchesClosedDoorFloorCollision(building, player);
+  }
+  const feet = getPlayerFeetStripBounds(x, z);
+  return getDoorCloseBlockRects(building).some((door) => aabbOverlap2D(feet, door));
+}
+
+export function wouldClosingDoorTrapPlayer(building, player) {
+  if (!building?.doorOpen || !player) return false;
+  return playerTouchesClosedDoorFloorCollision(building, player);
+}
+
+export function doorBackDrawZ(building, playerSortZ, playerInside, px, pz) {
+  const sortZ = doorSortZ(building);
+  if (!playerInside) return sortZ;
+  if (playerSortZ < sortZ - TILE * 0.85) return sortZ;
+  return Math.min(sortZ, playerSortZ - 0.06);
+}
+
+export function doorFrontDrawZ(building, playerSortZ, playerInside, px, pz) {
+  const sortZ = doorSortZ(building);
+  if (!doorDrawsInFront(building, playerSortZ, playerInside, px, pz)) return sortZ;
+  if (!playerInside) return Math.max(sortZ, playerSortZ + 0.06);
+  if (sortZ > playerSortZ + 0.02) return sortZ;
+  return playerSortZ + 0.08;
+}
+
+/** Closed door — bottom 20% of the door tile; soft matches hard (no extra lip). */
+export function createDoorObstacle(building) {
+  const { originX, originZ, h, doorTx } = building;
+  const fpH = h * TILE;
+  const tileSouth = originZ + fpH;
+  const stripH = TILE * DOOR_TILE_FOOT_FRAC;
+  const x = originX + (doorTx + 0.5) * TILE;
+  const southZ = tileSouth - stripH * 0.5;
+  const southBulletZ = originZ + fpH - TILE * 0.62;
+  const halfH = stripH * 0.5;
+  return {
+    kind: 'aabb',
+    x,
+    z: southZ,
+    halfW: TILE * 0.45,
+    halfH,
+    softHalfW: TILE * 0.45,
+    softHalfH: halfH,
+    softX: x,
+    softZ: southZ,
+    blocksBullets: true,
+    bulletZ: southBulletZ,
+    bulletHalfH: TILE * 0.22,
+    isDoor: true,
+  };
+}
+
+/** Y-sort foliage sprite overlaps walkable interior (feet can sit just outside). */
+export function foliageOverlapsBuildingInterior(building, foliage) {
+  const interior = building?.interior;
+  if (!interior) return false;
+  const b = foliageSpriteBounds(foliage);
+  const pad = TILE * 0.2;
+  return (
+    b.minX <= interior.maxX + pad
+    && b.maxX >= interior.minX - pad
+    && b.minZ <= interior.maxZ + pad
+    && b.maxZ >= interior.minZ - pad
+  );
+}
+
+/** World rect for clearing foliage around a shack (includes north sprite overhang). */
+export function buildingFoliageClearRect(building) {
+  const interior = building.interior;
+  const pad = TILE * 4;
+  return {
+    minX: interior.minX - pad,
+    maxX: interior.maxX + pad,
+    minZ: interior.minZ - pad,
+    maxZ: interior.maxZ + pad,
+  };
+}
+
 function wallFeetZ(originZ, tz, orient) {
   // N/S segments and corners anchor to tile center; E/W walls keep south-edge feet.
   if (orient === 'ns' || orient === 'corner') {
@@ -257,120 +612,6 @@ function wallCenter(originX, originZ, tx, tz, w, h, orient) {
   const cx = originX + (tx + 0.5) * TILE;
   const zOff = tz === 0 ? NS_WALL_THICK * 0.5 : h * TILE - NS_WALL_THICK * 0.5;
   return { x: cx, z: originZ + zOff };
-}
-
-/** Merged perimeter colliders — overlapping bars + corners, no gaps at joints. */
-function buildWallObstacles(originX, originZ, w, h, doorTx) {
-  const obstacles = [];
-  const pushSoftOnly = (x, z, halfW, halfH) => {
-    obstacles.push({
-      kind: 'aabb',
-      x,
-      z,
-      halfW: 0,
-      halfH: 0,
-      softHalfW: halfW,
-      softHalfH: halfH,
-      softX: x,
-      softZ: z,
-      blocksBullets: false,
-    });
-  };
-
-  const push = (x, z, halfW, halfH, opts = {}) => {
-    const {
-      ns = false,
-      softZ = null,
-      softHalfH = null,
-      bulletZ = null,
-      bulletHalfH = null,
-    } = opts;
-    const softPad = ns ? 0 : WALL_SOFT_COLLISION_PAD;
-    const obs = {
-      kind: 'aabb',
-      x,
-      z,
-      halfW: halfW + WALL_COLLISION_PAD,
-      halfH: halfH + WALL_COLLISION_PAD,
-      softHalfW: halfW + softPad,
-      softHalfH: softHalfH ?? halfH + softPad,
-      softX: x,
-      softZ: softZ ?? z,
-      blocksBullets: true,
-    };
-    if (bulletZ != null) {
-      obs.bulletZ = bulletZ;
-      obs.bulletHalfH = bulletHalfH ?? halfH;
-    }
-    obstacles.push(obs);
-  };
-
-  const fpW = w * TILE;
-  const fpH = h * TILE;
-
-  // North — full width; soft collision only blocks the north exterior lip.
-  push(originX + fpW * 0.5, originZ + WALL_HALF, fpW * 0.5, WALL_HALF, {
-    ns: true,
-    softZ: originZ + NS_SOFT_HALF,
-    softHalfH: NS_SOFT_HALF,
-  });
-
-  // Interior north floor edge — keep player out of the north wall row.
-  pushSoftOnly(
-    originX + fpW * 0.5,
-    originZ + TILE - 0.18,
-    fpW * 0.5 - EW_WALL_THICK,
-    0.18,
-  );
-
-  // West / east — full height.
-  push(originX + EW_WALL_THICK * 0.5, originZ + fpH * 0.5, EW_WALL_THICK * 0.5, fpH * 0.5);
-  push(originX + fpW - EW_WALL_THICK * 0.5, originZ + fpH * 0.5, EW_WALL_THICK * 0.5, fpH * 0.5);
-
-  const southZ = originZ + fpH - WALL_HALF;
-  const southSoftZ = originZ + fpH - NS_SOFT_HALF;
-  /** Bullet block on interior lip only — exterior hugging can still shoot inward. */
-  const southBulletZ = originZ + fpH - TILE * 0.62;
-  const southBulletHalf = TILE * 0.22;
-
-  const pushSouth = (x, halfW) => {
-    push(x, southZ, halfW, WALL_HALF, {
-      ns: true,
-      softZ: southSoftZ,
-      softHalfH: NS_SOFT_HALF,
-      bulletZ: southBulletZ,
-      bulletHalfH: southBulletHalf,
-    });
-  };
-  {
-    const west = originX;
-    const east = originX + Math.min(TILE, doorTx * TILE);
-    if (east - west > 0.01) {
-      pushSouth((west + east) * 0.5, (east - west) * 0.5);
-    }
-  }
-  {
-    const east = originX + fpW;
-    const west = originX + Math.max((w - 1) * TILE, (doorTx + 1) * TILE);
-    if (east - west > 0.01) {
-      pushSouth((west + east) * 0.5, (east - west) * 0.5);
-    }
-  }
-
-  // South wall spans between corner caps and door.
-  if (doorTx > 1) {
-    const west = originX + TILE;
-    const east = originX + doorTx * TILE;
-    pushSouth((west + east) * 0.5, (east - west) * 0.5);
-  }
-
-  if (doorTx < w - 2) {
-    const west = originX + (doorTx + 1) * TILE;
-    const east = originX + (w - 1) * TILE;
-    pushSouth((west + east) * 0.5, (east - west) * 0.5);
-  }
-
-  return obstacles;
 }
 
 /** Walkable AABB from floor + door tiles (stable interior test). */
@@ -426,7 +667,7 @@ export function buildShackPieces(originX, originZ, w, h, cells) {
   }
 
   const interior = computeInteriorBounds(originX, originZ, w, h, cells);
-  const obstacles = buildWallObstacles(originX, originZ, w, h, doorTx);
+  const obstacles = buildFloorEdgeObstacles(originX, originZ, w, h, cells, doorTx);
 
   return {
     type: 'shack',
@@ -448,6 +689,8 @@ export function buildShackPieces(originX, originZ, w, h, cells) {
       h: h * TILE,
       sortZ: originZ + h * TILE + TILE * 0.15,
     },
+    doorOpen: false,
+    doorEdgeObstacles: null,
   };
 }
 
@@ -468,6 +711,8 @@ export const SHACK_SPRITE_MANIFEST = [
   { id: 'floor_wood', file: 'floor_wood.png', size: '16×16', notes: 'Interior floor tile' },
   { id: 'floor_wood_alt', file: 'floor_wood_alt.png', size: '16×16', notes: 'Floor variation (optional)' },
   { id: 'door_mat', file: 'door_mat.png', size: '16×16', notes: 'Door threshold / mat on south entry' },
+  { id: 'door_closed', file: 'door_closed.png', size: '16×16', notes: 'Closed door panel on south entry' },
+  { id: 'door_open', file: 'door_open.png', size: '22×16', notes: 'Open door swung west — 6px wider left of the door tile' },
   { id: 'wall_ns', file: 'wall_ns.png', size: '16×16', notes: 'North/south wall segment (full tile width)' },
   { id: 'wall_ew', file: 'wall_ew.png', size: '4×16', notes: 'East/west wall — quarter-tile wide; top segment stacks 2× at north' },
   { id: 'wall_corner', file: 'wall_corner.png', size: '16×16', notes: 'Corner pillar (full tile)' },

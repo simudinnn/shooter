@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v174';
+const CACHE = 'robot-ruins-v194';
 
 function shackSprites() {
   return [
@@ -8,6 +8,8 @@ function shackSprites() {
     './assets/buildings/shack/wall_ew.png',
     './assets/buildings/shack/wall_corner.png',
     './assets/buildings/shack/door_mat.png',
+    './assets/buildings/shack/door_closed.png',
+    './assets/buildings/shack/door_open.png',
     './assets/buildings/shack/wall_door_top.png',
     './assets/buildings/shack/roof_fill.png',
     './assets/buildings/shack/roof_edge.png',

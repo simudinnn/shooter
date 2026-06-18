@@ -1,4 +1,5 @@
 import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
+import { updateChaseNav, canMeleeTarget } from './enemyNav.js';
 import { getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset } from './sprites.js';
 import { PPU } from './renderConfig.js';
 
@@ -195,6 +196,20 @@ export class Robot {
     this.z = r.z;
   }
 
+  /** Pathfind toward player (or door) while chasing; returns false if aggro is dropped. */
+  _chaseMove(dt, player, world, robots, buildings, time) {
+    const nav = updateChaseNav(this, player, world, buildings, time);
+    if (nav.forget) {
+      this.chasing = false;
+      this.aggroByHit = false;
+      return false;
+    }
+    const len = Math.hypot(nav.dirX, nav.dirZ) || 1;
+    const steer = Math.atan2(nav.dirX / len, nav.dirZ / len) + (Math.random() - 0.5) * 0.08;
+    this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+    return true;
+  }
+
   /** Idle / walk cycles while not chasing — pauses between direction changes. */
   _updateWander(dt, world, player, robots, speedMult = 0.45) {
     this.wanderTimer -= dt;
@@ -309,7 +324,7 @@ export class Robot {
     this.walkPhase += dt * 14;
   }
 
-  update(dt, player, world, robots, onMeleeHit, onShoot = null) {
+  update(dt, player, world, robots, onMeleeHit, onShoot = null, buildings = null, time = 0) {
     if (!this.alive) return;
     this.meleeCooldown -= dt;
     this.jumpCooldown -= dt;
@@ -379,11 +394,18 @@ export class Robot {
         this.jumpTryTimer = 0;
       }
 
-      const steer = this.angle + (Math.random() - 0.5) * 0.08;
-      this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+      if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
+        this.moving = false;
+        this.bob = 0;
+        return;
+      }
       moving = true;
 
-      if (dist < this.meleeRange + player.radius && this.meleeCooldown <= 0) {
+      if (
+        dist < this.meleeRange + player.radius
+        && this.meleeCooldown <= 0
+        && canMeleeTarget(world, this.x, this.z, player.x, player.z)
+      ) {
         onMeleeHit(this);
         this.meleeCooldown = this.attackRate;
       }
@@ -503,7 +525,7 @@ export class Scout extends Robot {
     this.shoot.burstTimer = this.shoot.burstInterval;
   }
 
-  update(dt, player, world, robots, onMeleeHit, onShoot = null) {
+  update(dt, player, world, robots, onMeleeHit, onShoot = null, buildings = null, time = 0) {
     if (!this.alive) return;
     this.meleeCooldown -= dt;
 
@@ -567,10 +589,17 @@ export class Scout extends Robot {
         }
       } else if (dist < meleeDist) {
         this._abortShoot();
-        const steer = this.angle + (Math.random() - 0.5) * 0.08;
-        this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+        if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
+          this._abortShoot();
+          this.moving = false;
+          this.bob = 0;
+          return;
+        }
         moving = true;
-        if (this.meleeCooldown <= 0) {
+        if (
+          this.meleeCooldown <= 0
+          && canMeleeTarget(world, this.x, this.z, player.x, player.z)
+        ) {
           onMeleeHit(this);
           this.meleeCooldown = this.attackRate;
         }
@@ -578,8 +607,12 @@ export class Scout extends Robot {
         if (this.shoot.reloadLeft > 0) {
           this.shoot.reloadLeft -= dt;
           this._abortShoot();
-          const steer = this.angle + (Math.random() - 0.5) * 0.08;
-          this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+          if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
+            this._abortShoot();
+            this.moving = false;
+            this.bob = 0;
+            return;
+          }
           moving = true;
         } else if (this.shoot.phase === 'ready') {
           this.shoot.phase = 'charging';
@@ -588,8 +621,12 @@ export class Scout extends Robot {
         }
       } else {
         this._abortShoot();
-        const steer = this.angle + (Math.random() - 0.5) * 0.08;
-        this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
+        if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
+          this._abortShoot();
+          this.moving = false;
+          this.bob = 0;
+          return;
+        }
         moving = true;
       }
     } else if (!this.chasing) {

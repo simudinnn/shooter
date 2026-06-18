@@ -56,6 +56,8 @@ const SHACK_ASSET_PATHS = {
   shack_floor_wood: 'assets/buildings/shack/floor_wood.png',
   shack_floor_wood_alt: 'assets/buildings/shack/floor_wood_alt.png',
   shack_door_mat: 'assets/buildings/shack/door_mat.png',
+  shack_door_closed: 'assets/buildings/shack/door_closed.png',
+  shack_door_open: 'assets/buildings/shack/door_open.png',
   shack_wall_ns: 'assets/buildings/shack/wall_ns.png',
   shack_wall_ew: 'assets/buildings/shack/wall_ew.png',
   shack_wall_corner: 'assets/buildings/shack/wall_corner.png',

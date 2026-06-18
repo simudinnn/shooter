@@ -394,9 +394,17 @@ export class World {
     return obs.halfW > 0 && obs.halfH > 0;
   }
 
-  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false) {
+  /** @param {'exterior'|'interior'|null} wallSoft — which building wall soft layer applies. */
+  _wallSoftMatches(obs, wallSoft) {
+    if (!obs.wallSoft) return true;
+    if (!wallSoft) return obs.wallSoft === 'exterior';
+    return obs.wallSoft === wallSoft;
+  }
+
+  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false, wallSoft = null) {
     for (const obs of obstacles) {
       if (forBullets && obs.blocksBullets === false) continue;
+      if (soft && !this._wallSoftMatches(obs, wallSoft)) continue;
       if (obs.kind === 'circle' && this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
         return true;
       }
@@ -435,13 +443,14 @@ export class World {
     return { cx: acx + (nx / dist) * overlap, cz: acz + (nz / dist) * overlap };
   }
 
-  _checkShapeCollision(px, pz, shape, obstacles, soft = false) {
+  _checkShapeCollision(px, pz, shape, obstacles, soft = false, wallSoft = null) {
     if (!shape || shape.kind === 'circle') {
-      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles, false, soft);
+      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles, false, soft, wallSoft);
     }
     const acx = px;
     const acz = pz + shape.zOff;
     for (const obs of obstacles) {
+      if (soft && !this._wallSoftMatches(obs, wallSoft)) continue;
       if (obs.kind === 'circle' && this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) {
         return true;
       }
@@ -454,9 +463,10 @@ export class World {
     return false;
   }
 
-  checkCollisionShape(px, pz, shape, soft = false) {
+  checkCollisionShape(px, pz, shape, soft = false, opts = {}) {
+    const wallSoft = opts.wallSoft ?? null;
     const obstacles = this.collectObstaclesNear(px, pz, this._shapeReach(shape));
-    return this._checkShapeCollision(px, pz, shape, obstacles, soft);
+    return this._checkShapeCollision(px, pz, shape, obstacles, soft, wallSoft);
   }
 
   checkCollision(x, z, radius) {
@@ -482,11 +492,12 @@ export class World {
     return !this.segmentBlocked(x0, z0, x1, z1, radius, false);
   }
 
-  resolveMovementShape(oldX, oldZ, newX, newZ, shape) {
+  resolveMovementShape(oldX, oldZ, newX, newZ, shape, opts = {}) {
     if (!shape || shape.kind === 'circle') {
       return this.resolveMovement(oldX, oldZ, newX, newZ, shape?.radius ?? 0);
     }
 
+    const wallSoft = opts.wallSoft ?? null;
     let x = newX;
     let z = newZ;
     const obstacles = this.collectObstaclesNear(x, z, this._shapeReach(shape));
@@ -502,6 +513,7 @@ export class World {
           z = pushed.cz - shape.zOff;
         } else if (obs.kind === 'aabb') {
           if (obs.softHalfW == null) continue;
+          if (!this._wallSoftMatches(obs, wallSoft)) continue;
           if (!this._aabbAabbHit(acx, acz, shape.halfW, shape.halfH, obs, true)) continue;
           const pushed = this._pushAabbFromAabb(acx, acz, shape.halfW, shape.halfH, obs, true);
           x = pushed.cx;
@@ -510,9 +522,9 @@ export class World {
       }
     }
 
-    if (!this._checkShapeCollision(x, z, shape, obstacles, true)) return { x, z };
-    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, true)) return { x: newX, z: oldZ };
-    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, true)) return { x: oldX, z: newZ };
+    if (!this._checkShapeCollision(x, z, shape, obstacles, true, wallSoft)) return { x, z };
+    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, true, wallSoft)) return { x: newX, z: oldZ };
+    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, true, wallSoft)) return { x: oldX, z: newZ };
     return { x: oldX, z: oldZ };
   }
 
@@ -558,14 +570,14 @@ export class World {
     return { x, z };
   }
 
-  moveAxisShape(x, z, dx, dz, shape) {
+  moveAxisShape(x, z, dx, dz, shape, opts = {}) {
     if (dx !== 0) {
-      const r = this.resolveMovementShape(x, z, x + dx, z, shape);
+      const r = this.resolveMovementShape(x, z, x + dx, z, shape, opts);
       x = r.x;
       z = r.z;
     }
     if (dz !== 0) {
-      const r = this.resolveMovementShape(x, z, x, z + dz, shape);
+      const r = this.resolveMovementShape(x, z, x, z + dz, shape, opts);
       x = r.x;
       z = r.z;
     }

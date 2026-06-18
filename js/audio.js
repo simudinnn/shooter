@@ -137,6 +137,12 @@ export class SoundManager {
     setTimeout(() => this._tone(440, 0.1, 0.07, 'triangle'), 120);
   }
 
+  doorToggle(opening) {
+    this._noise(0.06, 0.14, opening ? 280 : 220);
+    this._tone(opening ? 180 : 140, 0.05, 0.09, 'triangle');
+    setTimeout(() => this._tone(opening ? 240 : 200, 0.07, 0.06, 'sine'), 50);
+  }
+
   inventoryMove() {
     this._noise(0.025, 0.06, 1400);
     this._tone(520, 0.03, 0.05, 'triangle');

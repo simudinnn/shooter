@@ -304,7 +304,7 @@ export class Player {
     return performance.now() / 1000;
   }
 
-  /** Legs-only AABB for movement (lower half of the 24px sprite). */
+  /** Legs AABB for movement — doorway overlap uses getPlayerFeetStripBounds separately. */
   getMoveCollider(ppu = 8) {
     const zOffPx = 6 * PLAYER_SPRITE_SCALE;
     return {
