@@ -284,6 +284,49 @@ export class Player {
     this.itemSlots[1] = { kind: 'bandage', amount: 1 };
   }
 
+  /** Hydrate player from a save snapshot. */
+  applySaveData(data) {
+    this.x = data.x;
+    this.z = data.z;
+    this.angle = data.angle ?? 0;
+    this.health = data.health;
+    this.maxHealth = data.maxHealth ?? 100;
+    this.shield = data.shield ?? 0;
+    this.alive = data.alive !== false;
+    this.weaponSlot = data.weaponSlot ?? 'gun';
+    this.meleeKey = data.meleeKey ?? 'wooden_bat';
+    this.itemSlots = data.itemSlots.map((s) => (s ? { ...s } : null));
+    this.equipmentSlots = data.equipmentSlots.map((s) => (s ? { ...s } : null));
+    this.powerUps = {
+      speed: { until: data.powerUps?.speed?.until ?? 0 },
+      damage: {
+        mult: data.powerUps?.damage?.mult ?? 1.5,
+        until: data.powerUps?.damage?.until ?? 0,
+      },
+    };
+    this.invulnTimer = 0;
+    this.melee = {
+      charging: false,
+      chargeStart: 0,
+      swingStart: 0,
+      swingUntil: 0,
+      swingCharge: 0,
+      hitApplied: false,
+    };
+    this.roll = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: ROLL_DURATION };
+    this.jump = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: JUMP_DURATION, inPlace: false };
+    this.reloadAim = { phase: 'idle', fromAngle: 0, lowerStart: 0 };
+
+    if (data.weaponKey && WEAPONS[data.weaponKey]) {
+      this.weaponKey = data.weaponKey;
+      const ammo = data.weaponAmmo ?? WEAPONS[data.weaponKey].magSize;
+      this.weapon = this._buildWeaponRuntime(data.weaponKey, ammo);
+    } else {
+      this.weaponKey = null;
+      this.weapon = null;
+    }
+  }
+
   _normalizeWeaponItem(item) {
     if (!item || item.kind !== 'weapon') return item;
     const cfg = WEAPONS[item.key];

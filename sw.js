@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v250';
+const CACHE = 'robot-ruins-v251';
 
 function shackSprites() {
   return [
@@ -127,7 +127,9 @@ const SHELL = [
   './js/sprites.js',
   './js/world.js',
   './js/worldGen.js',
-  './assets/fonts/ascii.png',
+  './js/saveGame.js',
+  './js/visibility.js',
+  './js/collisionDebug.js',
   './assets/fonts/game-pixel.woff2',
   './assets/fonts/game-pixel.ttf',
   './assets/ui/inventory.png',

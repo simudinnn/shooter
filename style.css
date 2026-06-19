@@ -105,7 +105,10 @@ canvas {
 }
 
 #start-screen,
-#game-over {
+#game-over,
+#main-menu,
+#pause-menu,
+#confirm-dialog {
   position: absolute;
   inset: 0;
   display: flex;
@@ -122,6 +125,55 @@ canvas {
     );
 }
 
+.menu-btn-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.menu-btn-stack button {
+  min-width: 200px;
+}
+
+.menu-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+}
+
+.menu-btn-row button {
+  min-width: 120px;
+}
+
+.menu-heading {
+  font-size: clamp(14px, 4vw, 24px);
+  color: #f0a030;
+  text-shadow: 0 2px 0 #8a5010;
+  margin-bottom: 1.5rem;
+  font-weight: 400;
+}
+
+.menu-subtitle {
+  color: #c8d4c0;
+  margin: -1rem 0 1.5rem;
+  font-size: var(--hud-sm);
+  line-height: 1.5;
+  max-width: 28rem;
+}
+
+.menu-frame--confirm {
+  max-width: min(92vw, 420px);
+}
+
+#confirm-message {
+  color: #d8e4d0;
+  margin-bottom: 1.5rem;
+  font-size: var(--hud-sm);
+  line-height: 1.55;
+}
+
 .menu-frame {
   text-align: center;
   padding: 48px 56px;
@@ -133,6 +185,8 @@ canvas {
     inset 0 0 60px rgba(74, 106, 82, 0.15);
 }
 
+#main-menu h1,
+#pause-menu h1,
 #start-screen h1,
 #game-over h1 {
   font-size: clamp(16px, 5vw, 32px);

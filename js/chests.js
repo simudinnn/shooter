@@ -92,6 +92,25 @@ export class ChestManager {
     if (i >= 0) this.chests.splice(i, 1);
   }
 
+  /** Restore chest loot/state when loading a save. */
+  restoreInBuilding(saved, building) {
+    const chest = {
+      x: saved.x,
+      z: saved.z,
+      variant: saved.variant,
+      slots: saved.slots.map((s) => (s ? { ...s } : null)),
+      opened: !!saved.opened,
+      homeCx: building.homeCx,
+      homeCz: building.homeCz,
+      homeBuilding: building,
+      obstacle: null,
+    };
+    building.chest = chest;
+    this._registerObstacle(chest);
+    this.chests.push(chest);
+    return chest;
+  }
+
   getNearby(player, maxDist = CHEST_INTERACT_DIST) {
     let best = null;
     let bestD = maxDist + player.radius;

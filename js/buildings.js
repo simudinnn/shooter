@@ -708,6 +708,74 @@ export class BuildingManager {
     if (i >= 0) this.buildings.splice(i, 1);
   }
 
+  /** Rebuild one saved building (geometry, decor, door, chest). */
+  restoreFromSave(saved, world) {
+    const chunk = world.getChunk(saved.homeCx, saved.homeCz);
+    chunk.buildingsSpawned = true;
+
+    const cellData = {
+      w: saved.w,
+      h: saved.h,
+      cells: saved.cells,
+      doorTx: saved.doorTx,
+      doorTz: saved.doorTz,
+      shape: saved.shape ?? 'rect',
+    };
+    const building = buildBuildingPieces(saved.originX, saved.originZ, cellData, saved.style);
+    building.doorOpen = !!saved.doorOpen;
+    building.homeCx = saved.homeCx;
+    building.homeCz = saved.homeCz;
+    building.obstacleDefs = building.obstacles;
+    building.obstacles = [];
+    this._registerObstacles(building);
+    this._syncDoorObstacle(building);
+    this._clearFoliageForBuilding(world, building);
+
+    if (saved.chestTile) building.chestTile = { ...saved.chestTile };
+    const reserved = building.chestTile ? [building.chestTile] : [];
+    const interiorProps = buildBuildingInteriorProps(
+      building.originX,
+      building.originZ,
+      building.w,
+      building.h,
+      building.cells,
+      building.doorTx,
+      building.doorTz,
+      reserved,
+      building.originX * 0.29,
+      building.originZ * 0.31,
+    );
+    building.decor = [
+      ...interiorProps,
+      ...buildBuildingDecor(
+        building.originX,
+        building.originZ,
+        building.w,
+        building.h,
+        building.cells,
+        building.doorTx,
+        building.doorTz,
+        building.originX * 0.17,
+        building.originZ * 0.23,
+        reserved,
+      ),
+    ];
+    this._registerDecorObstacles(building);
+    this.buildings.push(building);
+
+    if (saved.chest) {
+      this.chests?.restoreInBuilding(saved.chest, building);
+      chunk.chestsSpawned = true;
+    }
+    return building;
+  }
+
+  restoreAllFromSave(saves, world) {
+    for (const saved of saves ?? []) {
+      this.restoreFromSave(saved, world);
+    }
+  }
+
   _registerObstacles(building) {
     for (const obs of building.obstacleDefs ?? []) {
       const entry = { ...obs, building };

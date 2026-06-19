@@ -16,17 +16,33 @@
   <canvas id="game-canvas"></canvas>
 
   <div id="overlay">
-    <div id="start-screen">
+    <div id="main-menu">
       <div class="menu-frame">
         <h1>Robot Ruins</h1>
-        <button id="start-btn">Deploy</button>
+        <p id="menu-subtitle" class="menu-subtitle hidden"></p>
+        <div class="menu-btn-stack">
+          <button type="button" id="new-game-btn">New Game</button>
+          <button type="button" id="load-game-btn" class="hidden">Load Game</button>
+        </div>
       </div>
     </div>
-    <div id="game-over" class="hidden">
+    <div id="pause-menu" class="hidden">
       <div class="menu-frame">
-        <h1 id="game-over-title">YOU DIED</h1>
-        <p id="game-over-stats"></p>
-        <button id="restart-btn">Try again</button>
+        <h2 class="menu-heading">Paused</h2>
+        <div class="menu-btn-stack">
+          <button type="button" id="resume-btn">Resume</button>
+          <button type="button" id="save-game-btn">Save Game</button>
+          <button type="button" id="back-to-menu-btn">Back to Menu</button>
+        </div>
+      </div>
+    </div>
+    <div id="confirm-dialog" class="hidden">
+      <div class="menu-frame menu-frame--confirm">
+        <p id="confirm-message"></p>
+        <div class="menu-btn-row">
+          <button type="button" id="confirm-yes-btn">Yes</button>
+          <button type="button" id="confirm-no-btn">No</button>
+        </div>
       </div>
     </div>
   </div>
@@ -98,6 +114,7 @@
       </div>
     </div>
     <div id="mobile-actions">
+      <button type="button" class="mb-btn mb-small mb-pause" id="mb-pause" title="Pause">II</button>
       <button type="button" class="mb-btn mb-small" id="mb-gun">1</button>
       <button type="button" class="mb-btn mb-small" id="mb-knife">2</button>
       <button type="button" class="mb-btn mb-small" id="mb-reload">R</button>

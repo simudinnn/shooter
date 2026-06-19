@@ -1,8 +1,15 @@
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
-import { unpackTintGradient, getBiome, isTreeFoliage, rollWorldSeed } from './worldGen.js';
+import { unpackTintGradient, getBiome, isTreeFoliage, rollWorldSeed, setWorldSeed } from './worldGen.js';
+import { Robot, Scout, createExplosion, createGroundSpew, updateParticles } from './enemies.js';
 import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
-import { createExplosion, createGroundSpew, updateParticles } from './enemies.js';
+import {
+  captureGameState,
+  deleteSave,
+  hasSavedGame,
+  readSave,
+  writeSave,
+} from './saveGame.js';
 import { SoundManager } from './audio.js';
 import { Minimap } from './minimap.js';
 import { ItemManager } from './items.js';
@@ -73,6 +80,7 @@ const CAM_FOLLOW_SMOOTH = 50;
 class Game {
   constructor() {
     this.running = false;
+    this.paused = false;
     this.kills = 0;
     this.startTime = 0;
     this.particles = [];
@@ -103,6 +111,7 @@ class Game {
     this._initCanvas();
     this._initUI();
     this._bindEvents();
+    this._showMainMenu();
   }
 
   _initCanvas() {
@@ -131,10 +140,11 @@ class Game {
 
   _initUI() {
     this.el = {
-      startScreen: document.getElementById('start-screen'),
-      gameOver: document.getElementById('game-over'),
-      gameOverTitle: document.getElementById('game-over-title'),
-      gameOverStats: document.getElementById('game-over-stats'),
+      mainMenu: document.getElementById('main-menu'),
+      menuSubtitle: document.getElementById('menu-subtitle'),
+      pauseMenu: document.getElementById('pause-menu'),
+      confirmDialog: document.getElementById('confirm-dialog'),
+      confirmMessage: document.getElementById('confirm-message'),
       hud: document.getElementById('hud'),
       healthBar: document.getElementById('health-bar'),
       healthText: document.getElementById('health-text'),
@@ -150,8 +160,13 @@ class Game {
       gameDay: document.getElementById('game-day'),
       gameClock: document.getElementById('game-clock'),
       damageFlash: document.getElementById('damage-flash'),
-      startBtn: document.getElementById('start-btn'),
-      restartBtn: document.getElementById('restart-btn'),
+      newGameBtn: document.getElementById('new-game-btn'),
+      loadGameBtn: document.getElementById('load-game-btn'),
+      resumeBtn: document.getElementById('resume-btn'),
+      saveGameBtn: document.getElementById('save-game-btn'),
+      backToMenuBtn: document.getElementById('back-to-menu-btn'),
+      confirmYesBtn: document.getElementById('confirm-yes-btn'),
+      confirmNoBtn: document.getElementById('confirm-no-btn'),
       minimapCanvas: document.getElementById('minimap'),
       mobileControls: document.getElementById('mobile-controls'),
       waveBanner: document.getElementById('wave-banner'),
@@ -160,6 +175,144 @@ class Game {
     this.minimap = new Minimap(this.el.minimapCanvas);
     this.inventoryUI = new InventoryUI(this);
     this._waveBannerTimer = null;
+    this._confirmYes = null;
+    this._confirmNo = null;
+  }
+
+  _refreshMainMenuButtons() {
+    const hasSave = hasSavedGame();
+    this.el.loadGameBtn?.classList.toggle('hidden', !hasSave);
+  }
+
+  _showMainMenu(deathStats = null) {
+    this._refreshMainMenuButtons();
+    this.el.mainMenu?.classList.remove('hidden');
+    this.el.pauseMenu?.classList.add('hidden');
+    this.el.confirmDialog?.classList.add('hidden');
+    this.el.hud?.classList.add('hidden');
+    document.body.classList.remove('game-active');
+    this.el.mobileControls?.classList.add('hidden');
+    if (deathStats) {
+      this.el.menuSubtitle.textContent = deathStats;
+      this.el.menuSubtitle.classList.remove('hidden');
+    } else {
+      this.el.menuSubtitle.textContent = '';
+      this.el.menuSubtitle.classList.add('hidden');
+    }
+  }
+
+  _hideMainMenu() {
+    this.el.mainMenu?.classList.add('hidden');
+    this.el.menuSubtitle?.classList.add('hidden');
+  }
+
+  _showPauseMenu() {
+    this.paused = true;
+    this.el.pauseMenu?.classList.remove('hidden');
+    this._clearKeyboardInput();
+    this.prevMouseDown = false;
+    this.mouseDown = false;
+    this.inventoryUI?.forceClose();
+  }
+
+  _hidePauseMenu() {
+    this.paused = false;
+    this.el.pauseMenu?.classList.add('hidden');
+    this.canvas.focus();
+  }
+
+  _showConfirm(message, onYes, onNo) {
+    this.el.confirmMessage.textContent = message;
+    this.el.confirmDialog?.classList.remove('hidden');
+    this._confirmYes = onYes;
+    this._confirmNo = onNo ?? (() => this.el.confirmDialog?.classList.add('hidden'));
+  }
+
+  _closeConfirm() {
+    this.el.confirmDialog?.classList.add('hidden');
+    this._confirmYes = null;
+    this._confirmNo = null;
+  }
+
+  _togglePause() {
+    if (!this.running || !this.player?.alive) return;
+    if (this.inventoryUI?.isOpen()) return;
+    if (this.el.confirmDialog && !this.el.confirmDialog.classList.contains('hidden')) return;
+    if (this.paused) {
+      this._hidePauseMenu();
+    } else {
+      this._showPauseMenu();
+    }
+  }
+
+  _saveCurrentGame() {
+    const ok = writeSave(captureGameState(this));
+    if (ok) this._refreshMainMenuButtons();
+    return ok;
+  }
+
+  _requestBackToMenu() {
+    this._showConfirm(
+      'Save before exiting?',
+      () => {
+        this._closeConfirm();
+        this._saveCurrentGame();
+        this._quitToMainMenu();
+      },
+      () => {
+        this._closeConfirm();
+        this._quitToMainMenu();
+      },
+    );
+  }
+
+  _quitToMainMenu() {
+    this.running = false;
+    this.paused = false;
+    this._hidePauseMenu();
+    this._clearKeyboardInput();
+    this.touchMove = { x: 0, z: 0 };
+    this.moveJoystick?.reset();
+    this.inventoryUI?.forceClose();
+    this._showMainMenu();
+  }
+
+  _requestNewGame() {
+    if (hasSavedGame()) {
+      this._showConfirm(
+        'Are you sure you want to play a new game? Your old save will be removed.',
+        () => {
+          this._closeConfirm();
+          deleteSave();
+          this._refreshMainMenuButtons();
+          this._startNewGame();
+        },
+        () => this._closeConfirm(),
+      );
+      return;
+    }
+    this._startNewGame();
+  }
+
+  _startNewGame() {
+    this._hideMainMenu();
+    this._bootGame(null).catch((err) => {
+      console.error('New game failed:', err);
+      this._showMainMenu();
+    });
+  }
+
+  _startLoadGame() {
+    const data = readSave();
+    if (!data) {
+      this._refreshMainMenuButtons();
+      return;
+    }
+    this._hideMainMenu();
+    this._bootGame(data).catch((err) => {
+      console.error('Load failed:', err);
+      this._showMainMenu();
+    });
   }
 
   showWaveBanner(text, duration = 2) {
@@ -209,11 +362,20 @@ class Game {
     }
     if (e.code === 'Tab') {
       e.preventDefault();
-      if (this.running && !e.repeat) this.inventoryUI.toggle();
+      if (this.running && !this.paused && !e.repeat) this.inventoryUI.toggle();
+      return;
+    }
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      if (this.el.confirmDialog && !this.el.confirmDialog.classList.contains('hidden')) {
+        if (this._confirmNo) this._confirmNo();
+        return;
+      }
+      if (this.running) this._togglePause();
       return;
     }
     if (!e.repeat) this.keys[e.code] = true;
-    if (!this.running) return;
+    if (!this.running || this.paused) return;
     if (e.repeat) return;
     if (this.inventoryUI?.isOpen()) return;
     if (e.code === 'F3') {
@@ -243,8 +405,16 @@ class Game {
   }
 
   _bindEvents() {
-    this.el.startBtn.addEventListener('click', () => this.start());
-    this.el.restartBtn.addEventListener('click', () => this.start());
+    this.el.newGameBtn?.addEventListener('click', () => this._requestNewGame());
+    this.el.loadGameBtn?.addEventListener('click', () => this._startLoadGame());
+    this.el.resumeBtn?.addEventListener('click', () => this._hidePauseMenu());
+    this.el.saveGameBtn?.addEventListener('click', () => {
+      this._saveCurrentGame();
+      this._hidePauseMenu();
+    });
+    this.el.backToMenuBtn?.addEventListener('click', () => this._requestBackToMenu());
+    this.el.confirmYesBtn?.addEventListener('click', () => this._confirmYes?.());
+    this.el.confirmNoBtn?.addEventListener('click', () => this._confirmNo?.());
     window.addEventListener('resize', () => this._resizeCanvas());
 
     window.addEventListener('keydown', (e) => this._onGameKeyDown(e), true);
@@ -258,8 +428,8 @@ class Game {
       if (e.button === 0) {
         this.canvas.focus();
         this.audio.resume();
-        this.mouseDown = true;
-      } else if (e.button === 2 && this.running && !this.inventoryUI?.isOpen()) {
+        if (!this.paused) this.mouseDown = true;
+      } else if (e.button === 2 && this.running && !this.paused && !this.inventoryUI?.isOpen()) {
         if (!this._tryToggleNearbyDoor()) {
           const chest = this._getChestUnderCursor();
           if (chest) this.inventoryUI.openChest(chest);
@@ -277,7 +447,7 @@ class Game {
     document.addEventListener('dragstart', (e) => e.preventDefault());
 
     this.canvas.addEventListener('wheel', (e) => {
-      if (!this.running || this.inventoryUI?.isOpen()) return;
+      if (!this.running || this.paused || this.inventoryUI?.isOpen()) return;
       e.preventDefault();
       if (this.player?.toggleWeaponSlot()) this.audio.weaponSwitch();
     }, { passive: false });
@@ -346,6 +516,7 @@ class Game {
       if (this.running) this._tryStartReload(performance.now() / 1000);
     });
 
+    bindPress('mb-pause', () => this._togglePause());
     bindPress('mb-gun', () => { if (this.running) this.player?.setWeaponSlot('gun'); });
     bindPress('mb-knife', () => { if (this.running) this.player?.setWeaponSlot('melee'); });
 
@@ -631,36 +802,29 @@ class Game {
     return z + 0.04;
   }
 
-  start() {
-    this.el.startBtn.disabled = true;
-    this.el.restartBtn.disabled = true;
-    this._bootGame()
-      .catch((err) => {
-        console.error('Deploy/start failed:', err);
-        this.el.startScreen?.classList.remove('hidden');
-        this.el.gameOver?.classList.add('hidden');
-        this.el.hud?.classList.add('hidden');
-      })
-      .finally(() => {
-        this.el.startBtn.disabled = false;
-        this.el.restartBtn.disabled = false;
-      });
-  }
-
-  async _bootGame() {
+  async _bootGame(saveData = null) {
     this.audio.init();
     this.audio.resume();
 
     await this._spritePreload;
 
-    rollWorldSeed();
+    if (saveData?.worldSeed != null) {
+      setWorldSeed(saveData.worldSeed);
+    } else {
+      rollWorldSeed();
+    }
+
     this.world = new World();
     await this.world.build();
     this.world.prewarmGround(this.sprites, PPU);
     this.player = new Player();
-    const spawn = this.world.getPlayerSpawn();
-    this.player.x = spawn.x;
-    this.player.z = spawn.z;
+    if (saveData?.player) {
+      this.player.applySaveData(saveData.player);
+    } else {
+      const spawn = this.world.getPlayerSpawn();
+      this.player.x = spawn.x;
+      this.player.z = spawn.z;
+    }
     this.bullets = new BulletPool();
     this.robots = [];
     this.chunkEntities = new ChunkEntityManager(this.world, this);
@@ -670,6 +834,11 @@ class Game {
     this.buildings = new BuildingManager(this.world, this.chests);
     this.particles = [];
     this.dayNight = new DayNightCycle();
+
+    if (saveData) {
+      this._applySaveState(saveData);
+    }
+
     this._weaponBreathY = 0;
     this.camOffset = { x: 0, z: 0 };
     this._camPxX = 0;
@@ -678,14 +847,16 @@ class Game {
     this._camLeanPxZ = 0;
     this._lastWalkStep = -1;
     this._lastBounceLand = -1;
-    this.kills = 0;
+    this.kills = saveData?.kills ?? 0;
+    this.playTimeBase = saveData?.playTimeMs ?? 0;
     this.startTime = performance.now();
+    this.paused = false;
     this.running = true;
 
     this.canvas.focus();
 
-    this.el.startScreen.classList.add('hidden');
-    this.el.gameOver.classList.add('hidden');
+    this.el.pauseMenu?.classList.add('hidden');
+    this.el.confirmDialog?.classList.add('hidden');
     this.el.hud.classList.remove('hidden');
     document.body.classList.add('game-active');
     if (this.mobile) this.el.mobileControls?.classList.remove('hidden');
@@ -695,7 +866,43 @@ class Game {
     this._loop();
   }
 
+  _applySaveState(data) {
+    if (data.dayNight) {
+      this.dayNight.timeMinutes = data.dayNight.timeMinutes;
+      this.dayNight.day = data.dayNight.day;
+    }
+
+    for (const f of data.chunkFlags ?? []) {
+      const chunk = this.world.getChunk(f.cx, f.cz);
+      if (f.spidersSpawned) chunk.spidersSpawned = true;
+      if (f.buildingsSpawned) chunk.buildingsSpawned = true;
+      if (f.chestsSpawned) chunk.chestsSpawned = true;
+    }
+
+    this.buildings.restoreAllFromSave(data.buildings, this.world);
+
+    for (const s of data.robots ?? []) {
+      const robot = s.type === 'scout'
+        ? new Scout(s.x, s.z, s.wave ?? 1)
+        : new Robot(s.x, s.z, s.wave ?? 1, s.type ?? 'spider');
+      robot.health = s.health;
+      robot.maxHealth = s.maxHealth;
+      robot.angle = s.angle ?? robot.angle;
+      robot.homeCx = s.homeCx;
+      robot.homeCz = s.homeCz;
+      robot.alive = s.alive !== false;
+      robot.emerging = false;
+      if (s.homeCx != null && s.homeCz != null) {
+        const chunk = this.world.getChunk(s.homeCx, s.homeCz);
+        chunk.spidersSpawned = true;
+      }
+      this.robots.push(robot);
+    }
+  }
+
   _update(dt, time) {
+    if (this.paused) return;
+
     const inventoryOpen = this.inventoryUI?.isOpen();
     this.dayNight?.update(dt);
     this.buildings?.update(this.player, dt);
@@ -1997,19 +2204,17 @@ class Game {
 
   _endGame() {
     this.running = false;
-    const elapsed = ((performance.now() - this.startTime) / 1000).toFixed(1);
+    this.paused = false;
+    const elapsed = (((this.playTimeBase ?? 0) + performance.now() - this.startTime) / 1000).toFixed(1);
     this.audio.lose();
-    this.el.gameOverTitle.textContent = 'Mission failed';
-    this.el.gameOverTitle.style.color = '#f05030';
-    this.el.gameOverStats.textContent = `Kills: ${this.kills} · Time: ${elapsed}s · HP: ${Math.ceil(this.player.health)}`;
-    this.el.gameOver.classList.remove('hidden');
-    this.el.hud.classList.add('hidden');
-    document.body.classList.remove('game-active');
+    deleteSave();
+    this._refreshMainMenuButtons();
     this._clearKeyboardInput();
     this.prevMouseDown = false;
     this.touchMove = { x: 0, z: 0 };
     this.moveJoystick?.reset();
     this.inventoryUI?.forceClose();
+    this._showMainMenu(`You died — Kills: ${this.kills} · Time: ${elapsed}s`);
   }
 
   _loop() {
@@ -2020,10 +2225,12 @@ class Game {
     const time = now / 1000;
 
     this._frameDt = dt;
-    this._update(dt, time);
+    if (!this.paused) {
+      this._update(dt, time);
+      this._checkGameOver();
+    }
     this._draw();
     this._updateHUD();
-    this._checkGameOver();
     requestAnimationFrame(() => this._loop());
   }
 }
