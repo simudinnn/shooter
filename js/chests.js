@@ -1,24 +1,31 @@
 import { TILE } from './worldGen.js';
 import { rollChestLoot, rollChestVariant } from './loot.js';
-import { CELL_FLOOR } from './buildingGen.js';
+import { CELL_FLOOR, isNorthInteriorColumn } from './buildingGen.js';
 
 export const CHEST_INTERACT_DIST = 2.8;
 export const CHEST_DRAW_SCALE = 2.1;
 /** Native chest art size (assets/buildings/chest_*.png are 16×16). */
 export const CHEST_NATIVE_PX = 16;
 const CHEST_GAME_PPU = 8;
-/** Opaque-pixel centroid in the 16×16 sheet (art sits low in the frame). */
-export const CHEST_VIS_PIVOT = { nx: 8.5, ny: 11.0 };
-export const CHEST_OPAQUE_HALF_W = 6.5;
-export const CHEST_OPAQUE_HALF_H = 4.5;
-/** Square collision half-extents at draw scale (world units). */
+/** Sprite and collision share the tile center. */
+export const CHEST_VIS_PIVOT = { nx: 8, ny: 8 };
+export const CHEST_DRAW_PIVOT = CHEST_VIS_PIVOT;
+const CHEST_COLLISION_FRAC = 0.72;
+export const CHEST_OPAQUE_HALF_W = 6.5 * CHEST_COLLISION_FRAC;
+export const CHEST_OPAQUE_HALF_H = 4.5 * CHEST_COLLISION_FRAC;
+/** Collision half-extents at draw scale (world units). */
 export const CHEST_COLLISION_HALF_W = (CHEST_OPAQUE_HALF_W * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
 export const CHEST_COLLISION_HALF_H = (CHEST_OPAQUE_HALF_H * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
-export const CHEST_DRAW_PIVOT = CHEST_VIS_PIVOT;
 
 /** Single world anchor for draw, collision, interaction, and minimap. */
 export function getChestWorldPos(chest) {
   return { x: chest.x, z: chest.z };
+}
+
+function cellWalkable(cells, w, h, tx, tz) {
+  if (tx < 0 || tz < 0 || tx >= w || tz >= h) return false;
+  const cell = cells[tz * w + tx];
+  return cell === CELL_FLOOR;
 }
 
 export class ChestManager {
@@ -27,9 +34,9 @@ export class ChestManager {
     this.chests = [];
   }
 
-  /** One loot chest on an interior floor tile when a shack is placed. */
+  /** One loot chest against the north interior wall when a building is placed. */
   spawnInBuilding(building, chunk) {
-    const pos = this._pickBuildingInteriorSpot(building);
+    const pos = this._pickNorthBorderSpot(building);
     if (!pos) return null;
 
     const chest = {
@@ -49,32 +56,32 @@ export class ChestManager {
     return chest;
   }
 
-  _pickBuildingInteriorSpot(building) {
+  _pickNorthBorderSpot(building) {
     const { originX, originZ, w, h, cells, doorTx } = building;
+    const doorTz = building.doorTz ?? h - 1;
     const candidates = [];
 
-    for (let tz = 1; tz < h - 1; tz++) {
-      for (let tx = 1; tx < w - 1; tx++) {
+    for (let tz = 0; tz < h; tz++) {
+      for (let tx = 0; tx < w; tx++) {
         if (cells[tz * w + tx] !== CELL_FLOOR) continue;
+        if (tx === doorTx && tz === doorTz) continue;
+        if (cellWalkable(cells, w, h, tx, tz - 1)) continue;
         candidates.push({ tx, tz });
       }
     }
 
-    if (!candidates.length) {
-      for (let tz = 0; tz < h; tz++) {
-        for (let tx = 0; tx < w; tx++) {
-          if (cells[tz * w + tx] !== CELL_FLOOR) continue;
-          if (tz === h - 1 && tx === doorTx) continue;
-          candidates.push({ tx, tz });
-        }
-      }
-    }
-
     if (!candidates.length) return null;
-    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+
+    const northTz = Math.min(...candidates.map((c) => c.tz));
+    const northRow = candidates.filter((c) => c.tz === northTz);
+    const interiorRow = northRow.filter((c) => isNorthInteriorColumn(cells, w, h, c.tx, c.tz));
+    const pool = interiorRow.length ? interiorRow : northRow;
+    pool.sort((a, b) => a.tx - b.tx);
+    const pick = pool[Math.floor(pool.length / 2)];
+    building.chestTile = { tx: pick.tx, tz: pick.tz };
     return {
       x: originX + (pick.tx + 0.5) * TILE,
-      z: originZ + (pick.tz + 0.5) * TILE,
+      z: originZ + (pick.tz + 1) * TILE,
     };
   }
 

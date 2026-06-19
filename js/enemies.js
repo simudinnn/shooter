@@ -1,5 +1,5 @@
-import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
-import { updateChaseNav, canMeleeTarget } from './enemyNav.js';
+import { collectCollisionTargets, moveWithEntityCollision, didDisplace } from './collision.js';
+import { updateChaseNav, canMeleeTarget, ensureNavState } from './enemyNav.js';
 import { getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset } from './sprites.js';
 import { PPU } from './renderConfig.js';
 
@@ -14,7 +14,7 @@ export class Robot {
     this.spawnWave = wave;
     this.angle = Math.random() * Math.PI * 2;
     const waveScale = 1 + (wave - 1) * 0.1;
-    this.health = Math.floor(65 * waveScale);
+    this.health = Math.floor(85 * waveScale);
     this.maxHealth = this.health;
     this.alive = true;
     this.baseSpeed = (10 + Math.random() * 2.2) * (1 + (wave - 1) * 0.05);
@@ -202,6 +202,9 @@ export class Robot {
     if (nav.forget) {
       this.chasing = false;
       this.aggroByHit = false;
+      const n = ensureNavState(this);
+      n.waypoints = null;
+      n.unreachableSince = null;
       return false;
     }
     const len = Math.hypot(nav.dirX, nav.dirZ) || 1;
@@ -320,8 +323,8 @@ export class Robot {
     const dur = this.jump.duration || 0.5;
     const t = 1 - this.jump.until / dur;
     this.bob = Math.sin(t * Math.PI) * 0.72;
-    this.moving = true;
-    this.walkPhase += dt * 14;
+    this.moving = didDisplace(prevX, prevZ, this.x, this.z);
+    if (this.moving) this.walkPhase += dt * 14;
   }
 
   update(dt, player, world, robots, onMeleeHit, onShoot = null, buildings = null, time = 0) {
@@ -357,6 +360,8 @@ export class Robot {
       return;
     }
 
+    const prevX = this.x;
+    const prevZ = this.z;
     let moving = false;
 
     if (!player.alive) {
@@ -395,11 +400,10 @@ export class Robot {
       }
 
       if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-        this.moving = false;
-        this.bob = 0;
-        return;
+        moving = this._updateWander(dt, world, player, robots, 0.45);
+      } else {
+        moving = true;
       }
-      moving = true;
 
       if (
         dist < this.meleeRange + player.radius
@@ -416,7 +420,7 @@ export class Robot {
     }
 
     this.walkPhase += dt * (moving ? 6 : 0);
-    this.moving = moving;
+    this.moving = moving && didDisplace(prevX, prevZ, this.x, this.z);
   }
 
   static findSpawnPoint(world, existing, minPlayerDist = 14, player = null) {
@@ -545,6 +549,8 @@ export class Scout extends Robot {
       return;
     }
 
+    const prevX = this.x;
+    const prevZ = this.z;
     let moving = false;
 
     if (!player.alive) {
@@ -565,7 +571,6 @@ export class Scout extends Robot {
     const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
     const meleeDist = this.meleeRange + player.radius;
     const inAttack = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';
-
     if (hasLOS || (this.chasing && dist < chaseRange) || this.aggroByHit || inAttack) {
       this.chasing = true;
       this.angle = Math.atan2(dx, dz);
@@ -590,14 +595,13 @@ export class Scout extends Robot {
       } else if (dist < meleeDist) {
         this._abortShoot();
         if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-          this._abortShoot();
-          this.moving = false;
-          this.bob = 0;
-          return;
+          moving = this._updateWander(dt, world, player, robots, 0.45);
+        } else {
+          moving = true;
         }
-        moving = true;
         if (
-          this.meleeCooldown <= 0
+          moving
+          && this.meleeCooldown <= 0
           && canMeleeTarget(world, this.x, this.z, player.x, player.z)
         ) {
           onMeleeHit(this);
@@ -608,12 +612,10 @@ export class Scout extends Robot {
           this.shoot.reloadLeft -= dt;
           this._abortShoot();
           if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-            this._abortShoot();
-            this.moving = false;
-            this.bob = 0;
-            return;
+            moving = this._updateWander(dt, world, player, robots, 0.45);
+          } else {
+            moving = true;
           }
-          moving = true;
         } else if (this.shoot.phase === 'ready') {
           this.shoot.phase = 'charging';
           this.shoot.chargeLeft = this.shoot.chargeDuration;
@@ -622,12 +624,10 @@ export class Scout extends Robot {
       } else {
         this._abortShoot();
         if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-          this._abortShoot();
-          this.moving = false;
-          this.bob = 0;
-          return;
+          moving = this._updateWander(dt, world, player, robots, 0.45);
+        } else {
+          moving = true;
         }
-        moving = true;
       }
     } else if (!this.chasing) {
       this._abortShoot();
@@ -638,7 +638,7 @@ export class Scout extends Robot {
     }
 
     this.walkPhase += dt * (moving ? (this.chasing ? 10 : 6) : 0);
-    this.moving = moving;
+    this.moving = moving && didDisplace(prevX, prevZ, this.x, this.z);
   }
 }
 

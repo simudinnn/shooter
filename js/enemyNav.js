@@ -1,7 +1,7 @@
 import { TILE } from './worldGen.js';
 import { getDoorWorldPos } from './buildingGen.js';
 
-const FORGET_AFTER = 5;
+const FORGET_AFTER = 4;
 const PATH_INTERVAL = 0.35;
 const WAYPOINT_REACH = TILE * 0.45;
 const GRID_MARGIN = 14;
@@ -25,12 +25,30 @@ export function ensureNavState(robot) {
   return robot._nav;
 }
 
-function isWalkable(world, wx, wz, shape) {
-  return !world.checkCollisionShape(wx, wz, shape, true);
+function isClosedDoorTile(buildings, wx, wz) {
+  const list = buildings?.buildings;
+  if (!list) return false;
+  for (const b of list) {
+    if (b.doorOpen) continue;
+    const doorTx = b.doorTx ?? Math.floor(b.w / 2);
+    const doorTz = b.doorTz ?? b.h - 1;
+    const lx = wx - b.originX;
+    const lz = wz - b.originZ;
+    if (lx < 0 || lz < 0 || lx >= b.w * TILE || lz >= b.h * TILE) continue;
+    const tx = Math.floor(lx / TILE);
+    const tz = Math.floor(lz / TILE);
+    if (tx === doorTx && tz === doorTz) return true;
+  }
+  return false;
+}
+
+function isWalkable(world, wx, wz, shape, buildings) {
+  if (isClosedDoorTile(buildings, wx, wz)) return false;
+  return !world.checkCollisionShape(wx, wz, shape, true, { forNav: true });
 }
 
 /** Straight-line walk test — LOS alone is not enough when walls block movement. */
-export function canWalkDirect(world, ax, az, bx, bz, shape) {
+export function canWalkDirect(world, ax, az, bx, bz, shape, buildings = null) {
   const dist = Math.hypot(bx - ax, bz - az);
   if (dist < 0.05) return true;
   const steps = Math.max(2, Math.ceil(dist / (TILE * 0.3)));
@@ -38,7 +56,7 @@ export function canWalkDirect(world, ax, az, bx, bz, shape) {
     const t = i / steps;
     const x = ax + (bx - ax) * t;
     const z = az + (bz - az) * t;
-    if (!isWalkable(world, x, z, shape)) return false;
+    if (!isWalkable(world, x, z, shape, buildings)) return false;
   }
   return true;
 }
@@ -53,40 +71,36 @@ export function getChaseGoal(robot, player, buildings, world) {
 
   // Player inside, enemy outside (or in another building).
   if (playerBuilding && playerBuilding !== enemyBuilding) {
-    const door = getDoorWorldPos(playerBuilding);
-    if (playerBuilding.doorOpen) {
-      if (canWalkDirect(world, robot.x, robot.z, player.x, player.z, col)) {
-        return { x: player.x, z: player.z, kind: 'player' };
-      }
-      return { x: door.x, z: door.z, kind: 'door-enter' };
+    if (!playerBuilding.doorOpen) {
+      const door = getDoorWorldPos(playerBuilding);
+      const outsideZ = playerBuilding.originZ + playerBuilding.h * TILE + TILE * 0.55;
+      return { x: door.x, z: outsideZ, kind: 'door-outside' };
     }
-    return {
-      x: door.x,
-      z: playerBuilding.originZ + playerBuilding.h * TILE + TILE * 0.55,
-      kind: 'door-outside',
-    };
+    const door = getDoorWorldPos(playerBuilding);
+    if (canWalkDirect(world, robot.x, robot.z, player.x, player.z, col, buildings)) {
+      return { x: player.x, z: player.z, kind: 'player' };
+    }
+    return { x: door.x, z: door.z, kind: 'door-enter' };
   }
 
   // Enemy inside, player outside.
   if (enemyBuilding && enemyBuilding !== playerBuilding) {
-    const door = getDoorWorldPos(enemyBuilding);
-    if (enemyBuilding.doorOpen) {
-      if (canWalkDirect(world, robot.x, robot.z, player.x, player.z, col)) {
-        return { x: player.x, z: player.z, kind: 'player' };
-      }
-      return { x: door.x, z: door.z, kind: 'door-exit' };
+    if (!enemyBuilding.doorOpen) {
+      const door = getDoorWorldPos(enemyBuilding);
+      const outsideZ = enemyBuilding.originZ + enemyBuilding.h * TILE + TILE * 0.55;
+      return { x: door.x, z: outsideZ, kind: 'door-outside' };
     }
-    return {
-      x: door.x,
-      z: enemyBuilding.originZ + enemyBuilding.h * TILE + TILE * 0.55,
-      kind: 'door-outside',
-    };
+    const door = getDoorWorldPos(enemyBuilding);
+    if (canWalkDirect(world, robot.x, robot.z, player.x, player.z, col, buildings)) {
+      return { x: player.x, z: player.z, kind: 'player' };
+    }
+    return { x: door.x, z: door.z, kind: 'door-enter' };
   }
 
   return { x: player.x, z: player.z, kind: 'player' };
 }
 
-export function findPath(world, fromX, fromZ, toX, toZ, shape) {
+export function findPath(world, fromX, fromZ, toX, toZ, shape, buildings = null) {
   const ftx = Math.floor(fromX / TILE);
   const ftz = Math.floor(fromZ / TILE);
   const ttx = Math.floor(toX / TILE);
@@ -138,7 +152,7 @@ export function findPath(world, fromX, fromZ, toX, toZ, shape) {
       if (visited[ni]) continue;
       const wx = ntx * TILE + TILE * 0.5;
       const wz = ntz * TILE + TILE * 0.5;
-      if (!isWalkable(world, wx, wz, shape)) continue;
+      if (!isWalkable(world, wx, wz, shape, buildings)) continue;
       visited[ni] = 1;
       parent[ni] = cur;
       queue.push(ni);
@@ -148,14 +162,23 @@ export function findPath(world, fromX, fromZ, toX, toZ, shape) {
   return null;
 }
 
+/** Whether the robot can path to the player's current position (not just a door waypoint). */
+export function canReachPlayer(robot, player, world, buildings) {
+  const col = robot.getWorldCollider();
+  if (canWalkDirect(world, robot.x, robot.z, player.x, player.z, col, buildings)) return true;
+  const path = findPath(world, robot.x, robot.z, player.x, player.z, col, buildings);
+  return !!path?.length;
+}
+
 /**
  * Returns steering toward the next waypoint (or direct line when walk is clear).
- * Sets forget=true when blocked with no route for FORGET_AFTER seconds.
+ * Sets forget=true when the player is unreachable for FORGET_AFTER seconds.
  */
 export function updateChaseNav(robot, player, world, buildings, time) {
   const nav = ensureNavState(robot);
   const goal = getChaseGoal(robot, player, buildings, world);
   const col = robot.getWorldCollider();
+  const playerReachable = canReachPlayer(robot, player, world, buildings);
 
   if (nav.lastGoalKind !== goal.kind) {
     nav.waypoints = null;
@@ -163,8 +186,16 @@ export function updateChaseNav(robot, player, world, buildings, time) {
     nav.lastGoalKind = goal.kind;
   }
 
-  if (canWalkDirect(world, robot.x, robot.z, goal.x, goal.z, col)) {
+  if (!playerReachable) {
+    if (!nav.unreachableSince) nav.unreachableSince = time;
+    if (time - nav.unreachableSince >= FORGET_AFTER) {
+      return { dirX: 0, dirZ: 0, forget: true };
+    }
+  } else {
     nav.unreachableSince = null;
+  }
+
+  if (canWalkDirect(world, robot.x, robot.z, goal.x, goal.z, col, buildings)) {
     nav.waypoints = null;
     return {
       dirX: goal.x - robot.x,
@@ -176,23 +207,17 @@ export function updateChaseNav(robot, player, world, buildings, time) {
   const needPath = !nav.waypoints || time - nav.lastPathAt >= PATH_INTERVAL;
   if (needPath) {
     nav.lastPathAt = time;
-    nav.waypoints = findPath(world, robot.x, robot.z, goal.x, goal.z, col);
+    nav.waypoints = findPath(world, robot.x, robot.z, goal.x, goal.z, col, buildings);
     nav.wpIdx = 0;
   }
 
   if (!nav.waypoints?.length) {
-    if (!nav.unreachableSince) nav.unreachableSince = time;
-    if (time - nav.unreachableSince >= FORGET_AFTER) {
-      return { dirX: 0, dirZ: 0, forget: true };
-    }
     return {
       dirX: goal.x - robot.x,
       dirZ: goal.z - robot.z,
       forget: false,
     };
   }
-
-  nav.unreachableSince = null;
 
   let idx = nav.wpIdx;
   while (idx < nav.waypoints.length) {

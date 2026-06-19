@@ -6,17 +6,32 @@ import {
 } from './worldGen.js';
 import { INTERNAL_W, INTERNAL_H } from './renderConfig.js';
 import {
-  SHACK_MAX_W,
-  SHACK_MAX_H,
+  BUILDING_MAX_W,
+  BUILDING_MAX_H,
+  rollBuildingStyle,
+  rollBuildingSize,
+  rollBuildingWidth,
+  rollBuildingShape,
+  rollLVariant,
+  shapeHeightForWidth,
+  generateBuildingCells,
+  rollTownLots,
+} from './buildingTypes.js';
+import {
   BUILDING_ART_PX,
   CELL_DOOR,
+  CELL_EMPTY,
   CELL_FLOOR,
-  rollShackSize,
-  generateShackCells,
-  buildShackPieces,
+  buildBuildingPieces,
   isInsideBuilding,
   entityFeetZ,
-  buildingFoliageClearRect,
+  buildingFoliageClearRects,
+  buildBuildingDecor,
+  buildBuildingInteriorProps,
+  barrelScreenSize,
+  getBuildingFootprintRect,
+  buildingFootprintsTooClose,
+  BUILDING_MIN_GAP_TILES,
   roofRaiseWorld,
   wallDrawsInFront,
   wallFrontDrawZ,
@@ -30,6 +45,7 @@ import {
   isNearDoor,
   wouldClosingDoorTrapPlayer,
   DOOR_INTERACT_DIST,
+  wallSpriteId,
 } from './buildingGen.js';
 
 export { SHACK_SPRITE_MANIFEST, BUILDING_ART_PX } from './buildingGen.js';
@@ -38,8 +54,34 @@ export { SHACK_SPRITE_MANIFEST, BUILDING_ART_PX } from './buildingGen.js';
 export const OPEN_DOOR_ART_W = 22;
 export const OPEN_DOOR_ART_H = 16;
 
-export const BUILDING_CHUNK_SPAWN_RATE = 0.42;
-export const MAX_NEARBY_BUILDINGS = 5;
+/** Screen-space center + half extents for door interact hover (internal resolution). */
+export function getDoorScreenHitBox(building, worldToScreen) {
+  const doorTx = building.doorTx ?? Math.floor(building.w / 2);
+  const doorTz = building.doorTz ?? building.h - 1;
+  const { originX, originZ } = building;
+  const tl = worldToScreen(originX + doorTx * TILE, originZ + doorTz * TILE);
+  const br = worldToScreen(originX + (doorTx + 1) * TILE, originZ + (doorTz + 1) * TILE);
+  const tileX = Math.min(tl.x, br.x);
+  const tileY = Math.min(tl.y, br.y);
+  const tilePx = Math.max(2, Math.abs(br.x - tl.x) || 16);
+  const drawW = building.doorOpen
+    ? Math.round(tilePx * (OPEN_DOOR_ART_W / BUILDING_ART_PX))
+    : tilePx;
+  const drawH = tilePx;
+  const x = building.doorOpen ? Math.round(tileX + tilePx - drawW) : tileX;
+  const cx = x + drawW * 0.5;
+  const cy = tileY + drawH * 0.5;
+  return {
+    x: cx,
+    y: cy,
+    halfW: drawW * 0.5 + 4,
+    halfH: drawH * 0.5 + 6,
+  };
+}
+
+export const BUILDING_CHUNK_SPAWN_RATE = 0.48;
+export const TOWN_CLUSTER_CHANCE = 0.58;
+export const MAX_NEARBY_BUILDINGS = 18;
 
 const ROOF_FADE_SPEED = 4.5;
 const ROOF_ALPHA_INSIDE = 0.06;
@@ -151,16 +193,38 @@ function drawPlaceholderWall(ctx, wall, tileX, tileY, tilePx) {
   }
 }
 
+function buildingStyle(building) {
+  return building.style ?? {
+    floor: ['bld_floor_wood', 'bld_floor_wood_alt'],
+    wallNs: 'bld_wall_wood',
+    wallEw: 'bld_wall_ew',
+    wallCorner: 'bld_wall_wood',
+    doorMat: 'bld_door_mat_wood',
+    doorClosed: 'bld_door_closed_wood',
+    doorOpen: 'bld_door_open_wood',
+    doorLintel: 'shack_wall_door_top',
+    roofFill: 'bld_roof_brown',
+    roofEdge: 'bld_roof_brown_edge',
+  };
+}
+
+function isFloorCell(building, tx, tz) {
+  const cell = building.cells[tz * building.w + tx];
+  return cell === CELL_FLOOR || cell === CELL_DOOR;
+}
+
 export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites = null) {
   const { originX, originZ, w, h } = building;
+  const style = buildingStyle(building);
   let drewArt = false;
 
   if (sprites) {
     for (let tz = 0; tz < h; tz++) {
       for (let tx = 0; tx < w; tx++) {
-        const tileName = (tx + tz) % 5 === 0 && hasSprite(sprites, 'shack_floor_wood_alt')
-          ? 'shack_floor_wood_alt'
-          : 'shack_floor_wood';
+        if (!isFloorCell(building, tx, tz)) continue;
+        const tileName = (tx + tz) % 4 === 0 && hasSprite(sprites, style.floor[1])
+          ? style.floor[1]
+          : style.floor[0];
         if (!hasSprite(sprites, tileName)) continue;
         const corner = worldToScreen(originX + tx * TILE, originZ + tz * TILE);
         const next = worldToScreen(originX + (tx + 1) * TILE, originZ + (tz + 1) * TILE);
@@ -173,8 +237,9 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
   }
 
   if (!drewArt) {
-    const s0 = worldToScreen(originX, originZ);
-    const s1 = worldToScreen(originX + building.footprintW, originZ + building.footprintH);
+    const interior = building.interior;
+    const s0 = worldToScreen(interior.minX, interior.minZ);
+    const s1 = worldToScreen(interior.maxX, interior.maxZ);
     const x = Math.round(Math.min(s0.x, s1.x));
     const y = Math.round(Math.min(s0.y, s1.y));
     const fw = Math.round(Math.abs(s1.x - s0.x));
@@ -183,19 +248,19 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
   }
 
   const doorTx = building.doorTx ?? Math.floor(building.w / 2);
-  const doorTz = h - 1;
+  const doorTz = building.doorTz ?? building.h - 1;
   const { x: doorX, y: doorY } = shackTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
-  if (!sprites || !drawShackTile(sprites, ctx, 'shack_door_mat', doorX, doorY, tilePx)) {
-    const matW = tilePx;
-    const matH = tilePx;
+  const matName = buildingStyle(building).doorMat;
+  if (!sprites || !drawShackTile(sprites, ctx, matName, doorX, doorY, tilePx)) {
     ctx.fillStyle = '#4a3828';
-    ctx.fillRect(doorX, doorY, matW, matH);
+    ctx.fillRect(doorX, doorY, tilePx, tilePx);
   }
 }
 
 export function drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, sprites = null) {
   if (alpha <= 0.01) return;
-  const { roof, w, h } = building;
+  const { roof, w, h, cells } = building;
+  const style = buildingStyle(building);
   ctx.save();
   ctx.globalAlpha = alpha;
 
@@ -205,20 +270,21 @@ export function drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, sp
   const baseX = Math.round(Math.min(s0.x, s1.x));
   const baseY = Math.round(Math.min(s0.y, s1.y));
   const edgeRows = Math.floor(h / 2);
-  const hasEdge = sprites && hasSprite(sprites, 'shack_roof_edge');
-  const hasFill = sprites && hasSprite(sprites, 'shack_roof_fill');
+  const hasEdge = sprites && hasSprite(sprites, style.roofEdge);
+  const hasFill = sprites && hasSprite(sprites, style.roofFill);
 
   if (hasFill || hasEdge) {
     for (let tz = 0; tz < h; tz++) {
       for (let tx = 0; tx < w; tx++) {
+        if (cells && cells[tz * w + tx] === CELL_EMPTY) continue;
         const drawX = baseX + tx * tilePx;
         const drawY = baseY + tz * tilePx;
         if (tz < edgeRows && hasEdge) {
-          drawShackTile(sprites, ctx, 'shack_roof_edge', drawX, drawY, tilePx);
+          drawShackTile(sprites, ctx, style.roofEdge, drawX, drawY, tilePx);
         } else if (hasFill) {
-          drawShackTile(sprites, ctx, 'shack_roof_fill', drawX, drawY, tilePx);
+          drawShackTile(sprites, ctx, style.roofFill, drawX, drawY, tilePx);
         } else if (hasEdge) {
-          drawShackTile(sprites, ctx, 'shack_roof_edge', drawX, drawY, tilePx);
+          drawShackTile(sprites, ctx, style.roofEdge, drawX, drawY, tilePx);
         }
       }
     }
@@ -237,11 +303,12 @@ export function drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, sp
 }
 
 export function drawBuildingDoorLintel(ctx, building, worldToScreen, tilePx, sprites = null) {
-  const { originX, originZ, h, doorTx } = building;
-  const doorTz = h - 1;
+  const { originX, originZ, doorTx } = building;
+  const doorTz = building.doorTz ?? building.h - 1;
+  const lintelName = buildingStyle(building).doorLintel;
   const { x: tileX, y: tileY } = shackTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
   const lintelH = Math.round(tilePx * 0.5);
-  if (sprites && drawSnappedWallSprite(sprites, ctx, 'shack_wall_door_top', tileX, tileY, tilePx, lintelH)) return;
+  if (sprites && drawSnappedWallSprite(sprites, ctx, lintelName, tileX, tileY, tilePx, lintelH)) return;
   ctx.fillStyle = '#5a4a3a';
   ctx.fillRect(tileX, tileY, tilePx, lintelH);
   ctx.fillStyle = '#6a5a4a';
@@ -250,15 +317,16 @@ export function drawBuildingDoorLintel(ctx, building, worldToScreen, tilePx, spr
 
 /** Door panel on the south entry tile (open or closed sprite). */
 export function drawBuildingDoorPanel(ctx, building, worldToScreen, tilePx, sprites = null) {
-  const { originX, originZ, h, doorTx } = building;
-  const doorTz = h - 1;
+  const { originX, originZ, doorTx } = building;
+  const doorTz = building.doorTz ?? building.h - 1;
+  const style = buildingStyle(building);
   const { x: tileX, y: tileY } = shackTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
   if (building.doorOpen) {
-    if (sprites && drawOpenDoorSprite(sprites, ctx, 'shack_door_open', tileX, tileY, tilePx)) return true;
-  } else if (sprites && drawShackTile(sprites, ctx, 'shack_door_closed', tileX, tileY, tilePx)) {
+    if (sprites && drawOpenDoorSprite(sprites, ctx, style.doorOpen, tileX, tileY, tilePx)) return true;
+  } else if (sprites && drawShackTile(sprites, ctx, style.doorClosed, tileX, tileY, tilePx)) {
     return true;
   }
-  if (!building.doorOpen && sprites && drawShackTile(sprites, ctx, 'shack_wall_ns', tileX, tileY, tilePx)) return false;
+  if (!building.doorOpen && sprites && drawShackTile(sprites, ctx, style.wallNs, tileX, tileY, tilePx)) return false;
   drawPlaceholderWall(
     ctx,
     { orient: 'ns', face: 'south', extendNorth: false },
@@ -276,22 +344,30 @@ export function drawBuildingDoor(ctx, building, worldToScreen, tilePx, sprites =
   }
 }
 
-/** Darken the viewport outside the interior while the player is inside. */
+/** Darken the viewport outside walkable floor while the player is inside. */
 export function drawExteriorDimWhenInside(ctx, building, worldToScreen, alpha = 0.58) {
-  const { minX, maxX, minZ, maxZ } = building.interior;
-  const tl = worldToScreen(minX, minZ);
-  const tr = worldToScreen(maxX, minZ);
-  const br = worldToScreen(maxX, maxZ);
-  const bl = worldToScreen(minX, maxZ);
+  const { originX, originZ, w, h, cells } = building;
   ctx.save();
   ctx.fillStyle = `rgba(2, 4, 8, ${alpha})`;
   ctx.beginPath();
   ctx.rect(0, 0, INTERNAL_W, INTERNAL_H);
-  ctx.moveTo(tl.x, tl.y);
-  ctx.lineTo(tr.x, tr.y);
-  ctx.lineTo(br.x, br.y);
-  ctx.lineTo(bl.x, bl.y);
-  ctx.closePath();
+  for (let tz = 0; tz < h; tz++) {
+    for (let tx = 0; tx < w; tx++) {
+      const cell = cells[tz * w + tx];
+      if (cell !== CELL_FLOOR && cell !== CELL_DOOR) continue;
+      const wx0 = originX + tx * TILE;
+      const wz0 = originZ + tz * TILE;
+      const wx1 = wx0 + TILE;
+      const wz1 = wz0 + TILE;
+      const tl = worldToScreen(wx0, wz0);
+      const br = worldToScreen(wx1, wz1);
+      const x = Math.min(tl.x, br.x);
+      const y = Math.min(tl.y, br.y);
+      const rw = Math.abs(br.x - tl.x);
+      const rh = Math.abs(br.y - tl.y);
+      ctx.rect(x, y, rw, rh);
+    }
+  }
   ctx.fill('evenodd');
   ctx.restore();
 }
@@ -299,16 +375,18 @@ export function drawExteriorDimWhenInside(ctx, building, worldToScreen, alpha = 
 export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, sprites = null) {
   const { originX, originZ } = building;
   const { tx, tz, orient } = wall;
+  const style = buildingStyle(building);
   const { x: tileX, y: tileY } = shackTileTopLeft(originX, originZ, tx, tz, worldToScreen);
   const segH = Math.round(tilePx);
   const ewDrawW = Math.max(2, Math.round(tilePx / 4));
 
   if (sprites) {
+    const primary = wallSpriteId(style, orient);
     const candidates = orient === 'ew'
-      ? ['shack_wall_ew', 'shack_wall_ns']
+      ? [primary, 'bld_wall_ew']
       : orient === 'corner'
-        ? ['shack_wall_corner', 'shack_wall_ns']
-        : ['shack_wall_ns'];
+        ? [style.wallCorner ?? primary, primary]
+        : [primary];
     const sprite = firstSprite(sprites, candidates);
     if (sprite) {
       if (orient === 'ew') {
@@ -316,13 +394,9 @@ export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, spr
         const segments = wall.extendNorth ? 2 : 1;
         const drawH = segH * segments;
         const drawY = tileY + tilePx - drawH;
-        if (sprite === 'shack_wall_ns') {
-          drawSnappedWallSprite(sprites, ctx, sprite, drawX, drawY, ewDrawW, drawH);
-        } else {
-          for (let i = 0; i < segments; i++) {
-            const segY = drawY + (segments - 1 - i) * segH;
-            drawSnappedWallSprite(sprites, ctx, sprite, drawX, segY, ewDrawW, segH);
-          }
+        for (let i = 0; i < segments; i++) {
+          const segY = drawY + (segments - 1 - i) * segH;
+          drawSnappedWallSprite(sprites, ctx, sprite, drawX, segY, ewDrawW, segH);
         }
       } else {
         drawShackTile(sprites, ctx, sprite, tileX, tileY, tilePx);
@@ -331,6 +405,31 @@ export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, spr
     }
   }
   drawPlaceholderWall(ctx, wall, tileX, tileY, tilePx);
+}
+
+export function drawDecorPiece(ctx, sprites, piece, tilePx, worldToScreen) {
+  const obs = piece.obstacle;
+  const cx = obs?.x ?? piece.x;
+  const cz = obs?.z ?? piece.z;
+  const img = sprites?.images?.[piece.sprite];
+  if (!img) return;
+  const { drawW, drawH } = barrelScreenSize(tilePx);
+  const ss = worldToScreen(cx, cz);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    img,
+    Math.round(ss.x - drawW * 0.5),
+    Math.round(ss.y - drawH * 0.5),
+    drawW,
+    drawH,
+  );
+}
+
+export function drawBuildingDecor(ctx, building, worldToScreen, tilePx, sprites = null) {
+  if (!building.decor?.length || !sprites) return;
+  for (const piece of building.decor) {
+    drawDecorPiece(ctx, sprites, piece, tilePx, worldToScreen);
+  }
 }
 
 export class BuildingManager {
@@ -392,6 +491,10 @@ export class BuildingManager {
     return best;
   }
 
+  isInDoorInteractRange(player, building, maxDist = DOOR_INTERACT_DIST) {
+    return isNearDoor(building, player.x, player.z, maxDist);
+  }
+
   toggleDoor(building, player = null) {
     if (!building) return false;
     if (building.doorOpen && player && wouldClosingDoorTrapPlayer(building, player)) {
@@ -418,6 +521,7 @@ export class BuildingManager {
       building.h,
       building.cells,
       building.doorTx,
+      building.doorTz ?? building.h - 1,
     );
     building.doorEdgeObstacles = [];
     for (const obs of defs) {
@@ -450,12 +554,15 @@ export class BuildingManager {
 
     if (canSpawn && !canSpawn()) return;
 
-    const layout = this._findChunkOrigin(chunk, world, player, spawnBias);
-    if (!layout) return;
+    const asTown = Math.random() < TOWN_CLUSTER_CHANCE;
+    const spawned = asTown
+      ? this._spawnTownInChunk(chunk, world, player, canSpawn, spawnBias)
+      : this._spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias);
 
-    chunk.buildingsSpawned = true;
-    const { w, h, cells } = generateShackCells(layout.w, layout.h);
-    const building = buildShackPieces(layout.x, layout.z, w, h, cells);
+    if (spawned) chunk.buildingsSpawned = true;
+  }
+
+  _finalizeBuilding(building, chunk, world) {
     building.homeCx = chunk.cx;
     building.homeCz = chunk.cz;
     building.obstacleDefs = building.obstacles;
@@ -465,11 +572,133 @@ export class BuildingManager {
     this._clearFoliageForBuilding(world, building);
     this.buildings.push(building);
     this.chests?.spawnInBuilding(building, chunk);
+    const reserved = building.chestTile ? [building.chestTile] : [];
+    const interiorProps = buildBuildingInteriorProps(
+      building.originX,
+      building.originZ,
+      building.w,
+      building.h,
+      building.cells,
+      building.doorTx,
+      building.doorTz,
+      reserved,
+      building.originX * 0.29,
+      building.originZ * 0.31,
+    );
+    building.decor = [
+      ...interiorProps,
+      ...buildBuildingDecor(
+        building.originX,
+        building.originZ,
+        building.w,
+        building.h,
+        building.cells,
+        building.doorTx,
+        building.doorTz,
+        building.originX * 0.17,
+        building.originZ * 0.23,
+        reserved,
+      ),
+    ];
+    this._registerDecorObstacles(building);
+    return building;
+  }
+
+  _registerDecorObstacles(building) {
+    building.decorObstacles = [];
+    for (const piece of building.decor ?? []) {
+      if (!piece.obstacle) continue;
+      const entry = { ...piece.obstacle, building, decorPiece: piece };
+      building.decorObstacles.push(entry);
+      this.world.addDynamicObstacle(entry);
+    }
+  }
+
+  _spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias) {
+    const shape = rollBuildingShape(chunk.cx * 31 + 7, chunk.cz * 37 + 11);
+    const layout = this._findChunkOrigin(chunk, world, player, spawnBias, shape);
+    if (!layout) return false;
+
+    const style = rollBuildingStyle(
+      Math.floor(layout.x * 0.41),
+      Math.floor(layout.z * 0.53),
+    );
+    const building = buildBuildingPieces(layout.x, layout.z, layout.cellData, style);
+    this._finalizeBuilding(building, chunk, world);
+    return true;
+  }
+
+  _spawnTownInChunk(chunk, world, player, canSpawn, spawnBias) {
+    const lots = rollTownLots(chunk.cx * 41, chunk.cz * 43, BUILDING_MIN_GAP_TILES);
+    let townWTiles = 0;
+    let townHTiles = 0;
+    for (const lot of lots) {
+      townWTiles = Math.max(townWTiles, lot.ox + lot.w);
+      townHTiles = Math.max(townHTiles, lot.oz + lot.h);
+    }
+    const townW = townWTiles * TILE;
+    const townH = townHTiles * TILE;
+
+    const chunkOriginX = chunk.cx * CHUNK_WORLD;
+    const chunkOriginZ = chunk.cz * CHUNK_WORLD;
+    const minX = chunkOriginX - CHUNK_WORLD + TILE;
+    const minZ = chunkOriginZ - CHUNK_WORLD + TILE;
+    const spanX = CHUNK_WORLD * 2 - townW - TILE * 2;
+    const spanZ = CHUNK_WORLD * 2 - townH - TILE * 2;
+    if (spanX < TILE || spanZ < TILE) return this._spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias);
+
+    const fx = spawnBias?.fx ?? 0;
+    const fz = spawnBias?.fz ?? 1;
+    const tries = [];
+    for (let i = 0; i < 20; i++) {
+      tries.push({
+        x: minX + Math.random() * spanX,
+        z: minZ + Math.random() * spanZ,
+      });
+    }
+    if (spawnBias) {
+      tries.sort((a, b) => {
+        const aheadA = (a.x - player.x) * fx + (a.z - player.z) * fz;
+        const aheadB = (b.x - player.x) * fx + (b.z - player.z) * fz;
+        return aheadB - aheadA;
+      });
+    }
+
+    for (const passAhead of [true, false]) {
+      for (const t of tries) {
+        const snapped = snapWorldPoint(t.x, t.z);
+        const ox = Math.floor(snapped.x / TILE) * TILE;
+        const oz = Math.floor(snapped.z / TILE) * TILE;
+        if (!this._fitsTownAt(world, ox, oz, lots, player, passAhead, spawnBias)) continue;
+
+        let placed = 0;
+        for (let i = 0; i < lots.length; i++) {
+          if (canSpawn && !canSpawn()) break;
+          const lot = lots[i];
+          const cellData = generateBuildingCells(lot.w, lot.h, 'rect');
+          const bx = ox + lot.ox * TILE;
+          const bz = oz + lot.oz * TILE;
+          const style = rollBuildingStyle(Math.floor(bx * 0.41 + i * 7), Math.floor(bz * 0.53 + i * 11));
+          const building = buildBuildingPieces(
+            bx,
+            bz,
+            cellData,
+            style,
+          );
+          building.townId = `${chunk.cx},${chunk.cz}`;
+          this._finalizeBuilding(building, chunk, world);
+          placed++;
+        }
+        return placed > 0;
+      }
+    }
+    return this._spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias);
   }
 
   _clearFoliageForBuilding(world, building) {
-    const rect = buildingFoliageClearRect(building);
-    world.clearFoliageInRect(rect.minX, rect.maxX, rect.minZ, rect.maxZ);
+    for (const rect of buildingFoliageClearRects(building)) {
+      world.clearFoliageInRect(rect.minX, rect.maxX, rect.minZ, rect.maxZ);
+    }
   }
 
   remove(building) {
@@ -494,28 +723,41 @@ export class BuildingManager {
       }
       building.doorEdgeObstacles = null;
     }
+    if (building.decorObstacles?.length) {
+      for (const obs of building.decorObstacles) {
+        this.world.removeDynamicObstacle(obs);
+      }
+      building.decorObstacles = null;
+    }
     for (const obs of building.obstacles ?? []) {
       this.world.removeDynamicObstacle(obs);
     }
     building.obstacles = [];
   }
 
-  _fitsAt(world, originX, originZ, w, h, cells) {
+  _fitsAt(world, originX, originZ, w, h, cells = null) {
     const footprintW = w * TILE;
     const footprintH = h * TILE;
     if (isInBase(originX + footprintW * 0.5, originZ + footprintH * 0.5)) return false;
 
+    const candidateFootprint = getBuildingFootprintRect(originX, originZ, w, h);
+
     for (const other of this.buildings) {
-      if (
-        originX < other.originX + other.footprintW
-        && originX + footprintW > other.originX
-        && originZ < other.originZ + other.footprintH
-        && originZ + footprintH > other.originZ
-      ) return false;
+      const otherFootprint = getBuildingFootprintRect(
+        other.originX,
+        other.originZ,
+        other.w,
+        other.h,
+      );
+      if (buildingFootprintsTooClose(candidateFootprint, otherFootprint)) return false;
     }
 
     for (let tz = 0; tz < h; tz++) {
       for (let tx = 0; tx < w; tx++) {
+        if (cells) {
+          const cell = cells[tz * w + tx];
+          if (cell !== CELL_FLOOR && cell !== CELL_DOOR) continue;
+        }
         const cx = originX + (tx + 0.5) * TILE;
         const cz = originZ + (tz + 0.5) * TILE;
         if (world.checkCollision(cx, cz, 0.45)) return false;
@@ -524,19 +766,62 @@ export class BuildingManager {
     return true;
   }
 
-  _findChunkOrigin(chunk, world, player, spawnBias = null) {
+  _fitsTownAt(world, ox, oz, lots, player, requireAhead, spawnBias) {
+    const townW = Math.max(...lots.map((l) => l.ox + l.w)) * TILE;
+    const townH = Math.max(...lots.map((l) => l.oz + l.h)) * TILE;
+    const cx = ox + townW * 0.5;
+    const cz = oz + townH * 0.5;
+    const fx = spawnBias?.fx ?? 0;
+    const fz = spawnBias?.fz ?? 1;
+    if (requireAhead && spawnBias) {
+      if ((cx - player.x) * fx + (cz - player.z) * fz < 4) return false;
+    }
+    if (spawnBias?.isOffScreen && !spawnBias.isOffScreen(cx, cz)) return false;
+    if (player) {
+      const pdx = cx - player.x;
+      const pdz = cz - player.z;
+      if (pdx * pdx + pdz * pdz < 6) return false;
+    }
+
+    const lotFootprints = [];
+    for (const lot of lots) {
+      const bx = ox + lot.ox * TILE;
+      const bz = oz + lot.oz * TILE;
+      const cellData = generateBuildingCells(lot.w, lot.h, 'rect');
+      const footprint = getBuildingFootprintRect(bx, bz, lot.w, lot.h);
+      for (const prev of lotFootprints) {
+        if (buildingFootprintsTooClose(footprint, prev)) return false;
+      }
+      lotFootprints.push(footprint);
+      if (!this._fitsAt(world, bx, bz, lot.w, lot.h, cellData.cells)) return false;
+    }
+    return true;
+  }
+
+  _findChunkOrigin(chunk, world, player, spawnBias = null, shape = 'rect') {
     const minX = chunk.cx * CHUNK_WORLD + TILE;
     const minZ = chunk.cz * CHUNK_WORLD + TILE;
-    const spanX = CHUNK_WORLD - SHACK_MAX_W * TILE - TILE;
-    const spanZ = CHUNK_WORLD - SHACK_MAX_H * TILE - TILE;
+    const spanX = CHUNK_WORLD - BUILDING_MAX_W * TILE - TILE;
+    const spanZ = CHUNK_WORLD - BUILDING_MAX_H * TILE - TILE;
     const fx = spawnBias?.fx ?? 0;
     const fz = spawnBias?.fz ?? 1;
 
     const tries = [];
     for (let i = 0; i < 24; i++) {
-      const size = rollShackSize(chunk.cx * 17 + i * 3, chunk.cz * 23 + i * 5);
+      let cellData;
+      if (shape === 'rect') {
+        const size = rollBuildingSize(chunk.cx * 17 + i * 3, chunk.cz * 23 + i * 5);
+        cellData = generateBuildingCells(size.w, size.h, 'rect');
+      } else {
+        const w = rollBuildingWidth(chunk.cx * 17 + i * 3, chunk.cz * 23 + i * 5);
+        const lLeg = shape === 'l'
+          ? rollLVariant(chunk.cx * 17 + i * 7, chunk.cz * 23 + i * 11)
+          : undefined;
+        const bh = shapeHeightForWidth(w);
+        cellData = generateBuildingCells(w, bh, shape, { lLeg });
+      }
       tries.push({
-        size,
+        cellData,
         x: minX + Math.random() * spanX,
         z: minZ + Math.random() * spanZ,
       });
@@ -570,9 +855,9 @@ export class BuildingManager {
         const snapped = snapWorldPoint(t.x, t.z);
         const ox = Math.floor(snapped.x / TILE) * TILE;
         const oz = Math.floor(snapped.z / TILE) * TILE;
-        const { w, h, cells } = generateShackCells(t.size.w, t.size.h);
+        const { w, h, cells } = t.cellData;
         if (isValid(ox, oz, w, h, cells, passAhead)) {
-          return { x: ox, z: oz, w, h };
+          return { x: ox, z: oz, cellData: t.cellData };
         }
       }
     }

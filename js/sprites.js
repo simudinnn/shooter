@@ -48,22 +48,56 @@ const WORLD_ASSET_PATHS = Object.fromEntries([
   ...WORLD_FOLIAGE_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
 ]);
 
-const BUILDING_ASSET_PATHS = Object.fromEntries(
-  ['chest_wood', 'chest_metal', 'chest_rust', 'chest_moss'].map((name) => [name, `assets/buildings/${name}.png`]),
-);
+const BUILDING_ASSET_PATHS = Object.fromEntries([
+  ['chest_wood', 'assets/buildings/chests/wood.png'],
+  ['chest_metal', 'assets/buildings/chests/metal.png'],
+  ['chest_rust', 'assets/buildings/chests/rust.png'],
+  ['chest_moss', 'assets/buildings/chests/moss.png'],
+  ['bld_floor_wood', 'assets/buildings/floor/wood.png'],
+  ['bld_floor_wood_alt', 'assets/buildings/floor/wood_alt.png'],
+  ['bld_floor_parket', 'assets/buildings/floor/parket.png'],
+  ['bld_floor_parket_alt', 'assets/buildings/floor/parket_alt.png'],
+  ['bld_floor_tiles', 'assets/buildings/floor/tiles.png'],
+  ['bld_floor_tiles_alt', 'assets/buildings/floor/tiles_alt.png'],
+  ['bld_wall_wood', 'assets/buildings/walls/wood.png'],
+  ['bld_wall_brick', 'assets/buildings/walls/brick.png'],
+  ['bld_wall_gray', 'assets/buildings/walls/gray.png'],
+  ['bld_wall_blue', 'assets/buildings/walls/blue.png'],
+  ['bld_wall_white_wood', 'assets/buildings/walls/white_wood.png'],
+  ['bld_wall_ew', 'assets/buildings/walls/wall_ew.png'],
+  ['bld_roof_brown', 'assets/buildings/roof/brown.png'],
+  ['bld_roof_brown_edge', 'assets/buildings/roof/brown_edge.png'],
+  ['bld_roof_red', 'assets/buildings/roof/red.png'],
+  ['bld_roof_red_edge', 'assets/buildings/roof/red_edge.png'],
+  ['bld_roof_blue', 'assets/buildings/roof/blue.png'],
+  ['bld_roof_blue_edge', 'assets/buildings/roof/blue_edge.png'],
+  ['bld_door_mat_wood', 'assets/buildings/doors/mat_wood.png'],
+  ['bld_door_closed_wood', 'assets/buildings/doors/closed_wood.png'],
+  ['bld_door_open_wood', 'assets/buildings/doors/open_wood.png'],
+  ['bld_barrel_blue', 'assets/buildings/misc/barrel_blue.png'],
+  ['bld_barrel_green', 'assets/buildings/misc/barrel_green.png'],
+  ['bld_barrel_red', 'assets/buildings/misc/barrel_red.png'],
+  ['bld_table', 'assets/buildings/misc/table.png'],
+  ['bld_fridge', 'assets/buildings/misc/fridge.png'],
+]);
 
 const SHACK_ASSET_PATHS = {
   shack_floor_wood: 'assets/buildings/shack/floor_wood.png',
   shack_floor_wood_alt: 'assets/buildings/shack/floor_wood_alt.png',
+  shack_floor_wood2: 'assets/buildings/shack/floor_wood2.png',
+  shack_floor_wood_alt2: 'assets/buildings/shack/floor_wood_alt2.png',
   shack_door_mat: 'assets/buildings/shack/door_mat.png',
   shack_door_closed: 'assets/buildings/shack/door_closed.png',
   shack_door_open: 'assets/buildings/shack/door_open.png',
   shack_wall_ns: 'assets/buildings/shack/wall_ns.png',
+  shack_wall_ns2: 'assets/buildings/shack/wall_ns2.png',
   shack_wall_ew: 'assets/buildings/shack/wall_ew.png',
   shack_wall_corner: 'assets/buildings/shack/wall_corner.png',
   shack_wall_door_top: 'assets/buildings/shack/wall_door_top.png',
   shack_roof_fill: 'assets/buildings/shack/roof_fill.png',
+  shack_roof_fill2: 'assets/buildings/shack/roof_fill2.png',
   shack_roof_edge: 'assets/buildings/shack/roof_edge.png',
+  shack_roof_edge2: 'assets/buildings/shack/roof_edge2.png',
 };
 
 const CORE_ASSETS = {
@@ -72,7 +106,6 @@ const CORE_ASSETS = {
   scout: 'assets/enemies/scout.png',
   scout_walk: 'assets/enemies/scout_walk.png',
   scout_charge: 'assets/enemies/charge.png',
-  wall: 'assets/world/wall.png',
   ...WORLD_ASSET_PATHS,
   ...BUILDING_ASSET_PATHS,
   ...SHACK_ASSET_PATHS,

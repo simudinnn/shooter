@@ -1,22 +1,62 @@
-const CACHE = 'robot-ruins-v194';
+const CACHE = 'robot-ruins-v250';
 
 function shackSprites() {
   return [
     './assets/buildings/shack/floor_wood.png',
     './assets/buildings/shack/floor_wood_alt.png',
-    './assets/buildings/shack/wall_ns.png',
-    './assets/buildings/shack/wall_ew.png',
-    './assets/buildings/shack/wall_corner.png',
+    './assets/buildings/shack/floor_wood2.png',
+    './assets/buildings/shack/floor_wood_alt2.png',
     './assets/buildings/shack/door_mat.png',
     './assets/buildings/shack/door_closed.png',
     './assets/buildings/shack/door_open.png',
+    './assets/buildings/shack/wall_ns.png',
+    './assets/buildings/shack/wall_ns2.png',
+    './assets/buildings/shack/wall_ew.png',
     './assets/buildings/shack/wall_door_top.png',
     './assets/buildings/shack/roof_fill.png',
+    './assets/buildings/shack/roof_fill2.png',
     './assets/buildings/shack/roof_edge.png',
+    './assets/buildings/shack/roof_edge2.png',
+  ];
+}
+
+function buildingKitSprites() {
+  return [
+    './assets/buildings/floor/wood.png',
+    './assets/buildings/floor/wood_alt.png',
+    './assets/buildings/floor/parket.png',
+    './assets/buildings/floor/parket_alt.png',
+    './assets/buildings/floor/tiles.png',
+    './assets/buildings/floor/tiles_alt.png',
+    './assets/buildings/walls/wood.png',
+    './assets/buildings/walls/brick.png',
+    './assets/buildings/walls/gray.png',
+    './assets/buildings/walls/blue.png',
+    './assets/buildings/walls/white_wood.png',
+    './assets/buildings/walls/wall_ew.png',
+    './assets/buildings/roof/brown.png',
+    './assets/buildings/roof/brown_edge.png',
+    './assets/buildings/roof/red.png',
+    './assets/buildings/roof/red_edge.png',
+    './assets/buildings/roof/blue.png',
+    './assets/buildings/roof/blue_edge.png',
+    './assets/buildings/doors/mat_wood.png',
+    './assets/buildings/doors/closed_wood.png',
+    './assets/buildings/doors/open_wood.png',
+    './assets/buildings/misc/barrel_blue.png',
+    './assets/buildings/misc/barrel_green.png',
+    './assets/buildings/misc/barrel_red.png',
+    './assets/buildings/misc/table.png',
+    './assets/buildings/misc/fridge.png',
+    './assets/buildings/chests/wood.png',
+    './assets/buildings/chests/metal.png',
+    './assets/buildings/chests/rust.png',
+    './assets/buildings/chests/moss.png',
   ];
 }
 
 const SHACK_SPRITES = shackSprites();
+const BUILDING_KIT_SPRITES = buildingKitSprites();
 
 function playerSprites() {
   // Only precache sprites that exist in assets/player/.
@@ -51,7 +91,6 @@ function worldSprites() {
     'foliage_bush', 'foliage_bush2', 'foliage_tree', 'foliage_tree2', 'foliage_tree3', 'foliage_stump',
   ];
   return [
-    './assets/world/wall.png',
     ...floors.map((n) => `./assets/world/${n}.png`),
     ...foliage.map((n) => `./assets/world/${n}.png`),
   ];
@@ -69,10 +108,12 @@ const SHELL = [
   './js/dayNight.js',
   './js/main.js',
   './js/player.js',
+  './js/bulletCollision.js',
   './js/enemies.js',
   './js/chunkEntities.js',
   './js/chests.js',
   './js/buildingGen.js',
+  './js/buildingTypes.js',
   './js/buildings.js',
   './js/loot.js',
   './js/audio.js',
@@ -94,10 +135,6 @@ const SHELL = [
   './assets/ui/inv_cursor.png',
   './assets/ui/chest_inventory.png',
   './assets/items/lock.png',
-  './assets/buildings/chest_wood.png',
-  './assets/buildings/chest_metal.png',
-  './assets/buildings/chest_rust.png',
-  './assets/buildings/chest_moss.png',
 ];
 
 const ASSETS = [
@@ -105,6 +142,7 @@ const ASSETS = [
   ...WEAPON_SPRITES,
   ...WORLD_SPRITES,
   ...SHACK_SPRITES,
+  ...BUILDING_KIT_SPRITES,
   './assets/enemies/spider.png',
   './assets/enemies/spider_walk.png',
   './assets/enemies/scout.png',

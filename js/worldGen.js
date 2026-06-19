@@ -84,7 +84,7 @@ function snapFoliageAxis(v) {
   return snapAxis(v);
 }
 
-function hash32(x, z) {
+export function hash32(x, z) {
   let h = (x | 0) * 374761393 + (z | 0) * 668265263 + _worldSeed * 982451653;
   h = (h ^ (h >> 13)) * 1274126177;
   return (h ^ (h >> 16)) >>> 0;

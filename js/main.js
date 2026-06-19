@@ -13,7 +13,9 @@ import {
   drawBuildingWall,
   drawBuildingRoof,
   drawBuildingDoor,
-  drawExteriorDimWhenInside,
+  drawBuildingDecor,
+  drawDecorPiece,
+  getDoorScreenHitBox,
 } from './buildings.js';
 import {
   wallDrawsInFront,
@@ -24,10 +26,12 @@ import {
   doorDrawsInFront,
   doorBackDrawZ,
   doorFrontDrawZ,
+  bulletDrawSortZ,
+  entityFeetZ,
 } from './buildingGen.js';
 import { chestSpriteName } from './loot.js';
 import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
-import { collectCollisionTargets, moveWithEntityCollision } from './collision.js';
+import { collectCollisionTargets, moveWithEntityCollision, didDisplace } from './collision.js';
 import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
@@ -35,6 +39,15 @@ import { InventoryUI } from './inventory.js';
 import { getWeaponAmmoType, AMMO_TYPES } from './ammo.js';
 import { DayNightCycle, applyNightOverlay } from './dayNight.js';
 import { snapCamLean, worldToScreen, camPixelsFromPlayer, leanPixelsFromOffset, drawPixelEllipseShadow, PPU, INTERNAL_W, INTERNAL_H, RENDER_SCALE } from './renderConfig.js';
+import {
+  collectVisionSegments,
+  computeVisibilityPolygon,
+  drawVisibilityOverlay,
+  pointInVisibilityPolygon,
+  resolveVisionOrigin,
+} from './visibility.js';
+
+const VISION_DARKNESS = 0.22;
 
 const SPRITE_PLAYER = 1.50;
 const SPRITE_CHEST = CHEST_DRAW_SCALE;
@@ -48,6 +61,8 @@ const AUTO_AIM_TARGET_TURN_RATE = 4.5;
 const AUTO_AIM_STICK_TURN_RATE = 12;
 const AUTO_AIM_GUN_MAX_RANGE = 52;
 const AUTO_AIM_MELEE_MAX_RANGE = 4.5;
+/** Extended melee snap range when mobile autolock is on. */
+const AUTO_AIM_MELEE_LOCK_RANGE = 9;
 const AUTO_AIM_SCREEN_PAD = 28;
 const MOBILE_STICK_DEADZONE = 0.15;
 /** Subtle camera lean toward cursor (world units = px / PPU). */
@@ -82,6 +97,7 @@ class Game {
     this._camLeanPxZ = 0;
     this.debugCollision = false;
     this.touchMove = { x: 0, z: 0 };
+    this.autoLock = false;
     this.mobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
     this._initCanvas();
@@ -344,6 +360,11 @@ class Game {
       if (this.running) this.inventoryUI.toggle();
     });
 
+    bindPress('mb-autolock', () => {
+      this.autoLock = !this.autoLock;
+      document.getElementById('mb-autolock')?.classList.toggle('mb-active', this.autoLock);
+    });
+
     if (this.mobile) {
       this.el.mobileControls.classList.remove('hidden');
       document.body.classList.add('mobile-ui');
@@ -390,9 +411,10 @@ class Game {
   _findNearestRobotOnScreen() {
     let best = null;
     let bestDist = Infinity;
-    const maxRange = this.mobile && this.player?.isMeleeActive()
-      ? AUTO_AIM_MELEE_MAX_RANGE
-      : AUTO_AIM_GUN_MAX_RANGE;
+    let maxRange = AUTO_AIM_GUN_MAX_RANGE;
+    if (this.mobile && this.player?.isMeleeActive()) {
+      maxRange = this.autoLock ? AUTO_AIM_MELEE_LOCK_RANGE : AUTO_AIM_MELEE_MAX_RANGE;
+    }
 
     for (const robot of this.robots) {
       if (!robot.alive && !robot.emerging) continue;
@@ -434,15 +456,19 @@ class Game {
       let cursorSy;
       let turnRate = null;
 
-      const target = this._findNearestRobotOnScreen();
-      if (target) {
-        const ts = this._worldToScreen(target.x, target.z);
-        cursorSx = ts.x;
-        cursorSy = ts.y;
-        this.mouse.wx = target.x;
-        this.mouse.wz = target.z;
-        turnRate = AUTO_AIM_TARGET_TURN_RATE;
-      } else {
+      if (this.autoLock) {
+        const target = this._findNearestRobotOnScreen();
+        if (target) {
+          const ts = this._worldToScreen(target.x, target.z);
+          cursorSx = ts.x;
+          cursorSy = ts.y;
+          this.mouse.wx = target.x;
+          this.mouse.wz = target.z;
+          turnRate = AUTO_AIM_TARGET_TURN_RATE;
+        }
+      }
+
+      if (turnRate == null) {
         const stickMag = Math.hypot(this.touchMove.x, this.touchMove.z);
         if (stickMag > MOBILE_STICK_DEADZONE) {
           const stickAngle = Math.atan2(this.touchMove.x, this.touchMove.z);
@@ -685,9 +711,11 @@ class Game {
       const usingStick = stickMag > MOBILE_STICK_DEADZONE;
 
       const sprintInput = this._isShiftHeld();
-      this.player.isMoving = moveX !== 0 || moveZ !== 0;
+      const wantsMove = moveX !== 0 || moveZ !== 0;
+      const playerPrevX = this.player.x;
+      const playerPrevZ = this.player.z;
 
-      if (this.player.isMoving) {
+      if (wantsMove) {
         const len = Math.hypot(moveX, moveZ);
         if (len > 0.01) {
           this.player.moveDirX = moveX / len;
@@ -706,7 +734,6 @@ class Game {
         moveZ = (moveZ / len) * speed * dt * analog;
         const targets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
         const moveShape = this.player.getMoveCollider(PPU);
-        const wallSoft = this.buildings?.insideBuilding ? 'interior' : 'exterior';
         const r = moveWithEntityCollision(
           this.world,
           this.player.x,
@@ -717,7 +744,6 @@ class Game {
           moveShape,
           targets,
           this.player,
-          { wallSoft },
         );
         this.player.x = r.x;
         this.player.z = r.z;
@@ -751,6 +777,8 @@ class Game {
         this._lastWalkStep = -1;
         this._lastBounceLand = -1;
       }
+
+      this.player.isMoving = wantsMove && didDisplace(playerPrevX, playerPrevZ, this.player.x, this.player.z);
 
       this._updateCameraFollow(dt);
       this._syncAim(dt);
@@ -910,9 +938,37 @@ class Game {
     return this.buildings.getNearbyDoor(this.player);
   }
 
+  _getHoveredDoor() {
+    if (!this.buildings?.buildings?.length) return null;
+    let best = null;
+    let bestD = Infinity;
+    const worldToScreen = (wx, wz) => this._worldToScreen(wx, wz);
+    for (const building of this.buildings.buildings) {
+      const box = getDoorScreenHitBox(building, worldToScreen);
+      const dx = this.mouse.sx - box.x;
+      const dy = this.mouse.sy - box.y;
+      if (Math.abs(dx) > box.halfW || Math.abs(dy) > box.halfH) continue;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = building;
+      }
+    }
+    return best;
+  }
+
+  /** Door for interact — proximity on mobile; cursor hover + range on desktop. */
+  _getInteractDoor() {
+    if (!this.buildings?.buildings?.length || !this.player) return null;
+    if (this.mobile) return this.buildings.getNearbyDoor(this.player);
+    const hovered = this._getHoveredDoor();
+    if (!hovered || !this.buildings.isInDoorInteractRange(this.player, hovered)) return null;
+    return hovered;
+  }
+
   _tryToggleNearbyDoor() {
     if (!this.running || this.inventoryUI?.isOpen()) return false;
-    const building = this._getNearbyDoor();
+    const building = this._getInteractDoor();
     if (!building) return false;
     if (!this.buildings.toggleDoor(building, this.player)) {
       if (building.doorOpen) {
@@ -969,6 +1025,56 @@ class Game {
       }
     }
     return best;
+  }
+
+  _getInteractHighlight(time) {
+    if (!this.running || this.inventoryUI?.isOpen() || !this.player) return null;
+    const door = this._getInteractDoor();
+    const nearbyChest = this._getNearbyChest();
+    const hoveredChest = this._getHoveredChest();
+    const canDoor = !!door;
+    const canChestMobile = this.mobile && nearbyChest && !door;
+    const canChestDesktop = !this.mobile && hoveredChest
+      && this.chests.isInInteractRange(this.player, hoveredChest);
+    const canChest = canChestMobile || canChestDesktop;
+
+    if (canDoor) {
+      return {
+        kind: 'door',
+        box: getDoorScreenHitBox(door, (wx, wz) => this._worldToScreen(wx, wz)),
+      };
+    }
+    if (canChest) {
+      const chest = canChestDesktop ? hoveredChest : nearbyChest;
+      const s = this._chestScreenPos(chest);
+      return {
+        kind: 'chest',
+        box: {
+          x: s.x,
+          y: s.y,
+          halfW: Math.round(CHEST_OPAQUE_HALF_W * SPRITE_CHEST) + 4,
+          halfH: Math.round(CHEST_OPAQUE_HALF_H * SPRITE_CHEST) + 6,
+        },
+      };
+    }
+    return null;
+  }
+
+  _drawInteractPulse(ctx, box, time) {
+    const pulse = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 5.5));
+    const pad = 2 + pulse * 2;
+    const x0 = Math.round(box.x - box.halfW - pad);
+    const y0 = Math.round(box.y - box.halfH - pad);
+    const w = Math.round((box.halfW + pad) * 2);
+    const h = Math.round((box.halfH + pad) * 2);
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 200, 90, ${0.35 + pulse * 0.45})`;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0, y0, w, h);
+    ctx.strokeStyle = `rgba(255, 220, 120, ${0.2 + pulse * 0.25})`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0 - 2, y0 - 2, w + 4, h + 4);
+    ctx.restore();
   }
 
   _tryStartReload(time) {
@@ -1068,7 +1174,14 @@ class Game {
       const dz = robot.z - this.player.z;
       const dist = Math.hypot(dx, dz);
       if (dist > range + robot.radius) continue;
-      if (this.world.segmentBlocked(this.player.x, this.player.z, robot.x, robot.z, 0.2, false)) {
+      if (this.world.segmentBlocked(this.player.x, this.player.z, robot.x, robot.z, 0.2, false, null, {
+        losSeg: {
+          x0: this.player.x,
+          z0: this.player.z,
+          x1: robot.x,
+          z1: robot.z,
+        },
+      })) {
         continue;
       }
       let diff = Math.atan2(dx, dz) - aim;
@@ -1320,7 +1433,13 @@ class Game {
     if (clipBounds) ctx.restore();
   }
 
-  _drawParticle(ctx, p) {
+  _visibilityMul(x, z, useVisFog, visPoly) {
+    if (!useVisFog || !visPoly) return 1;
+    return pointInVisibilityPolygon(x, z, visPoly) ? 1 : 0;
+  }
+
+  _drawParticle(ctx, p, visMul = 1) {
+    if (visMul < 0.02) return;
     const s = this._worldToScreen(p.x, p.z);
     const groundY = Math.round(p.groundDrop ?? 0);
     const airY = Math.round(this._particleAirY(p));
@@ -1336,11 +1455,11 @@ class Game {
     if (p.kind === 'spark') alpha = Math.min(1, alpha * 1.35);
     if (p.kind === 'scrape') alpha = Math.min(1, alpha * 1.05);
     ctx.fillStyle = p.color;
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = alpha * visMul;
 
     if (p.kind === 'casing') {
       const sprite = p.casingSprite || 'casing';
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = alpha * visMul;
       this.sprites.draw(
         ctx,
         sprite,
@@ -1357,7 +1476,7 @@ class Game {
     } else if (p.kind === 'blood') {
       ctx.fillRect(s.x - sz / 2, s.y - sz / 2 + airY, sz, sz * 0.85);
     } else if (p.kind === 'spark' || p.kind === 'smoke' || p.kind === 'fire') {
-      this._drawFxParticleSprite(ctx, p, s.x, Math.round(s.y + airY), alpha, sz);
+      this._drawFxParticleSprite(ctx, p, s.x, Math.round(s.y + airY), alpha * visMul, sz);
     } else if (p.kind === 'scrape' && p.grounded && p.splatW) {
       ctx.fillRect(s.x - splatW, s.y + groundY - splatH * 0.5, splatW * 2, splatH);
     } else if (p.kind === 'scrape') {
@@ -1403,11 +1522,40 @@ class Game {
       cam.z,
     );
 
+    const insideBuilding = this.buildings?.insideBuilding;
+    const useVisFog = this.player && this.running;
+    let visPoly = null;
+    if (useVisFog) {
+      const visOrigin = resolveVisionOrigin(this.world, this.player.x, this.player.z, insideBuilding);
+      const visSegs = collectVisionSegments(
+        this.world,
+        visibleBuildings,
+        viewMinX,
+        viewMaxX,
+        viewMinZ,
+        viewMaxZ,
+        insideBuilding,
+      );
+      visPoly = computeVisibilityPolygon(
+        visOrigin.x,
+        visOrigin.z,
+        visSegs,
+        viewMinX,
+        viewMaxX,
+        viewMinZ,
+        viewMaxZ,
+      );
+    }
+
     for (const building of visibleBuildings) {
       drawBuildingFloors(ctx, building, worldToScreen, tilePx, this.sprites);
     }
 
-    const insideBuilding = this.buildings?.insideBuilding;
+    if (useVisFog && visPoly) {
+      drawVisibilityOverlay(ctx, visPoly, worldToScreen, INTERNAL_W, INTERNAL_H, VISION_DARKNESS);
+    }
+
+    const visFadeStep = 1 - Math.exp(-10 * (this._frameDt ?? 0.016));
 
     const playerSortZ = this._playerSortZ();
     const playerX = this.player.x;
@@ -1428,6 +1576,13 @@ class Game {
           z: doorBackDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
           sortBias: 0,
           draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
+        });
+      }
+      for (const piece of building.decor ?? []) {
+        drawList.push({
+          z: piece.sortZ,
+          sortBias: piece.sortBias ?? 1,
+          draw: () => drawDecorPiece(ctx, this.sprites, piece, tilePx, worldToScreen),
         });
       }
     }
@@ -1524,13 +1679,26 @@ class Game {
           ctx.ellipse(s.x, s.y + 9, 8 + hole * 6, 3 + hole * 3, 0, 0, Math.PI * 2);
           ctx.fill();
         }
-        ctx.globalAlpha = 0.3 + emerge * 0.7;
+        let visMul = 1;
+        if (useVisFog && visPoly) {
+          const inVis = pointInVisibilityPolygon(robot.x, entityFeetZ(robot), visPoly);
+          const target = inVis ? 1 : 0;
+          if (robot._visAlpha == null) robot._visAlpha = target;
+          robot._visAlpha += (target - robot._visAlpha) * visFadeStep;
+          visMul = robot._visAlpha;
+        } else if (robot._visAlpha != null && robot._visAlpha < 0.999) {
+          robot._visAlpha += (1 - robot._visAlpha) * visFadeStep;
+          visMul = robot._visAlpha;
+        }
         const isSpider = robot.type === 'spider';
         const shadowLift = isScout ? 4 : (isSpider ? 4 : 0);
         const shadowRx = (isScout ? 15 : 10) * emerge;
         const shadowRy = (isScout ? 5.5 : 4) * emerge;
-        if (shadowRx >= 2 && shadowRy >= 2) {
+        if (shadowRx >= 2 && shadowRy >= 2 && visMul > 0.06) {
+          ctx.save();
+          ctx.globalAlpha = visMul;
           drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx);
+          ctx.restore();
         }
         const bodySheet = getEnemyBodySheet(robot.type, robotMoving, shootPhase);
         const bodyAnim = getEnemyBodyAnim(
@@ -1541,6 +1709,7 @@ class Game {
           robot.shoot?.animStart,
           { walkSpeedMult: scoutWalkMult },
         );
+        ctx.globalAlpha = (0.3 + emerge * 0.7) * visMul;
         this.sprites.draw(
           ctx,
           bodySheet,
@@ -1571,7 +1740,6 @@ class Game {
     const gunClip = insideBuilding ? buildingGunClipBounds(insideBuilding) : null;
     drawList.push({ z: playerSortZ + 0.02, sortBias: 2, draw: () => {
       const pose = this._getGunScreenPose(drawTime);
-      if (pose.isShotFlash) return;
       this._drawWeaponSprite(ctx, pose, gunClip);
     }});
     for (const building of visibleBuildings) {
@@ -1605,7 +1773,30 @@ class Game {
       } else {
         sortZ = p.z - 0.05;
       }
-      drawList.push({ z: sortZ, sortBias: 1, draw: () => this._drawParticle(ctx, p) });
+      drawList.push({
+        z: sortZ,
+        sortBias: 1,
+        draw: () => {
+          const visMul = this._visibilityMul(p.x, p.z, useVisFog, visPoly);
+          this._drawParticle(ctx, p, visMul);
+        },
+      });
+    }
+    for (const b of this.bullets.bullets) {
+      if (!b.active) continue;
+      const bulletZ = bulletDrawSortZ(b.x, b.z, visibleBuildings);
+      drawList.push({
+        z: bulletZ,
+        sortBias: 1,
+        draw: () => {
+          if (this._visibilityMul(b.x, b.z, useVisFog, visPoly) <= 0) return;
+          this._drawBulletTrail(ctx, b);
+          const s = this._worldToScreen(b.x, b.z);
+          const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
+          const bAngle = velToSpriteAngle(b.vx, b.vz);
+          this.sprites.draw(ctx, 'bullet', s.x, s.y, bScale, bAngle);
+        },
+      });
     }
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();
@@ -1615,37 +1806,14 @@ class Game {
       drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, this.sprites);
     }
 
-    if (insideBuilding) {
-      const roofA = this.buildings?.roofAlpha ?? 1;
-      const dimT = Math.min(1, Math.max(0, (1 - roofA) / 0.94));
-      const dimAlpha = 0.80 * dimT;
-      if (dimAlpha > 0.02) {
-        drawExteriorDimWhenInside(ctx, insideBuilding, worldToScreen, dimAlpha);
-      }
-    }
-
     this._drawPlayerCooldown(ctx, performance.now() / 1000);
 
     applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);
 
-    const gunPose = this._getGunScreenPose(drawTime);
-    if (gunPose.isShotFlash) {
-      const flashClip = insideBuilding ? buildingGunClipBounds(insideBuilding) : null;
-      this._drawWeaponSprite(ctx, gunPose, flashClip);
-    }
-
     brightParticles.sort((a, b) => a.z - b.z);
     for (const { p } of brightParticles) {
-      this._drawParticle(ctx, p);
-    }
-
-    for (const b of this.bullets.bullets) {
-      if (!b.active) continue;
-      this._drawBulletTrail(ctx, b);
-      const s = this._worldToScreen(b.x, b.z);
-      const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
-      const bAngle = velToSpriteAngle(b.vx, b.vz);
-      this.sprites.draw(ctx, 'bullet', s.x, s.y, bScale, bAngle);
+      const visMul = this._visibilityMul(p.x, p.z, useVisFog, visPoly);
+      this._drawParticle(ctx, p, visMul);
     }
 
     if (this.debugCollision) {
@@ -1783,20 +1951,20 @@ class Game {
 
     const hoveredChest = this._getHoveredChest();
     const nearbyChest = this._getNearbyChest();
-    const nearbyDoor = this._getNearbyDoor();
+    const interactDoor = this._getInteractDoor();
     const canOpenChestDesktop = !this.inventoryUI.open
       && !this.mobile
       && hoveredChest
       && this.chests.isInInteractRange(this.player, hoveredChest);
-    const canOpenChestMobile = !this.inventoryUI.open && this.mobile && nearbyChest && !nearbyDoor;
+    const canOpenChestMobile = !this.inventoryUI.open && this.mobile && nearbyChest && !interactDoor;
     const canOpenChest = canOpenChestDesktop || canOpenChestMobile;
-    const canToggleDoor = !this.inventoryUI.open && nearbyDoor;
+    const canToggleDoor = !this.inventoryUI.open && interactDoor;
     const mbInteract = document.getElementById('mb-interact');
     mbInteract?.classList.toggle('mb-nearby', canToggleDoor || canOpenChestMobile);
     const showPrompt = canToggleDoor || canOpenChest;
     this.el.interactPrompt.classList.toggle('hidden', !showPrompt);
     if (showPrompt) {
-      const doorVerb = nearbyDoor?.doorOpen ? 'close' : 'open';
+      const doorVerb = interactDoor?.doorOpen ? 'close' : 'open';
       if (this.mobile) {
         this.el.interactPrompt.textContent = canToggleDoor
           ? `E to ${doorVerb} door`
@@ -1851,6 +2019,7 @@ class Game {
     this.lastTime = now;
     const time = now / 1000;
 
+    this._frameDt = dt;
     this._update(dt, time);
     this._draw();
     this._updateHUD();

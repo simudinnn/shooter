@@ -14,6 +14,7 @@ import {
   foliageIntersectsRect,
   isCanopyFoliage,
 } from './worldGen.js';
+import { bulletWallCollisionZ, obstacleBehindAlongAim } from './bulletCollision.js';
 
 export { TILE, CHUNK_TILES, BASE_RADIUS } from './worldGen.js';
 export const MAP_SIZE = 999999;
@@ -30,15 +31,33 @@ export class World {
     this.obstacles = [];
     this.decor = [];
     this.dynamicObstacles = [];
+    this._dynamicGrid = new Map();
+    this._obstacleScratch = [];
   }
 
   addDynamicObstacle(obs) {
     this.dynamicObstacles.push(obs);
+    const cx = Math.floor(obs.x / CHUNK_WORLD);
+    const cz = Math.floor(obs.z / CHUNK_WORLD);
+    const key = `${cx},${cz}`;
+    let bucket = this._dynamicGrid.get(key);
+    if (!bucket) {
+      bucket = [];
+      this._dynamicGrid.set(key, bucket);
+    }
+    bucket.push(obs);
   }
 
   removeDynamicObstacle(obs) {
     const i = this.dynamicObstacles.indexOf(obs);
     if (i >= 0) this.dynamicObstacles.splice(i, 1);
+    const cx = Math.floor(obs.x / CHUNK_WORLD);
+    const cz = Math.floor(obs.z / CHUNK_WORLD);
+    const bucket = this._dynamicGrid.get(`${cx},${cz}`);
+    if (bucket) {
+      const j = bucket.indexOf(obs);
+      if (j >= 0) bucket.splice(j, 1);
+    }
   }
 
   get halfW() {
@@ -55,6 +74,7 @@ export class World {
     this.obstacles = [];
     this.decor = [];
     this.dynamicObstacles = [];
+    this._dynamicGrid.clear();
     this._touchChunk(0, 0);
   }
 
@@ -244,11 +264,6 @@ export class World {
     return out;
   }
 
-  /** @deprecated use collectYsortFoliage */
-  collectCanopyFoliage(minX, maxX, minZ, maxZ) {
-    return this.collectYsortFoliage(minX, maxX, minZ, maxZ);
-  }
-
   collectFoliage(minX, maxX, minZ, maxZ) {
     const minTX = Math.floor(minX / TILE);
     const maxTX = Math.ceil(maxX / TILE);
@@ -264,18 +279,30 @@ export class World {
   }
 
   collectObstaclesNear(x, z, radius) {
+    const out = this._obstacleScratch;
+    out.length = 0;
     const { cx: ccx, cz: ccz } = worldToChunk(x, z);
-    const reach = Math.ceil(radius / (CHUNK_TILES * TILE)) + 1;
-    const out = [];
+    const reach = Math.ceil(radius / CHUNK_WORLD) + 1;
     for (let dz = -reach; dz <= reach; dz++) {
       for (let dx = -reach; dx <= reach; dx++) {
-        const chunk = this.getChunk(ccx + dx, ccz + dz);
+        const chunk = this.chunks.get(this._chunkKey(ccx + dx, ccz + dz));
+        if (!chunk) continue;
         for (const obs of chunk.obstacles) out.push(obs);
       }
     }
     const pad = radius + 8;
-    for (const obs of this.dynamicObstacles) {
-      if (Math.abs(obs.x - x) <= pad && Math.abs(obs.z - z) <= pad) out.push(obs);
+    const minCX = Math.floor((x - pad) / CHUNK_WORLD);
+    const maxCX = Math.floor((x + pad) / CHUNK_WORLD);
+    const minCZ = Math.floor((z - pad) / CHUNK_WORLD);
+    const maxCZ = Math.floor((z + pad) / CHUNK_WORLD);
+    for (let gcz = minCZ; gcz <= maxCZ; gcz++) {
+      for (let gcx = minCX; gcx <= maxCX; gcx++) {
+        const bucket = this._dynamicGrid.get(`${gcx},${gcz}`);
+        if (!bucket) continue;
+        for (const obs of bucket) {
+          if (Math.abs(obs.x - x) <= pad && Math.abs(obs.z - z) <= pad) out.push(obs);
+        }
+      }
     }
     return out;
   }
@@ -327,17 +354,6 @@ export class World {
   }
 
   _circleAabbHit(px, pz, pr, obs, soft = false, forBullets = false) {
-    if (forBullets && obs.bulletZ != null) {
-      const halfW = obs.softHalfW ?? obs.halfW;
-      const halfH = obs.bulletHalfH ?? obs.halfH;
-      const ox = obs.softX ?? obs.x;
-      const oz = obs.bulletZ;
-      const cx = Math.max(ox - halfW, Math.min(px, ox + halfW));
-      const cz = Math.max(oz - halfH, Math.min(pz, oz + halfH));
-      const dx = px - cx;
-      const dz = pz - cz;
-      return dx * dx + dz * dz < pr * pr;
-    }
     const { halfW, halfH } = this._aabbHalfExtents(obs, soft);
     const { x: ox, z: oz } = this._aabbCenter(obs, soft);
     const cx = Math.max(ox - halfW, Math.min(px, ox + halfW));
@@ -394,23 +410,43 @@ export class World {
     return obs.halfW > 0 && obs.halfH > 0;
   }
 
-  /** @param {'exterior'|'interior'|null} wallSoft — which building wall soft layer applies. */
-  _wallSoftMatches(obs, wallSoft) {
-    if (!obs.wallSoft) return true;
-    if (!wallSoft) return obs.wallSoft === 'exterior';
-    return obs.wallSoft === wallSoft;
+  /** Nav pathfinding — treat closed-door seals and all floor edges as blocking. */
+  _navObstacleBlocks(obs) {
+    return obs.doorSeal || obs.floorEdge;
   }
 
-  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false, wallSoft = null) {
+  _pointExteriorOfFloorEdge(obs, x, z) {
+    if (!obs.floorEdge || !obs.edgeDir) return false;
+    switch (obs.edgeDir) {
+      case 's': return z >= obs.z - obs.halfH * 0.35;
+      case 'n': return z <= obs.z + obs.halfH * 0.35;
+      case 'e': return x >= obs.x - obs.halfW * 0.35;
+      case 'w': return x <= obs.x + obs.halfW * 0.35;
+      default: return false;
+    }
+  }
+
+  _losIgnoresFloorEdge(obs, losSeg) {
+    if (!losSeg || !obs.floorEdge) return false;
+    const aExt = this._pointExteriorOfFloorEdge(obs, losSeg.x0, losSeg.z0);
+    const bExt = this._pointExteriorOfFloorEdge(obs, losSeg.x1, losSeg.z1);
+    return aExt === bExt;
+  }
+
+  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false, _wallSoft = null, bulletCtx = null, forNav = false) {
     for (const obs of obstacles) {
       if (forBullets && obs.blocksBullets === false) continue;
-      if (soft && !this._wallSoftMatches(obs, wallSoft)) continue;
+      if (this._losIgnoresFloorEdge(obs, bulletCtx?.losSeg)) continue;
+      if (forBullets && bulletCtx?.shooterX != null && bulletCtx.aimAngle != null
+        && obstacleBehindAlongAim(obs, bulletCtx.shooterX, bulletCtx.shooterZ, bulletCtx.aimAngle)) {
+        continue;
+      }
+      if (forNav && !this._navObstacleBlocks(obs)) continue;
       if (obs.kind === 'circle' && this._circleHit(x, z, radius, obs.x, obs.z, obs.radius)) {
         return true;
       }
       if (obs.kind === 'aabb') {
         if (!soft && !this._aabbHardEnabled(obs)) continue;
-        if (soft && obs.softHalfW == null) continue;
         if (this._circleAabbHit(x, z, radius, obs, soft, forBullets)) return true;
       }
     }
@@ -443,20 +479,19 @@ export class World {
     return { cx: acx + (nx / dist) * overlap, cz: acz + (nz / dist) * overlap };
   }
 
-  _checkShapeCollision(px, pz, shape, obstacles, soft = false, wallSoft = null) {
+  _checkShapeCollision(px, pz, shape, obstacles, soft = false, forNav = false) {
     if (!shape || shape.kind === 'circle') {
-      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles, false, soft, wallSoft);
+      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles, false, soft, null, null, forNav);
     }
     const acx = px;
     const acz = pz + shape.zOff;
     for (const obs of obstacles) {
-      if (soft && !this._wallSoftMatches(obs, wallSoft)) continue;
+      if (forNav && !this._navObstacleBlocks(obs)) continue;
       if (obs.kind === 'circle' && this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) {
         return true;
       }
       if (obs.kind === 'aabb') {
         if (!soft && !this._aabbHardEnabled(obs)) continue;
-        if (soft && obs.softHalfW == null) continue;
         if (this._aabbAabbHit(acx, acz, shape.halfW, shape.halfH, obs, soft)) return true;
       }
     }
@@ -464,32 +499,54 @@ export class World {
   }
 
   checkCollisionShape(px, pz, shape, soft = false, opts = {}) {
-    const wallSoft = opts.wallSoft ?? null;
+    const forNav = opts.forNav ?? false;
     const obstacles = this.collectObstaclesNear(px, pz, this._shapeReach(shape));
-    return this._checkShapeCollision(px, pz, shape, obstacles, soft, wallSoft);
+    return this._checkShapeCollision(px, pz, shape, obstacles, soft, forNav);
   }
 
   checkCollision(x, z, radius) {
     return this.checkCollisionShape(x, z, { kind: 'circle', radius }, false);
   }
 
-  segmentBlocked(x0, z0, x1, z1, radius = BULLET_RADIUS, soft = true) {
+  /** Bullet spawn — ignores walls behind the player along the aim ray. */
+  checkBulletSpawnCollision(shooterX, shooterZ, x, z, radius, aimAngle) {
+    const cz = bulletWallCollisionZ(z, aimAngle);
+    const obstacles = this.collectObstaclesNear(x, cz, radius + 3);
+    return this._checkObstacleCollision(x, cz, radius, obstacles, true, true, null, {
+      shooterX,
+      shooterZ,
+      aimAngle,
+    });
+  }
+
+  segmentBlocked(x0, z0, x1, z1, radius = BULLET_RADIUS, soft = true, aimAngle = null, opts = null) {
     const dist = Math.hypot(x1 - x0, z1 - z0);
     const steps = Math.max(2, Math.ceil(dist / 0.25));
     const midX = (x0 + x1) * 0.5;
     const midZ = (z0 + z1) * 0.5;
     const obstacles = this.collectObstaclesNear(midX, midZ, dist * 0.5 + 2);
-    for (let i = 1; i <= steps; i++) {
+    const minStep = opts?.forwardOnly ? Math.max(1, Math.ceil(steps * 0.4)) : 1;
+    const bulletCtx = {
+      ...(opts?.shooterX != null && aimAngle != null
+        ? { shooterX: opts.shooterX, shooterZ: opts.shooterZ, aimAngle }
+        : {}),
+      ...(opts?.losSeg ? { losSeg: opts.losSeg } : {}),
+    };
+    const ctx = Object.keys(bulletCtx).length ? bulletCtx : null;
+    for (let i = minStep; i <= steps; i++) {
       const t = i / steps;
       const x = x0 + (x1 - x0) * t;
       const z = z0 + (z1 - z0) * t;
-      if (this._checkObstacleCollision(x, z, radius, obstacles, true, soft)) return true;
+      const cz = aimAngle != null ? bulletWallCollisionZ(z, aimAngle) : z;
+      if (this._checkObstacleCollision(x, cz, radius, obstacles, true, soft, null, ctx)) return true;
     }
     return false;
   }
 
   hasLineOfSight(x0, z0, x1, z1, radius = 0.25) {
-    return !this.segmentBlocked(x0, z0, x1, z1, radius, false);
+    return !this.segmentBlocked(x0, z0, x1, z1, radius, false, null, {
+      losSeg: { x0, z0, x1, z1 },
+    });
   }
 
   resolveMovementShape(oldX, oldZ, newX, newZ, shape, opts = {}) {
@@ -497,7 +554,6 @@ export class World {
       return this.resolveMovement(oldX, oldZ, newX, newZ, shape?.radius ?? 0);
     }
 
-    const wallSoft = opts.wallSoft ?? null;
     let x = newX;
     let z = newZ;
     const obstacles = this.collectObstaclesNear(x, z, this._shapeReach(shape));
@@ -512,19 +568,18 @@ export class World {
           x = pushed.cx;
           z = pushed.cz - shape.zOff;
         } else if (obs.kind === 'aabb') {
-          if (obs.softHalfW == null) continue;
-          if (!this._wallSoftMatches(obs, wallSoft)) continue;
-          if (!this._aabbAabbHit(acx, acz, shape.halfW, shape.halfH, obs, true)) continue;
-          const pushed = this._pushAabbFromAabb(acx, acz, shape.halfW, shape.halfH, obs, true);
+          if (!this._aabbHardEnabled(obs)) continue;
+          if (!this._aabbAabbHit(acx, acz, shape.halfW, shape.halfH, obs, false)) continue;
+          const pushed = this._pushAabbFromAabb(acx, acz, shape.halfW, shape.halfH, obs, false);
           x = pushed.cx;
           z = pushed.cz - shape.zOff;
         }
       }
     }
 
-    if (!this._checkShapeCollision(x, z, shape, obstacles, true, wallSoft)) return { x, z };
-    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, true, wallSoft)) return { x: newX, z: oldZ };
-    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, true, wallSoft)) return { x: oldX, z: newZ };
+    if (!this._checkShapeCollision(x, z, shape, obstacles, false)) return { x, z };
+    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, false)) return { x: newX, z: oldZ };
+    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, false)) return { x: oldX, z: newZ };
     return { x: oldX, z: oldZ };
   }
 

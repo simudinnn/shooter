@@ -1,13 +1,11 @@
-/** Draw soft (red) and hard (green) collision AABBs for debugging. */
+/** Draw collision AABBs for debugging (single box per obstacle). */
 import { CHUNK_WORLD } from './worldGen.js';
 
-function obsAabb(obs, soft) {
-  const halfW = soft ? (obs.softHalfW ?? obs.halfW) : obs.halfW;
-  const halfH = soft ? (obs.softHalfH ?? obs.halfH) : obs.halfH;
+export function obsAabb(obs) {
+  const halfW = obs.halfW;
+  const halfH = obs.halfH;
   if (!halfW || !halfH) return null;
-  const x = soft ? (obs.softX ?? obs.x) : obs.x;
-  const z = soft ? (obs.softZ ?? obs.z) : obs.z;
-  return { minX: x - halfW, maxX: x + halfW, minZ: z - halfH, maxZ: z + halfH };
+  return { minX: obs.x - halfW, maxX: obs.x + halfW, minZ: obs.z - halfH, maxZ: obs.z + halfH };
 }
 
 function obsInView(obs, minX, maxX, minZ, maxZ) {
@@ -16,9 +14,7 @@ function obsInView(obs, minX, maxX, minZ, maxZ) {
     return obs.x + r >= minX && obs.x - r <= maxX && obs.z + r >= minZ && obs.z - r <= maxZ;
   }
   if (obs.kind === 'aabb') {
-    const hard = obsAabb(obs, false);
-    const soft = obsAabb(obs, true);
-    const a = hard ?? soft;
+    const a = obsAabb(obs);
     if (!a) return false;
     return a.maxX >= minX && a.minX <= maxX && a.maxZ >= minZ && a.minZ <= maxZ;
   }
@@ -77,9 +73,7 @@ export function drawCollisionDebug(ctx, world, worldToScreen, minX, maxX, minZ, 
       }
       continue;
     }
-    const hard = obsAabb(obs, false);
-    const soft = obsAabb(obs, true);
-    if (soft) drawAabb(soft, 'rgba(255, 60, 60, 0.95)', 'rgba(255, 40, 40, 0.22)');
-    if (hard && hard !== soft) drawAabb(hard, 'rgba(60, 255, 100, 0.85)', 'rgba(60, 255, 100, 0.12)');
+    const hard = obsAabb(obs);
+    if (hard) drawAabb(hard, 'rgba(255, 60, 60, 0.95)', 'rgba(255, 40, 40, 0.22)');
   }
 }

@@ -77,7 +77,7 @@ export const WEAPONS = {
   m24: {
     name: 'M24',
     magSize: 5,
-    damage: 75,
+    damage: 85,
     fireRate: 1.15,
     reloadTime: 2.8,
     reloadStyle: 'incremental',
@@ -167,7 +167,7 @@ export const MELEE_WEAPONS = {
     swingAngle: Math.PI / 2.4,
     maxChargeTime: 0.75,
     minDamageMult: 0.1,
-    maxDamageMult: 1.0,
+    maxDamageMult: 1.5,
     maxRaiseAngle: Math.PI / 2.8,
     sprite: 'knife',
   },
@@ -181,7 +181,7 @@ export const MELEE_WEAPONS = {
     swingAngle: Math.PI / 2.0,
     maxChargeTime: 1.5,
     minDamageMult: 0.1,
-    maxDamageMult: 1,
+    maxDamageMult: 1.5,
     maxRaiseAngle: Math.PI / 2.2,
     sprite: 'fire_axe',
   },
@@ -195,7 +195,7 @@ export const MELEE_WEAPONS = {
     swingAngle: Math.PI / 2.5,
     maxChargeTime: 0.85,
     minDamageMult: 0.1,
-    maxDamageMult: 1.0,
+    maxDamageMult: 1.5,
     maxRaiseAngle: Math.PI / 2.6,
     sprite: 'wooden_bat',
   },
@@ -209,7 +209,7 @@ export const MELEE_WEAPONS = {
     swingAngle: Math.PI / 2.35,
     maxChargeTime: 0.7,
     minDamageMult: 0.1,
-    maxDamageMult: 1.0,
+    maxDamageMult: 1.5,
     maxRaiseAngle: Math.PI / 2.7,
     sprite: 'crowbar',
   },
@@ -662,16 +662,17 @@ export class Player {
       };
     }
 
+    if (time && time < this.shotFlashUntil && cfg.shotSprite) {
+      return { sheet: cfg.shotSprite };
+    }
+
     if (cfg.casingMode === 'mid_cooldown' && this.weapon.lastShot != null) {
       const elapsed = time - this.weapon.lastShot;
       const cycleSheet = `${cfg.sprite}_cycle`;
-      if (elapsed >= 0 && elapsed < getSheetPlayDuration(cycleSheet)) {
-        return { sheet: cycleSheet, elapsed };
+      const cycleStart = SHOT_FLASH_DURATION;
+      if (elapsed >= cycleStart && elapsed < cycleStart + getSheetPlayDuration(cycleSheet)) {
+        return { sheet: cycleSheet, elapsed: elapsed - cycleStart };
       }
-    }
-
-    if (time && time < this.shotFlashUntil && cfg.shotSprite) {
-      return { sheet: cfg.shotSprite };
     }
     return { sheet: cfg.sprite || 'm16' };
   }
@@ -1335,19 +1336,18 @@ export class Player {
 export function findBulletSpawn(world, px, pz, angle) {
   const sin = Math.sin(angle);
   const cos = Math.cos(angle);
-  const dist = 0.12;
   const raiseZ = BULLET_SPAWN_RAISE_PX / 8;
-  const x = px + sin * dist;
-  const z = pz + cos * dist - raiseZ;
-  if (world.checkCollisionShape(x, z, { kind: 'circle', radius: BULLET_RADIUS }, true)) {
-    return { x: px, z: pz - raiseZ };
+  for (const dist of [0.16, 0.22, 0.28]) {
+    const x = px + sin * dist;
+    const z = pz + cos * dist - raiseZ;
+    if (!world.checkBulletSpawnCollision(px, pz, x, z, BULLET_RADIUS, angle)) {
+      return { x, z };
+    }
   }
-  const fromX = px - sin * 0.08;
-  const fromZ = pz - cos * 0.08 - raiseZ * 0.35;
-  if (world.segmentBlocked(fromX, fromZ, x, z, BULLET_RADIUS)) {
-    return { x: px, z: pz - raiseZ };
-  }
-  return { x, z };
+  return {
+    x: px + sin * 0.16,
+    z: pz + cos * 0.16 - raiseZ,
+  };
 }
 
 export const BULLET_MAX_DIST = 48;
@@ -1391,6 +1391,7 @@ export class BulletPool {
     b.damage = weapon.damage;
     b.life = 2.5;
     b.fromPlayer = fromPlayer;
+    b.aimAngle = fromPlayer ? a : null;
     return b;
   }
 
@@ -1415,7 +1416,11 @@ export class BulletPool {
 
       const nx = b.x + b.vx * dt;
       const nz = b.z + b.vz * dt;
-      if (world.segmentBlocked(b.x, b.z, nx, nz)) {
+      if (world.segmentBlocked(b.x, b.z, nx, nz, BULLET_RADIUS, true, b.aimAngle, {
+        forwardOnly: true,
+        shooterX: b.x,
+        shooterZ: b.z,
+      })) {
         b.active = false;
         continue;
       }

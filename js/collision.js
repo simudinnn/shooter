@@ -90,6 +90,13 @@ export function collectCollisionTargets({ player, robots, exclude = null }) {
 export function moveWithEntityCollision(world, x, z, dx, dz, entityShape, worldShape, targets, exclude = null, opts = {}) {
   const moved = world.moveAxisShape(x, z, dx, dz, worldShape, opts);
   let pos = resolveEntityPositionShape(moved.x, moved.z, entityShape, targets, exclude);
-  if (world.checkCollisionShape(pos.x, pos.z, worldShape, true, opts)) pos = moved;
+  if (world.checkCollisionShape(pos.x, pos.z, worldShape, false, opts)) pos = moved;
   return pos;
+}
+
+/** Minimum world displacement before walk / footstep animation plays. */
+export const MOTION_IDLE_EPS = 0.0008;
+
+export function didDisplace(px, pz, x, z, eps = MOTION_IDLE_EPS) {
+  return Math.hypot(x - px, z - pz) > eps;
 }
