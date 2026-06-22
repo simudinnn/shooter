@@ -2,7 +2,7 @@ import { TILE } from './worldGen.js';
 import { rollChestLoot, rollChestVariant } from './loot.js';
 import { CELL_FLOOR, isNorthInteriorColumn } from './buildingGen.js';
 
-export const CHEST_INTERACT_DIST = 2.8;
+export const CHEST_INTERACT_DIST = 3;
 export const CHEST_DRAW_SCALE = 2.1;
 /** Native chest art size (assets/buildings/chest_*.png are 16×16). */
 export const CHEST_NATIVE_PX = 16;

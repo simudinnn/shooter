@@ -54,7 +54,7 @@ import {
   resolveVisionOrigin,
 } from './visibility.js';
 
-const VISION_DARKNESS = 0.22;
+const VISION_DARKNESS = 0.1;
 
 const SPRITE_PLAYER = 1.50;
 const SPRITE_CHEST = CHEST_DRAW_SCALE;
@@ -2007,6 +2007,10 @@ class Game {
     }
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();
+
+if (useVisFog && visPoly) {
+  drawVisibilityOverlay(ctx, visPoly, worldToScreen, INTERNAL_W, INTERNAL_H, VISION_DARKNESS);
+}
 
     for (const building of visibleBuildings) {
       const alpha = this.buildings?.roofAlphaFor(building) ?? 1;

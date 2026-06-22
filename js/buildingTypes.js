@@ -74,7 +74,7 @@ export const BUILDING_SIZE_VARIANTS = [
   { w: 6, h: 4 },
   { w: 6, h: 5 },
   { w: 7, h: 4 },
-  { w: 7, h: 5 },
+  { w: 7, h: 5 }
 ];
 
 export const BUILDING_WIDTH_VARIANTS = [5, 6, 7];
@@ -232,7 +232,7 @@ export function generateLShapeCells(w, h, leg = 'east') {
 /** T-bar across the top of a central stem. */
 export function generateTShapeCells(w, h) {
   const cells = new Uint8Array(w * h);
-  const barH = Math.max(2, Math.floor(h * 0.32));
+  const barH = Math.max(3, Math.floor(h * 0.32));
   const stemW = Math.max(3, Math.floor(w * 0.38));
   const stemX = Math.floor((w - stemW) / 2);
   carveRect(cells, w, 0, 0, w, barH);
