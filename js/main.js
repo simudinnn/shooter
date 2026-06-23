@@ -1357,10 +1357,14 @@ class Game {
     if (cfg?.casingMode === 'per_shot') {
       this._emitCasings(1, cfg.casingColor || 'yellow');
     }
-    if (w.sound === 'shotgun') this.audio.shotgunShot();
-    else if (w.sound === 'sniper') this.audio.sniperShot();
-    else if (w.sound === 'pistol') this.audio.pistolShot();
-    else this.audio.rifleShot();
+    if (w.sound === 'm870') this.audio.m870();
+    else if (w.sound === 'm24') this.audio.m24();
+    else if (w.sound === 'glock') this.audio.glock();
+    else if (w.sound === 'uzi') this.audio.uzi();
+    else if (w.sound === 'revolver') this.audio.revolver();
+    else if (w.sound === 'famas') this.audio.famas();
+    else if (w.sound === 'fal') this.audio.fal();
+    else this.audio.m16();
   }
 
   _updateMeleeStrike(time) {
@@ -1398,7 +1402,7 @@ class Game {
       this._damageRobot(robot, dmg, this.player.x, this.player.z);
       hitAny = true;
     }
-    if (hitAny) this.audio.pistolShot();
+    if (hitAny) this.audio.melee();
   }
 
   _onBulletHit(bullet) {

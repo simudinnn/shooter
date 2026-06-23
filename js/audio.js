@@ -3,253 +3,330 @@ export class SoundManager {
     this.ctx = null;
     this.master = null;
     this.enabled = false;
+    this.buffers = {};
+
     this._lastCasingLand = 0;
     this._lastFootstep = 0;
     this._lastEnemyStep = 0;
     this._lastScoutStomp = 0;
   }
 
-  init() {
+  async init() {
     if (this.ctx) return;
+
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.45;
     this.master.connect(this.ctx.destination);
     this.enabled = true;
+
+    await this.loadSounds();
   }
 
   resume() {
     if (this.ctx?.state === 'suspended') this.ctx.resume();
   }
 
+  async loadSounds() {
+    const sounds = {
+      m16: ['sounds/guns/m16.ogg'],
+      glock: ['sounds/guns/glock.ogg'],
+      m870: ['sounds/guns/m870.ogg'],
+      m24: ['sounds/guns/m24.ogg'],
+      uzi: ['sounds/guns/uzi.ogg'],
+      revolver: ['sounds/guns/revolver.ogg'],
+      famas: ['sounds/guns/famas.ogg'],
+      fal: ['sounds/guns/fal.ogg'],
+      melee: ['sounds/player/melee.ogg'],
+
+      enemyShot: [
+        'sounds/guns/enemy-shot.ogg'
+      ],
+      reload: [
+        'sounds/guns/reload.ogg'
+      ],
+      weaponSwitch: [
+        'sounds/player/weapon-switch-1.ogg'
+      ],
+      hitEnemy: [
+        'sounds/entities/hit-enemy-1.ogg',
+        'sounds/entities/hit-enemy-2.ogg',
+        'sounds/entities/hit-enemy-3.ogg',
+      ],
+      explosion: [
+        'sounds/world/explosion-1.ogg',
+        'sounds/world/explosion-2.ogg',
+        'sounds/world/explosion-3.ogg',
+      ],
+      playerHurt: [
+        'sounds/player/player-hurt-1.ogg',
+        'sounds/player/player-hurt-2.ogg',
+        'sounds/player/player-hurt-3.ogg',
+      ],
+      pickup: [
+        'sounds/ui/pickup.ogg'
+      ],
+      chestOpen: [
+        'sounds/world/chest-open-1.ogg',
+        'sounds/world/chest-open-2.ogg',
+        'sounds/world/chest-open-3.ogg',
+      ],
+      doorOpen: [
+        'sounds/world/door-open-1.ogg',
+        'sounds/world/door-open-2.ogg',
+        'sounds/world/door-open-3.ogg',
+      ],
+      doorClose: [
+        'sounds/world/door-close-1.ogg',
+        'sounds/world/door-close-2.ogg',
+        'sounds/world/door-close-3.ogg',
+      ],
+      inventoryMove: [
+        'sounds/ui/inventory-move-1.ogg',
+        'sounds/ui/inventory-move-2.ogg',
+        'sounds/ui/inventory-move-3.ogg',
+      ],
+      inventoryPlace: [
+        'sounds/ui/inventory-place-1.ogg',
+        'sounds/ui/inventory-place-2.ogg',
+        'sounds/ui/inventory-place-3.ogg',
+      ],
+      inventoryEquip: [
+        'sounds/ui/inventory-equip-1.ogg',
+        'sounds/ui/inventory-equip-2.ogg',
+        'sounds/ui/inventory-equip-3.ogg',
+      ],
+      footstep: [
+        'sounds/player/footstep-1.ogg',
+        'sounds/player/footstep-2.ogg',
+        'sounds/player/footstep-3.ogg',
+      ],
+      enemyFootstep: [
+        'sounds/entities/enemy-footstep-1.ogg',
+        'sounds/entities/enemy-footstep-2.ogg',
+        'sounds/entities/enemy-footstep-3.ogg',
+      ],
+      scoutStomp: [
+        'sounds/entities/scout-stomp-1.ogg',
+        'sounds/entities/scout-stomp-2.ogg',
+        'sounds/entities/scout-stomp-3.ogg',
+      ],
+      scoutChargeStart: [
+        'sounds/entities/scout-charge-start-1.ogg',
+        'sounds/entities/scout-charge-start-2.ogg',
+        'sounds/entities/scout-charge-start-3.ogg',
+      ],
+      casingEject: [
+        'sounds/guns/casing-eject-1.ogg',
+        'sounds/guns/casing-eject-2.ogg',
+        'sounds/guns/casing-eject-3.ogg'
+      ],
+      casingLand: [
+      ],
+      jump: [
+        'sounds/jump-1.ogg',
+        'sounds/jump-2.ogg',
+        'sounds/jump-3.ogg',
+      ],
+      regenStart: [
+        'sounds/player/regen-start.ogg'
+      ],
+      win: [
+        'sounds/ui/win.ogg'
+      ],
+      lose: [
+        'sounds/ui/lose.ogg'
+      ],
+    };
+
+    for (const [name, paths] of Object.entries(sounds)) {
+      this.buffers[name] = [];
+
+      for (const path of paths) {
+        try {
+          const res = await fetch(path);
+          if (!res.ok) throw new Error(`Missing sound: ${path}`);
+
+          const arrayBuffer = await res.arrayBuffer();
+          const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+
+          this.buffers[name].push(audioBuffer);
+        } catch (err) {
+          console.warn(err.message);
+        }
+      }
+    }
+  }
+
+  play(name, volume = 1, playbackRate = 1) {
+    if (!this.enabled || !this.ctx) return;
+
+    const variants = this.buffers[name];
+    if (!variants || variants.length === 0) return;
+
+    const buffer = variants[Math.floor(Math.random() * variants.length)];
+
+    const src = this.ctx.createBufferSource();
+    const gain = this.ctx.createGain();
+
+    src.buffer = buffer;
+    src.playbackRate.value = playbackRate;
+    gain.gain.value = volume;
+
+    src.connect(gain);
+    gain.connect(this.master);
+    src.start();
+  }
+
   /** 0 beyond maxDist, 1 at or inside fullDist, smooth falloff between. */
   _distanceAtten(dist, fullDist = 5, maxDist = 28) {
     if (dist >= maxDist) return 0;
     if (dist <= fullDist) return 1;
+
     const t = (maxDist - dist) / (maxDist - fullDist);
     return t * t;
   }
 
-  _noise(duration, volume = 0.3, filterFreq = 800) {
-    if (!this.enabled) return;
-    const { ctx, master } = this;
-    const len = Math.floor(ctx.sampleRate * duration);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  m16() {const pitch = 0.95 + Math.random() * 0.2;
+    this.play('m16', 1, pitch);}
+  glock() {const pitch = 0.95 + Math.random() * 0.2;this.play('glock', 1, pitch);}
+  m870() {const pitch = 0.95 + Math.random() * 0.2;this.play('m870', 1, pitch);}
+  m24() {const pitch = 0.95 + Math.random() * 0.2;this.play('m24', 1, pitch);}
+  uzi() {const pitch = 0.95 + Math.random() * 0.2;this.play('uzi', 1, pitch);}
+  revolver() {const pitch = 0.95 + Math.random() * 0.2;this.play('revolver', 1, pitch);}
+  famas() {const pitch = 0.95 + Math.random() * 0.2;this.play('famas', 1, pitch);}
+  fal() {const pitch = 0.95 + Math.random() * 0.2;this.play('fal', 1, pitch);}
+  melee() {const pitch = 0.95 + Math.random() * 0.2;this.play('melee', 1, pitch);}
 
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = filterFreq;
-    filter.Q.value = 0.8;
-    gain.gain.setValueAtTime(volume, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-    src.connect(filter);
-    filter.connect(gain);
-    gain.connect(master);
-    src.start();
-  }
-
-  _tone(freq, duration, volume = 0.15, type = 'square') {
-    if (!this.enabled) return;
-    const { ctx, master } = this;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 0.3), ctx.currentTime + duration);
-    gain.gain.setValueAtTime(volume, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start();
-    osc.stop(ctx.currentTime + duration);
-  }
-
-  rifleShot() {
-    this._noise(0.08, 0.35, 1200);
-    this._tone(90, 0.06, 0.2, 'sawtooth');
-  }
-
-  pistolShot() {
-    this._noise(0.05, 0.4, 2000);
-    this._tone(150, 0.04, 0.15, 'square');
-  }
-
-  enemyShot() {
-    this._noise(0.06, 0.15, 900);
-    this._tone(70, 0.05, 0.08, 'sawtooth');
-  }
+  enemyShot() {const pitch = 0.95 + Math.random() * 0.2;this.play('enemyShot', 1, pitch);}
 
   reload() {
-    if (!this.enabled) return;
-    const t = this.ctx.currentTime;
-    [0, 0.12, 0.28].forEach((delay, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.value = 200 + i * 80;
-      gain.gain.setValueAtTime(0.12, t + delay);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.06);
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(t + delay);
-      osc.stop(t + delay + 0.07);
-    });
+    this.play('reload', 0.75);
   }
 
   weaponSwitch() {
-    this._tone(440, 0.04, 0.08, 'triangle');
+    this.play('weaponSwitch', 0.5);
   }
 
   hitEnemy() {
-    this._tone(180, 0.08, 0.2, 'square');
-    this._noise(0.04, 0.15, 400);
+    this.play('hitEnemy', 0.6);
   }
 
   explosion() {
-    this._noise(0.35, 0.5, 300);
-    this._tone(60, 0.3, 0.25, 'sawtooth');
+    this.play('explosion', 1);
   }
 
   playerHurt() {
-    this._tone(120, 0.15, 0.25, 'sawtooth');
-    this._noise(0.1, 0.2, 500);
+    this.play('playerHurt', 0.9);
   }
 
   pickup() {
-    this._tone(660, 0.08, 0.12, 'sine');
-    this._tone(880, 0.1, 0.1, 'triangle');
+    this.play('pickup', 0.75);
   }
 
   mysteryOpen() {
-    this._noise(0.12, 0.2, 600);
-    [440, 554, 659, 880].forEach((f, i) => setTimeout(() => this._tone(f, 0.12, 0.1, 'sine'), i * 70));
+    this.play('mysteryOpen', 0.8);
   }
 
   chestOpen() {
-    this._noise(0.1, 0.18, 420);
-    this._tone(220, 0.06, 0.1, 'triangle');
-    setTimeout(() => this._tone(330, 0.08, 0.08, 'sine'), 60);
-    setTimeout(() => this._tone(440, 0.1, 0.07, 'triangle'), 120);
+    this.play('chestOpen', 0.75);
   }
 
   doorToggle(opening) {
-    this._noise(0.06, 0.14, opening ? 280 : 220);
-    this._tone(opening ? 180 : 140, 0.05, 0.09, 'triangle');
-    setTimeout(() => this._tone(opening ? 240 : 200, 0.07, 0.06, 'sine'), 50);
+    this.play(opening ? 'doorOpen' : 'doorClose', 0.75);
   }
 
   inventoryMove() {
-    this._noise(0.025, 0.06, 1400);
-    this._tone(520, 0.03, 0.05, 'triangle');
+    this.play('inventoryMove', 0.55);
   }
 
   inventoryPlace() {
-    this._noise(0.03, 0.07, 900);
-    this._tone(380, 0.04, 0.06, 'square');
+    this.play('inventoryPlace', 0.6);
   }
 
   inventoryEquip() {
-    this._tone(330, 0.05, 0.09, 'triangle');
-    this._tone(495, 0.06, 0.07, 'sine');
+    this.play('inventoryEquip', 0.65);
   }
 
   footstep(sprinting = false) {
     if (!this.enabled || !this.ctx) return;
+
     const now = this.ctx.currentTime;
     const minGap = sprinting ? 0.09 : 0.14;
+
     if (now - this._lastFootstep < minGap) return;
     this._lastFootstep = now;
-    const vol = sprinting ? 1.15 : 1;
-    this._noise(0.035, 0.07 * vol, 500 + Math.random() * 200);
-    this._tone(80 + Math.random() * 40, 0.03, 0.04 * vol, 'triangle');
+
+    const volume = sprinting ? 0.2 : 0.2;
+    const pitch = 1.15 + Math.random() * 0.1;
+
+    this.play('footstep', volume, pitch);
   }
 
   enemyFootstep(distance = 0) {
     if (!this.enabled || !this.ctx) return;
+
     const vol = this._distanceAtten(distance);
     if (vol <= 0) return;
+
     const now = this.ctx.currentTime;
     if (now - this._lastEnemyStep < 0.18) return;
     this._lastEnemyStep = now;
-    this._noise(0.04, 0.05 * vol, 350 + Math.random() * 150);
-    this._tone(60 + Math.random() * 30, 0.035, 0.035 * vol, 'square');
+
+    const pitch = 0.9 + Math.random() * 0.12;
+    this.play('enemyFootstep', 0.4 * vol, pitch);
   }
 
   scoutStomp(distance = 0) {
     if (!this.enabled || !this.ctx) return;
+
     const vol = this._distanceAtten(distance, 6, 32);
     if (vol <= 0) return;
+
     const now = this.ctx.currentTime;
     if (now - this._lastScoutStomp < 0.34) return;
     this._lastScoutStomp = now;
-    this._noise(0.07, 0.14 * vol, 180 + Math.random() * 90);
-    this._tone(42 + Math.random() * 18, 0.09, 0.12 * vol, 'sawtooth');
-    this._tone(95, 0.04, 0.05 * vol, 'square');
+
+    const pitch = 0.9 + Math.random() * 0.08;
+    this.play('scoutStomp', 1 * vol, pitch);
   }
 
   scoutChargeStart(distance = 0) {
     if (!this.enabled || !this.ctx) return;
-    const vol = this._distanceAtten(distance, 4, 36);
+
+    const vol = this._distanceAtten(distance, 10, 36);
     if (vol <= 0) return;
-    const { ctx, master } = this;
-    const t = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(90, t);
-    osc.frequency.exponentialRampToValueAtTime(280, t + 0.55);
-    gain.gain.setValueAtTime(0.001, t);
-    gain.gain.linearRampToValueAtTime(0.18 * vol, t + 0.08);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.62);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start(t);
-    osc.stop(t + 0.65);
-    this._noise(0.12, 0.13 * vol, 520);
+
+    this.play('scoutChargeStart', 1.5 * vol);
   }
 
   casingEject() {
-    this._noise(0.02, 0.1, 3200);
-    this._tone(1200 + Math.random() * 400, 0.025, 0.05, 'triangle');
+    this.play('casingEject', 0.25, 0.95 + Math.random() * 0.15);
   }
 
   casingLand() {
     if (!this.enabled || !this.ctx) return;
+
     const now = this.ctx.currentTime;
     if (now - this._lastCasingLand < 0.045) return;
+
     this._lastCasingLand = now;
-    this._noise(0.028, 0.09, 2200);
-    this._tone(700 + Math.random() * 300, 0.022, 0.045, 'triangle');
-  }
-
-  shotgunShot() {
-    this._noise(0.14, 0.45, 700);
-    this._tone(70, 0.1, 0.22, 'sawtooth');
-  }
-
-  sniperShot() {
-    this._noise(0.1, 0.4, 1500);
-    this._tone(110, 0.08, 0.18, 'square');
+    this.play('casingLand', 0.25, 0.95 + Math.random() * 0.15);
   }
 
   jump() {
-    this._tone(320, 0.06, 0.06, 'triangle');
+    this.play('jump', 0.6);
   }
 
   regenStart() {
-    this._tone(520, 0.12, 0.06, 'sine');
+    this.play('regenStart', 0.65);
   }
 
   win() {
-    [523, 659, 784].forEach((f, i) => setTimeout(() => this._tone(f, 0.2, 0.15, 'sine'), i * 120));
+    this.play('win', 0.85);
   }
 
   lose() {
-    [300, 220, 150].forEach((f, i) => setTimeout(() => this._tone(f, 0.3, 0.2, 'sawtooth'), i * 200));
+    this.play('lose', 0.85);
   }
 }
