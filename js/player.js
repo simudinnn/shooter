@@ -23,7 +23,7 @@ export const PLAYER_SPRITE_SCALE = 1.5;
 const SCREEN_PPU = 5.5;
 
 export const ITEM_STORAGE_SIZE = 20;
-export const UNLOCKED_ITEM_SLOTS = 10;
+export const UNLOCKED_ITEM_SLOTS = 20;
 export const EQUIPMENT_SLOT_COUNT = 4;
 
 export const WEAPONS = {
