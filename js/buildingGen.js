@@ -1,4 +1,4 @@
-import { TILE, hash01, foliageSpriteBounds } from './worldGen.js';
+import { TILE, hash01, hash32, foliageSpriteBounds } from './worldGen.js';
 import { PPU } from './renderConfig.js';
 import { CHAR_NATIVE_PX, spriteFeetOffset, getEnemyNativePx, getEnemyDrawScale } from './sprites.js';
 import {
@@ -492,6 +492,8 @@ export function isInsideBuilding(building, px, pz, feetZOverride = null) {
 
   const southFace = originZ + h * TILE;
   if (feetZ >= southFace - TILE * 0.1) return false;
+  // Hugging south exterior — feet on bottom row lip band, not interior.
+  if (feetTz === h - 1 && feetZ >= southFace - TILE * 0.32) return false;
 
   if (feetTz === 0 && !cellWalkable(cells, w, h, feetTx, -1)) {
     if (feetZ <= originZ + TILE * 0.1) return false;
@@ -1065,6 +1067,14 @@ function isReserved(tx, tz, reserved) {
   return reserved.some((t) => t.tx === tx && t.tz === tz);
 }
 
+/** Keep tables/fridges off the door approach (south entry corridor). */
+function isDoorApproachTile(tx, tz, doorTx, doorTz) {
+  const northOfDoor = doorTz - tz;
+  if (northOfDoor < 0 || northOfDoor > 2) return false;
+  const spread = northOfDoor === 2 ? 1 : 2;
+  return Math.abs(tx - doorTx) <= spread;
+}
+
 /** Fridge on north border; table on interior floor — avoids reserved tiles (chest, etc.). */
 export function buildBuildingInteriorProps(
   originX,
@@ -1095,7 +1105,7 @@ export function buildBuildingInteriorProps(
   if (northCandidates.length) {
     northWallTz = Math.min(...northCandidates.map((c) => c.tz));
     const northRow = northCandidates.filter((c) => c.tz === northWallTz);
-    const idx = Math.floor(hash01(seedA + 11, seedB + 13) * northRow.length);
+    const idx = hash32(seedA + 11, seedB + 13) % northRow.length;
     const fridge = northRow[idx];
     if (fridge) {
       taken.add(tileKey(fridge.tx, fridge.tz));
@@ -1129,6 +1139,7 @@ export function buildBuildingInteriorProps(
       if (cells[tz * w + tx] !== CELL_FLOOR) continue;
       if (tx === doorTx && tz === doorTz) continue;
       if (taken.has(tileKey(tx, tz))) continue;
+      if (isDoorApproachTile(tx, tz, doorTx, doorTz)) continue;
       if (frontBlocked.has(tileKey(tx, tz))) continue;
       if (tz < northWallTz + 2) continue;
       if (!cellWalkable(cells, w, h, tx - 1, tz)
@@ -1139,7 +1150,7 @@ export function buildBuildingInteriorProps(
     }
   }
   if (tableCandidates.length) {
-    const idx = Math.floor(hash01(seedA + 17, seedB + 19) * tableCandidates.length);
+    const idx = hash32(seedA + 17, seedB + 19) % tableCandidates.length;
     const table = tableCandidates[idx];
     const x = originX + (table.tx + 0.5) * TILE;
     const z = originZ + (table.tz + 0.5) * TILE;
@@ -1209,7 +1220,7 @@ export function buildBuildingDecor(originX, originZ, w, h, cells, doorTx, doorTz
   if (!candidates.length) return decor;
   const count = Math.min(
     candidates.length,
-    2 + Math.floor(hash01(seedA, seedB) * 2),
+    2 + (hash32(seedA, seedB) % 2),
   );
   const southPool = candidates.filter((c) => c.dir === 's');
   const sidePool = candidates.filter((c) => c.dir === 'w' || c.dir === 'e');
@@ -1218,7 +1229,7 @@ export function buildBuildingDecor(originX, originZ, w, h, cells, doorTx, doorTz
     : [...southPool, ...sidePool, ...candidates.filter((c) => c.dir === 'n')];
 
   for (let i = 0; i < count; i++) {
-    const idx = Math.floor(hash01(seedA + i * 3.1, seedB + i * 5.7) * pool.length);
+    const idx = hash32(seedA + i * 3.1, seedB + i * 5.7) % pool.length;
     const pick = pool.splice(idx, 1)[0];
     if (!pick) break;
     const { sprite } = rollDecorSprite(seedA + pick.otx, seedB + pick.otz);

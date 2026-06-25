@@ -61,14 +61,21 @@ export function captureGameState(game) {
     style: { ...b.style },
     homeCx: b.homeCx,
     homeCz: b.homeCz,
-    chestTile: b.chestTile ? { ...b.chestTile } : null,
-    chest: b.chest
+    chestTiles: (b.chestTiles ?? (b.chestTile ? [b.chestTile] : [])).map((t) => ({ ...t })),
+    chests: (b.chests ?? (b.chest ? [b.chest] : [])).map((c) => ({
+      x: c.x,
+      z: c.z,
+      variant: c.variant,
+      slots: cloneSlots(c.slots),
+      opened: !!c.opened,
+    })),
+    chest: b.chests?.[0] ?? b.chest
       ? {
-          x: b.chest.x,
-          z: b.chest.z,
-          variant: b.chest.variant,
-          slots: cloneSlots(b.chest.slots),
-          opened: !!b.chest.opened,
+          x: (b.chests?.[0] ?? b.chest).x,
+          z: (b.chests?.[0] ?? b.chest).z,
+          variant: (b.chests?.[0] ?? b.chest).variant,
+          slots: cloneSlots((b.chests?.[0] ?? b.chest).slots),
+          opened: !!(b.chests?.[0] ?? b.chest).opened,
         }
       : null,
   }));

@@ -87,6 +87,38 @@ export function collectCollisionTargets({ player, robots, exclude = null }) {
   return out;
 }
 
+/** Push other entities when moving into them (fraction of overlap). */
+export function applyApproachPush(mover, prevX, prevZ, newX, newZ, moverRadius, targets, strength = 0.36) {
+  const vx = newX - prevX;
+  const vz = newZ - prevZ;
+  const vlen = Math.hypot(vx, vz);
+  if (vlen < 1e-7) return;
+  const nx = vx / vlen;
+  const nz = vz / vlen;
+
+  for (const ent of targets) {
+    if (ent === mover) continue;
+    if (ent.alive === false) continue;
+    if (ent.emerging) continue;
+
+    const dx = ent.x - newX;
+    const dz = ent.z - newZ;
+    const dist = Math.hypot(dx, dz) || 0.001;
+    const minDist = moverRadius + (ent.radius ?? 0);
+    const overlap = minDist - dist;
+    if (overlap <= 0) continue;
+
+    const ux = dx / dist;
+    const uz = dz / dist;
+    const approach = nx * ux + nz * uz;
+    if (approach < 0.18) continue;
+
+    const push = overlap * strength * approach;
+    ent.x += ux * push;
+    ent.z += uz * push;
+  }
+}
+
 export function moveWithEntityCollision(world, x, z, dx, dz, entityShape, worldShape, targets, exclude = null, opts = {}) {
   const moved = world.moveAxisShape(x, z, dx, dz, worldShape, opts);
   let pos = resolveEntityPositionShape(moved.x, moved.z, entityShape, targets, exclude);
@@ -97,6 +129,24 @@ export function moveWithEntityCollision(world, x, z, dx, dz, entityShape, worldS
 /** Minimum world displacement before walk / footstep animation plays. */
 export const MOTION_IDLE_EPS = 0.0008;
 
+/** Fraction along walk→sprint speed range before run animation plays. */
+export const SPRINT_ANIM_BLEND = 0.55;
+
 export function didDisplace(px, pz, x, z, eps = MOTION_IDLE_EPS) {
   return Math.hypot(x - px, z - pz) > eps;
+}
+
+export function motionSpeed(px, pz, x, z, dt) {
+  if (dt <= 0) return 0;
+  return Math.hypot(x - px, z - pz) / dt;
+}
+
+export function updateLocomotion(px, pz, x, z, dt, eps = MOTION_IDLE_EPS) {
+  const moving = didDisplace(px, pz, x, z, eps);
+  return { moving, speed: moving ? motionSpeed(px, pz, x, z, dt) : 0 };
+}
+
+export function isSprintAnimSpeed(actualSpeed, walkSpeed, sprintSpeed, blend = SPRINT_ANIM_BLEND) {
+  if (actualSpeed <= 0.01 || sprintSpeed <= walkSpeed) return false;
+  return actualSpeed >= walkSpeed + (sprintSpeed - walkSpeed) * blend;
 }

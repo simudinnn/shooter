@@ -1,4 +1,4 @@
-import { TILE } from './worldGen.js';
+import { TILE, hash01 } from './worldGen.js';
 import { rollChestLoot, rollChestVariant } from './loot.js';
 import { CELL_FLOOR, isNorthInteriorColumn } from './buildingGen.js';
 
@@ -17,7 +17,12 @@ export const CHEST_OPAQUE_HALF_H = 4.5 * CHEST_COLLISION_FRAC;
 export const CHEST_COLLISION_HALF_W = (CHEST_OPAQUE_HALF_W * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
 export const CHEST_COLLISION_HALF_H = (CHEST_OPAQUE_HALF_H * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
 
-/** Single world anchor for draw, collision, interaction, and minimap. */
+/** Footprint area (tiles) for “large” houses eligible for a second chest. */
+export const LARGE_BUILDING_AREA = 30;
+/** Chance of a second chest in a large house. */
+export const LARGE_BUILDING_TWO_CHEST_CHANCE = 0.45;
+
+/** Single world anchor for draw, collision, and interaction. */
 export function getChestWorldPos(chest) {
   return { x: chest.x, z: chest.z };
 }
@@ -28,43 +33,69 @@ function cellWalkable(cells, w, h, tx, tz) {
   return cell === CELL_FLOOR;
 }
 
+export function isLargeBuilding(building) {
+  const { w, h, shape } = building;
+  if (shape === 'l' || shape === 't') return true;
+  return w * h >= LARGE_BUILDING_AREA;
+}
+
+export function rollBuildingChestCount(building) {
+  if (!isLargeBuilding(building)) return 1;
+  const seedA = Math.floor(building.originX * 17 + building.w * 3);
+  const seedB = Math.floor(building.originZ * 23 + building.h * 5);
+  return hash01(seedA, seedB) < LARGE_BUILDING_TWO_CHEST_CHANCE ? 2 : 1;
+}
+
 export class ChestManager {
   constructor(world) {
     this.world = world;
     this.chests = [];
   }
 
-  /** One loot chest against the north interior wall when a building is placed. */
+  /** Loot chest(s) on the north interior wall when a building is placed. */
   spawnInBuilding(building, chunk) {
-    const pos = this._pickNorthBorderSpot(building);
-    if (!pos) return null;
+    building.chests = [];
+    building.chestTiles = [];
+    const count = rollBuildingChestCount(building);
+    const edges = count >= 2 ? ['start', 'end'] : ['mid'];
 
-    const chest = {
-      x: pos.x,
-      z: pos.z,
-      variant: rollChestVariant(),
-      slots: rollChestLoot(),
-      opened: false,
-      homeCx: chunk.cx,
-      homeCz: chunk.cz,
-      homeBuilding: building,
-      obstacle: null,
-    };
-    building.chest = chest;
-    this._registerObstacle(chest);
-    this.chests.push(chest);
-    return chest;
+    for (let i = 0; i < count; i++) {
+      const pos = this._pickNorthBorderSpot(building, building.chestTiles, edges[i] ?? 'mid');
+      if (!pos) break;
+
+      const chest = {
+        x: pos.x,
+        z: pos.z,
+        variant: rollChestVariant(),
+        slots: rollChestLoot(),
+        opened: false,
+        homeCx: chunk.cx,
+        homeCz: chunk.cz,
+        homeBuilding: building,
+        obstacle: null,
+      };
+      building.chestTiles.push({ tx: pos.tx, tz: pos.tz });
+      building.chests.push(chest);
+      building.chest = building.chests[0];
+      building.chestTile = building.chestTiles[0];
+      this._registerObstacle(chest);
+      this.chests.push(chest);
+    }
+
+    return building.chests[0] ?? null;
   }
 
-  _pickNorthBorderSpot(building) {
+  _pickNorthBorderSpot(building, reservedTiles = [], edge = 'mid') {
     const { originX, originZ, w, h, cells, doorTx } = building;
     const doorTz = building.doorTz ?? h - 1;
+    const reserved = new Set(reservedTiles.map((t) => `${t.tx},${t.tz}`));
     const candidates = [];
 
     for (let tz = 0; tz < h; tz++) {
       for (let tx = 0; tx < w; tx++) {
         if (cells[tz * w + tx] !== CELL_FLOOR) continue;
         if (tx === doorTx && tz === doorTz) continue;
+        if (reserved.has(`${tx},${tz}`)) continue;
         if (cellWalkable(cells, w, h, tx, tz - 1)) continue;
         candidates.push({ tx, tz });
       }
@@ -77,19 +108,56 @@ export class ChestManager {
     const interiorRow = northRow.filter((c) => isNorthInteriorColumn(cells, w, h, c.tx, c.tz));
     const pool = interiorRow.length ? interiorRow : northRow;
     pool.sort((a, b) => a.tx - b.tx);
-    const pick = pool[Math.floor(pool.length / 2)];
-    building.chestTile = { tx: pick.tx, tz: pick.tz };
+
+    let pick;
+    if (edge === 'start') {
+      pick = pool[0];
+    } else if (edge === 'end') {
+      pick = pool[pool.length - 1];
+    } else {
+      pick = pool[Math.floor(pool.length / 2)];
+    }
+    if (reserved.has(`${pick.tx},${pick.tz}`)) {
+      pick = pool.find((c) => !reserved.has(`${c.tx},${c.tz}`)) ?? pool[0];
+    }
+
     return {
+      tx: pick.tx,
+      tz: pick.tz,
       x: originX + (pick.tx + 0.5) * TILE,
       z: originZ + (pick.tz + 1) * TILE,
     };
   }
 
   remove(chest) {
-    if (chest.homeBuilding?.chest === chest) chest.homeBuilding.chest = null;
+    const building = chest.homeBuilding;
+    if (building?.chests) {
+      const i = building.chests.indexOf(chest);
+      if (i >= 0) building.chests.splice(i, 1);
+      building.chest = building.chests[0] ?? null;
+      building.chestTile = building.chestTiles?.[0] ?? null;
+      if (building.chestTiles) {
+        const ti = building.chestTiles.findIndex((t) =>
+          Math.abs(chest.x - (building.originX + (t.tx + 0.5) * TILE)) < 0.01);
+        if (ti >= 0) building.chestTiles.splice(ti, 1);
+      }
+    } else if (building?.chest === chest) {
+      building.chest = null;
+      building.chestTile = null;
+    }
     this._unregisterObstacle(chest);
     const i = this.chests.indexOf(chest);
     if (i >= 0) this.chests.splice(i, 1);
+  }
+
+  removeAllFromBuilding(building) {
+    for (const chest of [...(building.chests ?? (building.chest ? [building.chest] : []))]) {
+      this.remove(chest);
+    }
+    building.chests = [];
+    building.chestTiles = [];
+    building.chest = null;
+    building.chestTile = null;
   }
 
   /** Restore chest loot/state when loading a save. */
@@ -105,7 +173,10 @@ export class ChestManager {
       homeBuilding: building,
       obstacle: null,
     };
-    building.chest = chest;
+    if (!building.chests) building.chests = [];
+    if (!building.chestTiles) building.chestTiles = [];
+    building.chests.push(chest);
+    building.chest = building.chests[0];
     this._registerObstacle(chest);
     this.chests.push(chest);
     return chest;

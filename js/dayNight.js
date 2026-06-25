@@ -2,6 +2,13 @@
 export const MINUTES_PER_DAY = 24 * 60;
 const START_MINUTES = 12 * 60;
 
+/** Dawn fade — sun rises 04:00 → 06:00. */
+const DAWN_START_H = 4;
+const DAWN_END_H = 6;
+/** Dusk fade — darkens 19:00 → 21:00. */
+const DUSK_START_H = 19;
+const DUSK_END_H = 21;
+
 export class DayNightCycle {
   constructor() {
     this.timeMinutes = START_MINUTES;
@@ -38,12 +45,17 @@ export class DayNightCycle {
     return `Day ${this.day}`;
   }
 
-  /** 0 = daylight, 1 = deepest night. */
+  /** 0 = full daylight, 1 = deepest night. */
   getNightFactor() {
-    const dayT = this.timeMinutes / MINUTES_PER_DAY;
-    const sun = Math.cos((dayT - 0.5) * Math.PI * 2);
-    if (sun > -0.12) return 0;
-    return Math.min(1, Math.max(0, (-sun - 0.12) / 0.88));
+    const h = this.timeMinutes / 60;
+    if (h >= DAWN_START_H && h < DAWN_END_H) {
+      return 1 - (h - DAWN_START_H) / (DAWN_END_H - DAWN_START_H);
+    }
+    if (h >= DAWN_END_H && h < DUSK_START_H) return 0;
+    if (h >= DUSK_START_H && h < DUSK_END_H) {
+      return (h - DUSK_START_H) / (DUSK_END_H - DUSK_START_H);
+    }
+    return 1;
   }
 }
 

@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v251';
+const CACHE = 'robot-ruins-v277';
 
 function shackSprites() {
   return [
@@ -69,14 +69,14 @@ function playerSprites() {
 
 function weaponSprites() {
   const guns = ['glock', 'm16', 'm870', 'm24', 'uzi', 'revolver', 'famas', 'fal'];
-  const melees = ['knife', 'fire_axe', 'wooden_bat', 'crowbar'];
+  const melees = ['knife', 'fire_axe', 'wooden_bat', 'crowbar', 'hand'];
   const paths = [];
   for (const base of guns) {
     paths.push(`./assets/weapons/${base}.png`);
     paths.push(`./assets/weapons/${base}_shot.png`);
   }
   for (const base of melees) paths.push(`./assets/weapons/${base}.png`);
-  for (const base of [...guns, ...melees]) paths.push(`./assets/items/${base}.png`);
+  for (const base of [...guns, ...melees]) paths.push(`./assets/items/weapons/${base}.png`);
   return paths;
 }
 
@@ -106,18 +106,22 @@ const SHELL = [
   './js/font-load.js',
   './js/renderConfig.js',
   './js/dayNight.js',
+  './js/lanSession.js',
   './js/main.js',
   './js/player.js',
   './js/bulletCollision.js',
   './js/enemies.js',
+  './js/enemyNav.js',
   './js/chunkEntities.js',
   './js/chests.js',
+  './js/corpses.js',
+  './js/groundDrops.js',
+  './js/materials.js',
   './js/buildingGen.js',
   './js/buildingTypes.js',
   './js/buildings.js',
   './js/loot.js',
   './js/audio.js',
-  './js/minimap.js',
   './js/items.js',
   './js/ammo.js',
   './js/joystick.js',
@@ -136,7 +140,7 @@ const SHELL = [
   './assets/ui/inv_slot.png',
   './assets/ui/inv_cursor.png',
   './assets/ui/chest_inventory.png',
-  './assets/items/lock.png',
+  './assets/items/misc/lock.png',
 ];
 
 const ASSETS = [
@@ -150,19 +154,56 @@ const ASSETS = [
   './assets/enemies/scout.png',
   './assets/enemies/scout_walk.png',
   './assets/enemies/charge.png',
-  './assets/items/ammo.png',
-  './assets/items/pistol_ammo.png',
-  './assets/items/rifle_ammo.png',
-  './assets/items/shotgun_ammo.png',
-  './assets/items/sniper_ammo.png',
-  './assets/items/bandage.png',
-  './assets/items/mystery.png',
-  './assets/items/mystery_weapon.png',
-  './assets/items/bullet.png',
-  './assets/items/particle_spark.png',
-  './assets/items/particle_smoke.png',
-  './assets/items/particle_fire.png',
+  './assets/enemies/spider_dead.png',
+  './assets/enemies/scout_dead.png',
+  './assets/items/materials/adhesive.png',
+  './assets/items/materials/battery.png',
+  './assets/items/materials/blueprint.png',
+  './assets/items/materials/blueprint_old.png',
+  './assets/items/materials/chemicals.png',
+  './assets/items/materials/cloth.png',
+  './assets/items/materials/copper_coil.png',
+  './assets/items/materials/electrical_comp.png',
+  './assets/items/materials/electrical_trans.png',
+  './assets/items/materials/fabric.png',
+  './assets/items/materials/fuel.png',
+  './assets/items/materials/glass.png',
+  './assets/items/materials/glass_bottle.png',
+  './assets/items/materials/gun_parts.png',
+  './assets/items/materials/mechanical_comp.png',
+  './assets/items/materials/metal.png',
+  './assets/items/materials/metal_pipe.png',
+  './assets/items/materials/metal_sheet.png',
+  './assets/items/materials/microchip.png',
+  './assets/items/materials/military_comp.png',
+  './assets/items/materials/nails.png',
+  './assets/items/materials/plank.png',
+  './assets/items/materials/plastic.png',
+  './assets/items/materials/repair_kit.png',
+  './assets/items/materials/rope.png',
+  './assets/items/materials/rubber.png',
+  './assets/items/materials/sewing_kit.png',
+  './assets/items/materials/splint_kit.png',
+  './assets/items/materials/spring.png',
+  './assets/items/materials/stick.png',
+  './assets/items/materials/tape.png',
+  './assets/items/materials/upgrade_kit.png',
+  './assets/items/materials/wires.png',
+  './assets/items/materials/wood.png',
+  './assets/items/weapons/pistol_ammo.png',
+  './assets/items/weapons/rifle_ammo.png',
+  './assets/items/weapons/shotgun_ammo.png',
+  './assets/items/weapons/sniper_ammo.png',
+  './assets/items/consumable/bandage.png',
+  './assets/items/weapons/bullet.png',
+  './assets/items/particles/casing.png',
+  './assets/items/particles/casing_red.png',
+  './assets/items/particles/particle_spark.png',
+  './assets/items/particles/particle_smoke.png',
+  './assets/items/particles/particle_fire.png',
   './assets/ui/cursor.png',
+  './assets/ui/enemy_aggro.png',
+  './assets/ui/enemy_search.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

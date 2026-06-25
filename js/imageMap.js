@@ -136,11 +136,6 @@ export class ImageMap {
     const br = worldToScreen(this.halfW, this.halfH);
     ctx.drawImage(this.mapImage, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
   }
-
-  drawMinimap(ctx, size) {
-    if (!this.loaded || !this.mapImage) return;
-    ctx.drawImage(this.mapImage, 0, 0, size, size);
-  }
 }
 
 export async function tryLoadImageMap() {

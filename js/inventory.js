@@ -1,6 +1,7 @@
 import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS, EQUIPMENT_SLOT_COUNT } from './player.js';
 import { weaponItemSpritePath } from './sprites.js';
 import { CHEST_SLOT_COUNT, getItemDisplayName, getItemDescription, getItemIconSrc } from './loot.js';
+import { mergeMaterialStacks, MATERIAL_STACK_MAX, materialItemsMatch } from './materials.js';
 import {
   AMMO_STACK_MAX,
   BANDAGE_STACK_MAX,
@@ -9,13 +10,14 @@ import {
   mergeAmmoStacks,
   mergeBandageStacks,
 } from './ammo.js';
+import { INTERNAL_W, INTERNAL_H } from './renderConfig.js';
 
 const EQUIPMENT_LABELS = ['Head', 'Body', 'Legs', 'Gear'];
 const ANIM_MS = 240;
 
 export const INV_SLOT_SRC = 'assets/ui/inv_slot.png';
 export const INV_CURSOR_SRC = 'assets/ui/inv_cursor.png';
-export const INV_LOCK_SRC = 'assets/items/lock.png';
+export const INV_LOCK_SRC = 'assets/items/misc/lock.png';
 
 export class InventoryUI {
   constructor(game) {
@@ -68,6 +70,7 @@ export class InventoryUI {
 
     this.backdrop = this.root?.querySelector('.inv-backdrop');
     this.backdrop?.addEventListener('pointerdown', (e) => {
+      if (this.drag?.moved) return;
       e.preventDefault();
       this.close();
     });
@@ -153,11 +156,16 @@ export class InventoryUI {
 
   openChest(chest) {
     if (!this.running() || this.animating || !chest) return;
-    if (!this.game.chests?.isInInteractRange(this.game.player, chest)) return;
+    const inRange = chest.isCorpse
+      ? this.game.corpses?.isInInteractRange(this.game.player, chest)
+      : this.game.chests?.isInInteractRange(this.game.player, chest);
+    if (!inRange) return;
     this.chestMode = true;
     this.chest = chest;
-    chest.opened = true;
-    this.game.audio?.chestOpen();
+    if (!chest.isCorpse) {
+      chest.opened = true;
+      this.game.audio?.chestOpen();
+    }
     this._setChestLayout(true);
     this._openUi();
   }
@@ -297,6 +305,7 @@ export class InventoryUI {
   _stackAmount(data) {
     if (data?.kind === 'ammo') return data.amount;
     if (data?.kind === 'bandage') return data.amount ?? 1;
+    if (data?.kind === 'material') return data.amount ?? 1;
     return 0;
   }
 
@@ -582,7 +591,7 @@ export class InventoryUI {
   }
 
   _isStackableItem(item) {
-    return item?.kind === 'ammo' || item?.kind === 'bandage';
+    return item?.kind === 'ammo' || item?.kind === 'bandage' || item?.kind === 'material';
   }
 
   _groupStacksInContainer(container, focusIndex) {
@@ -591,22 +600,34 @@ export class InventoryUI {
     const focus = slots[focusIndex];
     if (!this._isStackableItem(focus)) return;
 
-    let total = focus.kind === 'bandage' ? (focus.amount ?? 1) : (focus.amount ?? 0);
+    let total = focus.kind === 'bandage' || focus.kind === 'material'
+      ? (focus.amount ?? 1)
+      : (focus.amount ?? 0);
     for (let i = 0; i < slots.length; i++) {
       if (i === focusIndex) continue;
       const s = slots[i];
       const matches = focus.kind === 'bandage'
         ? bandageItemsMatch(s, focus)
-        : ammoItemsMatch(s, focus);
+        : focus.kind === 'material'
+          ? materialItemsMatch(s, focus)
+          : ammoItemsMatch(s, focus);
       if (!matches) continue;
-      total += focus.kind === 'bandage' ? (s.amount ?? 1) : (s.amount ?? 0);
+      total += focus.kind === 'bandage' || focus.kind === 'material'
+        ? (s.amount ?? 1)
+        : (s.amount ?? 0);
       slots[i] = null;
     }
 
-    const stackMax = focus.kind === 'bandage' ? BANDAGE_STACK_MAX : AMMO_STACK_MAX;
+    const stackMax = focus.kind === 'bandage'
+      ? BANDAGE_STACK_MAX
+      : focus.kind === 'material'
+        ? MATERIAL_STACK_MAX
+        : AMMO_STACK_MAX;
     const inFocus = Math.min(stackMax, total);
     if (focus.kind === 'bandage') {
       slots[focusIndex] = { kind: 'bandage', amount: inFocus };
+    } else if (focus.kind === 'material') {
+      slots[focusIndex] = { kind: 'material', key: focus.key, amount: inFocus };
     } else {
       slots[focusIndex] = { kind: 'ammo', ammoType: focus.ammoType, amount: inFocus };
     }
@@ -618,6 +639,8 @@ export class InventoryUI {
       const add = Math.min(stackMax, total);
       if (focus.kind === 'bandage') {
         slots[empty] = { kind: 'bandage', amount: add };
+      } else if (focus.kind === 'material') {
+        slots[empty] = { kind: 'material', key: focus.key, amount: add };
       } else {
         slots[empty] = { kind: 'ammo', ammoType: focus.ammoType, amount: add };
       }
@@ -630,6 +653,7 @@ export class InventoryUI {
   _stackAmountForSplit(item) {
     if (item?.kind === 'ammo') return item.amount ?? 0;
     if (item?.kind === 'bandage') return item.amount ?? 1;
+    if (item?.kind === 'material') return item.amount ?? 1;
     return 0;
   }
 
@@ -667,6 +691,9 @@ export class InventoryUI {
     } else if (item.kind === 'bandage') {
       slots[index] = { kind: 'bandage', amount: keep };
       slots[emptyIdx] = { kind: 'bandage', amount: splitOff };
+    } else if (item.kind === 'material') {
+      slots[index] = { kind: 'material', key: item.key, amount: keep };
+      slots[emptyIdx] = { kind: 'material', key: item.key, amount: splitOff };
     } else {
       return false;
     }
@@ -988,6 +1015,32 @@ export class InventoryUI {
     this.drag.ghost = ghost;
   }
 
+  _isPointerOverInventoryPanels(clientX, clientY) {
+    const panels = [this.panel, this.chestPanelRoot];
+    for (const el of panels) {
+      if (!el || el.classList.contains('hidden')) continue;
+      const r = el.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  tryDropOnGround(e, stashedItem) {
+    if (!stashedItem || !this.open) return false;
+    if (this._isPointerOverInventoryPanels(e.clientX, e.clientY)) return false;
+    const game = this.game;
+    if (!game?.groundDrops || !game.player || !game.canvas) return false;
+    const canvasRect = game.canvas.getBoundingClientRect();
+    const sx = ((e.clientX - canvasRect.left) / canvasRect.width) * INTERNAL_W;
+    const sy = ((e.clientY - canvasRect.top) / canvasRect.height) * INTERNAL_H;
+    const w = game._screenToWorld(sx, sy);
+    game.groundDrops.dropAt(w.x, w.z, stashedItem, game.player);
+    game.items?.setPickupMsg(`Dropped ${getItemDisplayName(stashedItem)}`, { duration: 1.5 });
+    return true;
+  }
+
   _dropTargetFromElement(el) {
     if (!el?.closest) return null;
     const main = el.closest('.inv-weapon-slot.inv-primary[data-drop-zone="main"]');
@@ -1039,6 +1092,17 @@ export class InventoryUI {
         return merged.overflow;
       }
     }
+    if (item?.kind === 'material' && displaced && materialItemsMatch(item, displaced)) {
+      const merged = mergeMaterialStacks(item, displaced);
+      if (merged && !merged.overflow) {
+        player.itemSlots[index] = merged;
+        return null;
+      }
+      if (merged?.merged) {
+        player.itemSlots[index] = merged.merged;
+        return merged.overflow;
+      }
+    }
     player.itemSlots[index] = item;
     return displaced;
   }
@@ -1060,6 +1124,17 @@ export class InventoryUI {
       }
       if (item?.kind === 'bandage' && displaced && bandageItemsMatch(item, displaced)) {
         const merged = mergeBandageStacks(item, displaced);
+        if (merged && !merged.overflow) {
+          this.chest.slots[index] = merged;
+          return null;
+        }
+        if (merged?.merged) {
+          this.chest.slots[index] = merged.merged;
+          return merged.overflow;
+        }
+      }
+      if (item?.kind === 'material' && displaced && materialItemsMatch(item, displaced)) {
+        const merged = mergeMaterialStacks(item, displaced);
         if (merged && !merged.overflow) {
           this.chest.slots[index] = merged;
           return null;
@@ -1388,7 +1463,11 @@ export class InventoryUI {
     }
 
     if (moved && stashedItem && !placed) {
-      this._restoreDragItem();
+      if (this.game._tryDropFromInventoryDrag(e, stashedItem)) {
+        placed = true;
+      } else {
+        this._restoreDragItem();
+      }
     }
 
     if (placed) {
@@ -1471,8 +1550,18 @@ export class InventoryUI {
 
   _renderChestSlots() {
     if (!this.chestEl || !this.chest) return;
+    const slotCount = this.chest.slots?.length ?? CHEST_SLOT_COUNT;
+    if (slotCount === 5) {
+      this.chestEl.style.gridTemplateColumns = 'repeat(5, var(--chest-slot-size))';
+      this.chestEl.style.gridTemplateRows = 'var(--chest-slot-size)';
+      this.chestEl.style.width = 'calc(var(--chest-slot-size) * 5 + 24px)';
+    } else {
+      this.chestEl.style.gridTemplateColumns = 'repeat(4, var(--chest-slot-size))';
+      this.chestEl.style.gridTemplateRows = 'repeat(2, var(--chest-slot-size))';
+      this.chestEl.style.width = 'calc(var(--chest-slot-size) * 4 + 18px)';
+    }
     this.chestEl.innerHTML = '';
-    for (let i = 0; i < CHEST_SLOT_COUNT; i++) {
+    for (let i = 0; i < slotCount; i++) {
       const slot = this._makeSlot('inv-chest-slot');
       slot.dataset.slotIndex = String(i);
       slot.dataset.slotContainer = 'chest';

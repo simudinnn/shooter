@@ -2,6 +2,17 @@
  * Sprite loader — assets/{player,enemies,weapons,world,items,ui}/
  */
 
+import { MATERIAL_KEYS, materialSpritePath } from './materials.js';
+
+const MATERIAL_ASSET_PATHS = Object.fromEntries(
+  MATERIAL_KEYS.map((key) => [key, materialSpritePath(key)]),
+);
+
+const DEAD_ENEMY_TYPES = ['spider', 'scout'];
+const DEAD_ENEMY_ASSET_PATHS = Object.fromEntries(
+  DEAD_ENEMY_TYPES.map((type) => [`${type}_dead`, `assets/enemies/${type}_dead.png`]),
+);
+
 const PLAYER_ASSET_PATHS = {
   player_idle: 'assets/player/idle.png',
   player_walk: 'assets/player/walk.png',
@@ -12,7 +23,8 @@ const GUN_SPRITES = ['glock', 'm16', 'm870', 'm24', 'uzi', 'revolver', 'famas', 
 /** Pump / bolt guns use a dedicated mid-fire cycle strip. */
 const GUN_CYCLE_SPRITES = ['m870', 'm24'];
 const MELEE_SPRITES = ['knife', 'fire_axe', 'wooden_bat', 'crowbar'];
-/** 16×16 inventory / GUI icons — weapon only, no hands (assets/items/{name}.png). */
+const UNARMED_SPRITES = ['hand'];
+/** 16×16 inventory / GUI icons — weapon only, no hands (assets/items/weapons/{name}.png). */
 export const ITEM_WEAPON_SPRITES = [...GUN_SPRITES, ...MELEE_SPRITES];
 
 const WEAPON_ASSET_PATHS = (() => {
@@ -28,11 +40,14 @@ const WEAPON_ASSET_PATHS = (() => {
   for (const base of MELEE_SPRITES) {
     paths[base] = `assets/weapons/${base}.png`;
   }
+  for (const base of UNARMED_SPRITES) {
+    paths[base] = `assets/weapons/${base}.png`;
+  }
   return paths;
 })();
 
 const ITEM_WEAPON_ASSET_PATHS = Object.fromEntries(
-  ITEM_WEAPON_SPRITES.map((base) => [`item_${base}`, `assets/items/${base}.png`]),
+  ITEM_WEAPON_SPRITES.map((base) => [`item_${base}`, `assets/items/weapons/${base}.png`]),
 );
 
 const WORLD_FLOOR_SPRITES = ['floor_grass', 'floor_dirt', 'floor_rock'];
@@ -106,27 +121,29 @@ const CORE_ASSETS = {
   scout: 'assets/enemies/scout.png',
   scout_walk: 'assets/enemies/scout_walk.png',
   scout_charge: 'assets/enemies/charge.png',
+  ...MATERIAL_ASSET_PATHS,
+  ...DEAD_ENEMY_ASSET_PATHS,
   ...WORLD_ASSET_PATHS,
   ...BUILDING_ASSET_PATHS,
   ...SHACK_ASSET_PATHS,
-  ammo: 'assets/items/ammo.png',
-  pistol_ammo: 'assets/items/pistol_ammo.png',
-  rifle_ammo: 'assets/items/rifle_ammo.png',
-  shotgun_ammo: 'assets/items/shotgun_ammo.png',
-  sniper_ammo: 'assets/items/sniper_ammo.png',
-  bandage: 'assets/items/bandage.png',
-  inv_lock: 'assets/items/lock.png',
-  mystery: 'assets/items/mystery.png',
-  mystery_weapon: 'assets/items/mystery_weapon.png',
-  bullet: 'assets/items/bullet.png',
-  casing: 'assets/items/casing.png',
-  casing_red: 'assets/items/casing_red.png',
-  particle_spark: 'assets/items/particle_spark.png',
-  particle_smoke: 'assets/items/particle_smoke.png',
-  particle_fire: 'assets/items/particle_fire.png',
+  ammo: 'assets/items/weapons/pistol_ammo.png',
+  pistol_ammo: 'assets/items/weapons/pistol_ammo.png',
+  rifle_ammo: 'assets/items/weapons/rifle_ammo.png',
+  shotgun_ammo: 'assets/items/weapons/shotgun_ammo.png',
+  sniper_ammo: 'assets/items/weapons/sniper_ammo.png',
+  bandage: 'assets/items/consumable/bandage.png',
+  inv_lock: 'assets/items/misc/lock.png',
+  bullet: 'assets/items/weapons/bullet.png',
+  casing: 'assets/items/particles/casing.png',
+  casing_red: 'assets/items/particles/casing_red.png',
+  particle_spark: 'assets/items/particles/particle_spark.png',
+  particle_smoke: 'assets/items/particles/particle_smoke.png',
+  particle_fire: 'assets/items/particles/particle_fire.png',
   cursor: 'assets/ui/cursor.png',
   cursor_melee: 'assets/ui/cursor_melee.png',
   cursor_shotgun: 'assets/ui/cursor_shotgun.png',
+  enemy_aggro: 'assets/ui/enemy_aggro.png',
+  enemy_search: 'assets/ui/enemy_search.png',
 };
 
 /**
@@ -148,10 +165,6 @@ export const SPRITE_ANIM = {
     player_idle: { fps: 3, loop: true },
     player_walk: { fps: 10, loop: true },
     player_run: { fps: 14, loop: true },
-    player_roll: { fps: 14, loop: true },
-    player_crouch: { fps: 4, loop: true },
-    player_sneak: { fps: 7, loop: true },
-    player_jump: { fps: 12, loop: false },
     spider_walk: { fps: 10, loop: true },
     scout_walk: { fps: 6, loop: true, frameW: 32, frameH: 32 },
     scout_charge: { fps: 10, loop: false, frameW: 32, frameH: 32 },
@@ -173,6 +186,8 @@ export const SPRITE_ANIM = {
     cursor: { frameW: 15, frameH: 15, frames: 1 },
     cursor_melee: { frameW: 15, frameH: 15, frames: 1 },
     cursor_shotgun: { frameW: 15, frameH: 15, frames: 1 },
+    enemy_aggro: { frameW: 16, frameH: 16, frames: 1 },
+    enemy_search: { frameW: 16, frameH: 16, frames: 1 },
     ...Object.fromEntries(
       ITEM_WEAPON_SPRITES.map((base) => [`item_${base}`, { frameW: 16, frameH: 16, frames: 1 }]),
     ),
@@ -238,7 +253,7 @@ export function weaponHoldSpritePath(sprite) {
 
 /** 16×16 item icon for inventory / GUI / back-carry (no hands). */
 export function weaponItemSpritePath(sprite) {
-  return `assets/items/${sprite}.png`;
+  return `assets/items/weapons/${sprite}.png`;
 }
 
 /** SpriteBank key for a weapon item icon. */
@@ -268,13 +283,6 @@ const RUN_LEGS = [
   [{ x: 8, y: 10, w: 5, h: 7 }, { x: 12, y: 12, w: 5, h: 7 }],
 ];
 
-const SNEAK_LEGS = [
-  [{ x: 6, y: 16, w: 4, h: 4 }, { x: 14, y: 16, w: 4, h: 4 }],
-  [{ x: 5, y: 17, w: 4, h: 3 }, { x: 15, y: 15, w: 4, h: 5 }],
-  [{ x: 8, y: 16, w: 4, h: 4 }, { x: 12, y: 16, w: 4, h: 4 }],
-  [{ x: 15, y: 15, w: 4, h: 5 }, { x: 5, y: 17, w: 4, h: 3 }],
-];
-
 const PLAYER_ANIM_RE = /^player_(walk|run)_(\d+)$/;
 
 function getAnimSpec(name) {
@@ -288,7 +296,8 @@ function defaultFrameSize(name) {
   if (name.startsWith('scout')) return SCOUT_NATIVE_PX;
   if (name.startsWith('player_') || name.startsWith('spider')) return CHAR_SIZE;
   if (GUN_SPRITES.some((b) => name === b || name.startsWith(`${b}_`))
-    || MELEE_SPRITES.includes(name)) {
+    || MELEE_SPRITES.includes(name)
+    || UNARMED_SPRITES.includes(name)) {
     return WEAPON_NATIVE_PX;
   }
   return SPRITE_ANIM.frameH;
@@ -412,60 +421,10 @@ function drawSpiderFrame(g, leftLeg, rightLeg, leftArm, rightArm) {
   px(g, rightArm.x, rightArm.y, rightArm.w, rightArm.h, '#505860');
 }
 
-function drawPlayerRollFrame(g, frame = 1) {
-  const skid = frame > 1 ? 2 : 0;
-  px(g, 2 + skid, 12, 5, 4, '#d4a878');
-  px(g, 6 + skid, 11, 14, 6, '#3a6070');
-  px(g, 5 + skid, 12, 12, 5, '#4a8090');
-  px(g, 18 + skid, 13, 5, 3, '#2a5060');
-  px(g, 1, 14, 5 + skid, 2, '#2a5060');
-}
-
-function drawPlayerCrouchFrame(g) {
-  px(g, 9, 9, 6, 3, '#d4a878');
-  px(g, 7, 12, 10, 7, '#3a6070');
-  px(g, 8, 13, 8, 5, '#4a8090');
-  px(g, 6, 18, 4, 2, '#2a5060');
-  px(g, 14, 18, 4, 2, '#2a5060');
-}
-
-function drawPlayerSneakFrame(g, frame = 1) {
-  const legs = SNEAK_LEGS[(frame - 1) % 4];
-  px(g, 9, 10, 6, 3, '#d4a878');
-  px(g, 7, 13, 10, 6, '#3a6070');
-  px(g, 8, 14, 8, 4, '#4a8090');
-  px(g, legs[0].x, legs[0].y, legs[0].w, legs[0].h, '#2a5060');
-  px(g, legs[1].x, legs[1].y, legs[1].w, legs[1].h, '#2a5060');
-}
-
-function drawPlayerJumpFrame(g, frame = 1) {
-  const tuck = frame > 1 ? 1 : 0;
-  px(g, 9, 4 + tuck, 6, 3, '#d4a878');
-  px(g, 8, 7 + tuck, 8, 7, '#4a8090');
-  px(g, 7, 11 + tuck, 4, 5, '#2a5060');
-  px(g, 13, 10 + tuck, 4, 5, '#2a5060');
-}
-
 function buildPlayerFallback(kind, frame) {
   const c = makeCanvas(CHAR_SIZE, CHAR_SIZE);
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
-  if (kind === 'roll') {
-    drawPlayerRollFrame(g, frame);
-    return c;
-  }
-  if (kind === 'crouch') {
-    drawPlayerCrouchFrame(g);
-    return c;
-  }
-  if (kind === 'sneak') {
-    drawPlayerSneakFrame(g, frame);
-    return c;
-  }
-  if (kind === 'jump') {
-    drawPlayerJumpFrame(g, frame);
-    return c;
-  }
   let legs = WALK_LEGS[0];
   if (kind === 'walk') legs = WALK_LEGS[(frame - 1) % 4];
   else if (kind === 'run') legs = RUN_LEGS[(frame - 1) % 4];
@@ -475,7 +434,7 @@ function buildPlayerFallback(kind, frame) {
 }
 
 function buildPlayerStripFallback(kind) {
-  const frames = (kind === 'roll' || kind === 'jump') ? 2 : (kind === 'crouch' ? 1 : 4);
+  const frames = 4;
   const c = makeCanvas(CHAR_SIZE, CHAR_SIZE * frames);
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
@@ -519,15 +478,30 @@ function buildSpiderWalkStripFallback() {
   return c;
 }
 
+function drawDeadEnemyFrame(g, type) {
+  const body = type === 'scout' ? '#4a5058' : '#3a4a50';
+  const dark = type === 'scout' ? '#2a3038' : '#243038';
+  px(g, 4, 15, 16, 4, '#1a1814');
+  px(g, 6, 11, 12, 5, body);
+  px(g, 7, 9, 10, 3, dark);
+  px(g, 5, 13, 3, 2, '#181410');
+  px(g, 16, 12, 3, 2, '#181410');
+}
+
 function buildCharFallback(name) {
   if (name === 'player_idle') return buildPlayerFallback('idle', 1);
   if (name === 'player_walk') return buildPlayerStripFallback('walk');
   if (name === 'player_run') return buildPlayerStripFallback('run');
-  if (name === 'player_roll') return buildPlayerStripFallback('roll');
-  if (name === 'player_crouch') return buildPlayerStripFallback('crouch');
-  if (name === 'player_sneak') return buildPlayerStripFallback('sneak');
-  if (name === 'player_jump') return buildPlayerStripFallback('jump');
   if (name === 'spider_walk') return buildSpiderWalkStripFallback();
+
+  const deadMatch = name.match(/^(spider|scout)_dead$/);
+  if (deadMatch) {
+    const c = makeCanvas(CHAR_SIZE, CHAR_SIZE);
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    drawDeadEnemyFrame(g, deadMatch[1]);
+    return c;
+  }
 
   const animMatch = name.match(PLAYER_ANIM_RE);
   if (animMatch) {
@@ -729,6 +703,12 @@ function buildMeleeFallback(name) {
       px(g, 7 + o, 2 + o, 4, 3, '#9098a0');
       px(g, 8 + o, 14 + o, 4, 2, '#606870');
       break;
+    case 'hand':
+      px(g, 8 + o, 6 + o, 5, 6, '#c8a888');
+      px(g, 9 + o, 4 + o, 3, 3, '#d8b898');
+      px(g, 10 + o, 3 + o, 2, 2, '#e0c4a8');
+      px(g, 7 + o, 10 + o, 2, 3, '#b09070');
+      break;
     default:
       px(g, 0, 0, CHAR_SIZE, CHAR_SIZE, '#ff00ff');
   }
@@ -779,7 +759,7 @@ function buildFallback(name) {
     || MELEE_SPRITES.includes(name)) {
     return buildWeaponFallback(name);
   }
-  if (MELEE_SPRITES.includes(name)) {
+  if (MELEE_SPRITES.includes(name) || UNARMED_SPRITES.includes(name)) {
     return buildMeleeFallback(name);
   }
 
@@ -821,16 +801,6 @@ function buildFallback(name) {
       px(g, 2, 2, 12, 12, '#f0ece8');
       px(g, 6, 4, 4, 8, '#ff3030');
       px(g, 4, 6, 8, 4, '#ff3030');
-      break;
-    case 'mystery':
-      px(g, 2, 2, 12, 12, '#7744cc');
-      px(g, 4, 4, 8, 8, '#aa66ff');
-      px(g, 6, 6, 4, 4, '#ffee88');
-      break;
-    case 'mystery_weapon':
-      px(g, 2, 3, 12, 10, '#cc8822');
-      px(g, 4, 5, 8, 6, '#ffaa22');
-      px(g, 6, 6, 4, 3, '#ffffff');
       break;
     case 'bullet':
       px(g, 7, 4, 2, 8, '#ffe040');
@@ -889,6 +859,16 @@ function buildFallback(name) {
       px(g, 3, 11, 2, 2, '#c88828');
       px(g, 11, 11, 2, 2, '#c88828');
       break;
+    case 'enemy_aggro':
+      px(g, 7, 2, 2, 10, '#e04040');
+      px(g, 5, 4, 6, 6, '#e04040');
+      px(g, 6, 12, 4, 2, '#e04040');
+      break;
+    case 'enemy_search':
+      px(g, 3, 4, 10, 8, '#c88828');
+      px(g, 5, 6, 6, 4, '#f0d060');
+      px(g, 7, 2, 2, 3, '#c88828');
+      break;
     default:
       px(g, 0, 0, 16, 16, '#ff00ff');
   }
@@ -912,15 +892,6 @@ export function isMovingForward(player) {
   return (lookRight && moveSide === 'r') || (!lookRight && moveSide === 'l');
 }
 
-/** Roll direction opposite to where the player is aiming. */
-export function isRollingBackward(player) {
-  if (!player?.roll?.active) return false;
-  const fx = Math.sin(player.angle ?? 0);
-  const fz = Math.cos(player.angle ?? 0);
-  const dot = (player.roll.dirX ?? 0) * fx + (player.roll.dirZ ?? 0) * fz;
-  return dot < -0.12;
-}
-
 export function getFlipXFromAngle(angle) {
   return !isLookingRight(angle);
 }
@@ -929,46 +900,44 @@ export function getPlayerFlipX(player) {
   return getFlipXFromAngle(player.angle);
 }
 
-/** Melee held horizontal — east when facing right, west when flipped left; ignores aim pitch. */
-export const MELEE_HOLD_ANGLE = Math.PI / 2;
+/** Melee / hand sprites use a fixed horizontal draw angle; flipX handles left vs right. */
+export const ENEMY_STATUS_ICON_SCALE = 2;
 export const MELEE_SIDE_HOLD_DIST = 0.64;
+const MELEE_SPRITE_ANGLE = Math.PI / 2;
 
 export function getMeleeHoldPose(player, lunge = 0) {
   const flipX = getPlayerFlipX(player);
   const sideAngle = flipX ? -Math.PI / 2 : Math.PI / 2;
   const dist = MELEE_SIDE_HOLD_DIST + lunge;
   return {
-    angle: MELEE_HOLD_ANGLE,
+    angle: MELEE_SPRITE_ANGLE,
     flipX,
     worldX: player.x + Math.sin(sideAngle) * dist,
     worldZ: player.z + Math.cos(sideAngle) * dist,
   };
 }
 
-export function getPlayerSheet(player, time = 0) {
-  if (player.isRolling?.(time)) return 'player_roll';
-  if (player.isJumping?.(time)) return 'player_jump';
-  if (player.isSneaking) return 'player_sneak';
-  if (player.isCrouching) return 'player_crouch';
+/** Unarmed fist — fixed horizontal art; position shifts forward with body facing. */
+export const HAND_HOLD_DIST = 0.44;
+
+export function getHandHoldPose(player, punchExtend = 0) {
+  const flipX = getPlayerFlipX(player);
+  const dist = HAND_HOLD_DIST + punchExtend;
+  return {
+    angle: MELEE_SPRITE_ANGLE,
+    flipX,
+    worldX: player.x + Math.sin(player.angle) * dist,
+    worldZ: player.z + Math.cos(player.angle) * dist,
+  };
+}
+
+export function getPlayerSheet(player) {
   if (!player.isMoving) return 'player_idle';
   return player.isSprinting ? 'player_run' : 'player_walk';
 }
 
 /** Animation state for flipbook player sheets. */
 export function getPlayerAnim(player, time = 0) {
-  if (player.isRolling?.(time)) {
-    return {
-      elapsed: Math.max(0, time - (player.roll.startTime ?? 0)),
-      reverse: isRollingBackward(player),
-    };
-  }
-  if (player.isJumping?.(time)) {
-    return { elapsed: Math.max(0, time - (player.jump.startTime ?? 0)) };
-  }
-  if (player.isSneaking) {
-    return { phase: player.walkPhase, reverse: !isMovingForward(player) };
-  }
-  if (player.isCrouching) return { time };
   if (!player.isMoving) return { time };
   return {
     phase: player.walkPhase,
@@ -998,12 +967,7 @@ export function getScoutWalkBounceY(animTime, moving, fps = SCOUT_WALK_FPS, amp 
   return -amp + amp * Math.pow(u, 3.6);
 }
 
-export function getPlayerBounceY(player, time = 0) {
-  if (player.isRolling?.(time) || player.isCrouching || player.isSneaking) return 0;
-  if (player.isJumping?.(time)) {
-    const t = player.getJumpT?.(time) ?? 0;
-    return -Math.sin(t * Math.PI) * 11;
-  }
+export function getPlayerBounceY(player) {
   const amp = player.isSprinting ? 2.8 : 1.8;
   return getWalkBounceY(player.walkPhase, player.isMoving, amp);
 }
@@ -1013,8 +977,7 @@ export const IDLE_BREATH_AMP = 1.1;
 export const IDLE_BREATH_HZ = 0.42;
 
 export function getPlayerIdleBreathY(player, time = 0) {
-  if (player.isMoving || player.isCrouching || player.isSneaking || player.isMeleeAnimating?.(time)) return 0;
-  if (player.isRolling?.(time) || player.isJumping?.(time)) return 0;
+  if (player.isMoving || player.isMeleeAnimating?.(time)) return 0;
   const phase = time * Math.PI * 2 * IDLE_BREATH_HZ;
   // Cosine — zero velocity at inhale/exhale peaks (smoother than raw sine steps).
   return -Math.cos(phase) * IDLE_BREATH_AMP;
@@ -1133,12 +1096,16 @@ export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimS
     return { elapsed };
   }
   const walkSpeedMult = opts.walkSpeedMult ?? 1;
+  if (opts.walkPhase != null) {
+    return getWalkAnim(moving, 0, opts.walkPhase);
+  }
   return getWalkAnim(moving, time * walkSpeedMult);
 }
 
 /** Time-based flipbook anim for walk sheets (respects SPRITE_ANIM fps). */
-export function getWalkAnim(moving, time = 0) {
+export function getWalkAnim(moving, time = 0, phase = null) {
   if (!moving) return null;
+  if (phase != null) return { phase };
   return { time };
 }
 
@@ -1164,6 +1131,8 @@ export class SpriteBank {
     this._tileBitmapCache = new Map();
     this._tileBitmapOrder = [];
     this._tileBitmapMax = 384;
+    /** 10×10 nearest-neighbor downscales of 16×16 item icons for world drops. */
+    this._groundItemBitmaps = new Map();
   }
 
   getImageByPath(path) {
@@ -1243,6 +1212,7 @@ export class SpriteBank {
     if (this.ready) return;
     const entries = Object.entries(ASSET_PATHS);
     await Promise.all(entries.map(([name, path]) => this._loadOne(name, path)));
+    this._groundItemBitmaps.clear();
     this.ready = true;
   }
 
@@ -1385,6 +1355,57 @@ export class SpriteBank {
     if (angle) ctx.rotate(angle);
     if (chopTilt) ctx.rotate(chopTilt);
     ctx.drawImage(img, srcX, srcY, fw, fh, -ox, -oy, dw, dh);
+    ctx.restore();
+  }
+
+  _getGroundItemBitmap(spriteName, resPx = 10) {
+    const key = `${spriteName}@${resPx}`;
+    const cached = this._groundItemBitmaps.get(key);
+    if (cached) return cached;
+
+    const img = this.images[spriteName] ?? this._getImage(spriteName);
+    if (!img) return null;
+
+    const srcW = img.width || 16;
+    const srcH = img.height || 16;
+    const c = document.createElement('canvas');
+    c.width = resPx;
+    c.height = resPx;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.drawImage(img, 0, 0, srcW, srcH, 0, 0, resPx, resPx);
+    this._groundItemBitmaps.set(key, c);
+    return c;
+  }
+
+  /**
+   * World pickup — 16×16 icon → resPx×resPx bitmap (nearest-neighbor), then integer-upscaled
+   * to displayPx so on-screen pixels stay chunky (e.g. 10→20 = 2× block size).
+   */
+  drawGroundItem(ctx, spriteName, sx, sy, displayPx = 20, bobY = 0, resPx = 10) {
+    const bitmap = this._getGroundItemBitmap(spriteName, resPx);
+    if (!bitmap) return;
+    const dw = Math.round(displayPx);
+    const dh = Math.round(displayPx);
+    const drawX = Math.round(sx - dw * 0.5);
+    const drawY = Math.round(sy - dh + bobY);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bitmap, 0, 0, resPx, resPx, drawX, drawY, dw, dh);
+  }
+
+  drawGroundItemLabel(ctx, label, sx, sy, bobY = 0, itemDisplayPx = 20) {
+    if (!label) return;
+    const text = label.length > 18 ? `${label.slice(0, 17)}…` : label;
+    const labelY = Math.round(sy - itemDisplayPx - 3 + bobY);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.font = '8px GamePixel, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = 'rgba(8, 8, 12, 0.72)';
+    ctx.fillText(text, Math.round(sx) + 1, labelY + 1);
+    ctx.fillStyle = '#e8e4dc';
+    ctx.fillText(text, Math.round(sx), labelY);
     ctx.restore();
   }
 

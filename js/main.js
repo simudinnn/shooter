@@ -1,7 +1,8 @@
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
-import { unpackTintGradient, getBiome, isTreeFoliage, rollWorldSeed, setWorldSeed } from './worldGen.js';
-import { Robot, Scout, createExplosion, createGroundSpew, updateParticles } from './enemies.js';
+import { unpackTintGradient, getBiome, isTreeFoliage, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
+import { Robot, Scout, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
+import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
 import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
 import {
   captureGameState,
@@ -11,8 +12,9 @@ import {
   writeSave,
 } from './saveGame.js';
 import { SoundManager } from './audio.js';
-import { Minimap } from './minimap.js';
 import { ItemManager } from './items.js';
+import { GroundDropManager, GROUND_DROP_DISPLAY_PX, GROUND_DROP_RES_PX } from './groundDrops.js';
+import { getEnemyStatusIcon } from './enemyNav.js';
 import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_H, CHEST_DRAW_PIVOT } from './chests.js';
 import {
   BuildingManager,
@@ -37,8 +39,8 @@ import {
   entityFeetZ,
 } from './buildingGen.js';
 import { chestSpriteName } from './loot.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE } from './sprites.js';
-import { collectCollisionTargets, moveWithEntityCollision, didDisplace } from './collision.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE, ENEMY_STATUS_ICON_SCALE } from './sprites.js';
+import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, updateLocomotion, isSprintAnimSpeed } from './collision.js';
 import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
@@ -53,8 +55,15 @@ import {
   pointInVisibilityPolygon,
   resolveVisionOrigin,
 } from './visibility.js';
+import { LanSession, defaultLanUrl } from './lanSession.js';
 
-const VISION_DARKNESS = 0.1;
+const VISION_DARKNESS = 0.15;
+/** Y-sort bias — shadows on the floor, under walls and bodies. */
+const SORT_SHADOW = 0;
+const SORT_WALL_BACK = 1;
+const SORT_ENTITY = 2;
+const SORT_GUN = 3;
+const SORT_WALL_FRONT = 6;
 
 const SPRITE_PLAYER = 1.50;
 const SPRITE_CHEST = CHEST_DRAW_SCALE;
@@ -107,6 +116,7 @@ class Game {
     this.touchMove = { x: 0, z: 0 };
     this.autoLock = false;
     this.mobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    this.lan = null;
 
     this._initCanvas();
     this._initUI();
@@ -162,17 +172,19 @@ class Game {
       damageFlash: document.getElementById('damage-flash'),
       newGameBtn: document.getElementById('new-game-btn'),
       loadGameBtn: document.getElementById('load-game-btn'),
+      hostLanBtn: document.getElementById('host-lan-btn'),
+      joinLanBtn: document.getElementById('join-lan-btn'),
+      lanHostInput: document.getElementById('lan-host-input'),
+      lanStatus: document.getElementById('lan-status'),
       resumeBtn: document.getElementById('resume-btn'),
       saveGameBtn: document.getElementById('save-game-btn'),
       backToMenuBtn: document.getElementById('back-to-menu-btn'),
       confirmYesBtn: document.getElementById('confirm-yes-btn'),
       confirmNoBtn: document.getElementById('confirm-no-btn'),
-      minimapCanvas: document.getElementById('minimap'),
       mobileControls: document.getElementById('mobile-controls'),
       waveBanner: document.getElementById('wave-banner'),
       inventory: document.getElementById('inventory'),
     };
-    this.minimap = new Minimap(this.el.minimapCanvas);
     this.inventoryUI = new InventoryUI(this);
     this._waveBannerTimer = null;
     this._confirmYes = null;
@@ -269,12 +281,91 @@ class Game {
   _quitToMainMenu() {
     this.running = false;
     this.paused = false;
+    this.lan?.disconnect();
+    this.lan = null;
     this._hidePauseMenu();
     this._clearKeyboardInput();
     this.touchMove = { x: 0, z: 0 };
     this.moveJoystick?.reset();
     this.inventoryUI?.forceClose();
     this._showMainMenu();
+  }
+
+  _setLanStatus(text) {
+    if (!this.el.lanStatus) return;
+    if (text) {
+      this.el.lanStatus.textContent = text;
+      this.el.lanStatus.classList.remove('hidden');
+    } else {
+      this.el.lanStatus.textContent = '';
+      this.el.lanStatus.classList.add('hidden');
+    }
+  }
+
+  _lanUrlFromInput() {
+    let raw = this.el.lanHostInput?.value?.trim();
+    if (!raw) raw = window.location.hostname || 'localhost';
+    raw = raw.replace(/^ws:\/\//i, '').replace(/\/$/, '');
+    if (!raw.includes(':')) raw = `${raw}:8765`;
+    return `ws://${raw}`;
+  }
+
+  async _startLanHost() {
+    this._setLanStatus('Connecting…');
+    const url = defaultLanUrl();
+    try {
+      const lan = new LanSession(this, {
+        isHost: true,
+        playerId: null,
+        playerName: 'Host',
+        url,
+      });
+      await lan.connect();
+      this.lan = lan;
+      this._setLanStatus('');
+      this._hideMainMenu();
+      await this._bootGame(null, { lan });
+      lan.sendStart(getWorldSeed());
+    } catch (err) {
+      console.error(err);
+      this.lan?.disconnect();
+      this.lan = null;
+      this._setLanStatus(`LAN failed: ${err.message}. Run "npm run lan-server" on this PC first.`);
+      this._showMainMenu();
+    }
+  }
+
+  async _startLanJoin() {
+    this._setLanStatus('Connecting…');
+    const url = this._lanUrlFromInput();
+    try {
+      const lan = new LanSession(this, {
+        isHost: false,
+        playerId: null,
+        playerName: 'Guest',
+        url,
+      });
+      await lan.connect();
+      this.lan = lan;
+
+      const boot = async (seed) => {
+        this._setLanStatus('');
+        this._hideMainMenu();
+        await this._bootGame({ worldSeed: seed }, { lan });
+      };
+
+      if (lan.sessionSeed != null) {
+        await boot(lan.sessionSeed);
+      } else {
+        this._setLanStatus('Connected — waiting for host to start…');
+        lan.onStart(boot);
+      }
+    } catch (err) {
+      console.error(err);
+      this.lan?.disconnect();
+      this.lan = null;
+      this._setLanStatus(`Could not join: ${err.message}`);
+    }
   }
 
   _requestNewGame() {
@@ -384,7 +475,7 @@ class Game {
       return;
     }
     if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
-    if (e.code === 'KeyE') this._tryInteract();
+    if (e.code === 'KeyE' && this.mobile) this._tryInteract();
     if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
     if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
   }
@@ -406,6 +497,8 @@ class Game {
 
   _bindEvents() {
     this.el.newGameBtn?.addEventListener('click', () => this._requestNewGame());
+    this.el.hostLanBtn?.addEventListener('click', () => this._startLanHost());
+    this.el.joinLanBtn?.addEventListener('click', () => this._startLanJoin());
     this.el.loadGameBtn?.addEventListener('click', () => this._startLoadGame());
     this.el.resumeBtn?.addEventListener('click', () => this._hidePauseMenu());
     this.el.saveGameBtn?.addEventListener('click', () => {
@@ -430,9 +523,13 @@ class Game {
         this.audio.resume();
         if (!this.paused) this.mouseDown = true;
       } else if (e.button === 2 && this.running && !this.paused && !this.inventoryUI?.isOpen()) {
-        if (!this._tryToggleNearbyDoor()) {
-          const chest = this._getChestUnderCursor();
-          if (chest) this.inventoryUI.openChest(chest);
+        if (this._tryPickupGroundDrop()) {
+          /* hovered ground drop takes priority over chest / door */
+        } else if (!this._tryToggleNearbyDoor()) {
+          const container = this._getLootContainerUnderCursor();
+          if (container) {
+            this.inventoryUI.openChest(container);
+          }
         }
       }
     });
@@ -579,6 +676,46 @@ class Game {
     return s.x >= -pad && s.x <= INTERNAL_W + pad && s.y >= -pad && s.y <= INTERNAL_H + pad;
   }
 
+  _refreshAimVisibility() {
+    if (!this.player || !this.running || !this.world) {
+      this._aimVisPoly = null;
+      return;
+    }
+    const cam = this._camera();
+    const viewHalfW = INTERNAL_W / PPU / 2 + TILE;
+    const viewHalfH = INTERNAL_H / PPU / 2 + TILE;
+    const viewMinX = cam.x - viewHalfW;
+    const viewMaxX = cam.x + viewHalfW;
+    const viewMinZ = cam.z - viewHalfH;
+    const viewMaxZ = cam.z + viewHalfH;
+    const insideBuilding = this.buildings?.insideBuilding;
+    const visibleBuildings = this.buildings?.collectInView(viewMinX, viewMaxX, viewMinZ, viewMaxZ) ?? [];
+    const visOrigin = resolveVisionOrigin(this.world, this.player.x, this.player.z, insideBuilding);
+    const visSegs = collectVisionSegments(
+      this.world,
+      visibleBuildings,
+      viewMinX,
+      viewMaxX,
+      viewMinZ,
+      viewMaxZ,
+      insideBuilding,
+    );
+    this._aimVisPoly = computeVisibilityPolygon(
+      visOrigin.x,
+      visOrigin.z,
+      visSegs,
+      viewMinX,
+      viewMaxX,
+      viewMinZ,
+      viewMaxZ,
+    );
+  }
+
+  _isRobotVisibleToPlayer(robot) {
+    if (!this._aimVisPoly) return true;
+    return pointInVisibilityPolygon(robot.x, entityFeetZ(robot), this._aimVisPoly);
+  }
+
   _findNearestRobotOnScreen() {
     let best = null;
     let bestDist = Infinity;
@@ -590,6 +727,7 @@ class Game {
     for (const robot of this.robots) {
       if (!robot.alive && !robot.emerging) continue;
       if (!this._isWorldOnScreen(robot.x, robot.z)) continue;
+      if (!this._isRobotVisibleToPlayer(robot)) continue;
       const dx = robot.x - this.player.x;
       const dz = robot.z - this.player.z;
       const dist = Math.hypot(dx, dz);
@@ -802,7 +940,13 @@ class Game {
     return z + 0.04;
   }
 
-  async _bootGame(saveData = null) {
+  async _bootGame(saveData = null, bootOpts = null) {
+    if (bootOpts?.lan) {
+      this.lan = bootOpts.lan;
+    } else {
+      this.lan?.disconnect();
+      this.lan = null;
+    }
     this.audio.init();
     this.audio.resume();
 
@@ -810,6 +954,8 @@ class Game {
 
     if (saveData?.worldSeed != null) {
       setWorldSeed(saveData.worldSeed);
+    } else if (bootOpts?.lan?.sessionSeed != null) {
+      setWorldSeed(bootOpts.lan.sessionSeed);
     } else {
       rollWorldSeed();
     }
@@ -831,6 +977,8 @@ class Game {
     this.chunkEntities.reset();
     this.items = new ItemManager(this.world);
     this.chests = new ChestManager(this.world);
+    this.corpses = new CorpseManager(this.world);
+    this.groundDrops = new GroundDropManager(this.world);
     this.buildings = new BuildingManager(this.world, this.chests);
     this.particles = [];
     this.dayNight = new DayNightCycle();
@@ -903,13 +1051,13 @@ class Game {
   _update(dt, time) {
     if (this.paused) return;
 
+    this.lan?.tick(dt, this);
+
     const inventoryOpen = this.inventoryUI?.isOpen();
     this.dayNight?.update(dt);
     this.buildings?.update(this.player, dt);
 
     if (!inventoryOpen) {
-      this.player.updateMobility(time);
-
       const { moveX: rawMoveX, moveZ: rawMoveZ } = this._getMoveInput();
       let moveX = rawMoveX;
       let moveZ = rawMoveZ;
@@ -928,14 +1076,15 @@ class Game {
           this.player.moveDirX = moveX / len;
           this.player.moveDirZ = moveZ / len;
         }
-        let sprint;
+        let wantsSprint;
         if (this.mobile && usingStick) {
-          sprint = stickMag > 0.9 && isMovingForward(this.player);
+          wantsSprint = stickMag > 0.9 && isMovingForward(this.player);
         } else {
-          sprint = sprintInput && isMovingForward(this.player);
+          wantsSprint = sprintInput && isMovingForward(this.player);
         }
-        const speed = this.player.speed * (sprint ? this.player.sprintMult : 1) * this.player.getSpeedMult(time);
-        this.player.isSprinting = sprint;
+        const walkSpeed = this.player.speed * this.player.getSpeedMult(time);
+        const sprintSpeed = walkSpeed * this.player.sprintMult;
+        const speed = wantsSprint ? sprintSpeed : walkSpeed;
         const analog = Math.min(1, len);
         moveX = (moveX / len) * speed * dt * analog;
         moveZ = (moveZ / len) * speed * dt * analog;
@@ -954,6 +1103,51 @@ class Game {
         );
         this.player.x = r.x;
         this.player.z = r.z;
+        applyApproachPush(
+          this.player,
+          playerPrevX,
+          playerPrevZ,
+          this.player.x,
+          this.player.z,
+          this.player.radius,
+          targets,
+          0.42,
+        );
+      }
+
+      if (Math.abs(this.player.knockVX) > 0.08 || Math.abs(this.player.knockVZ) > 0.08) {
+        const knockTargets = collectCollisionTargets({ player: this.player, robots: this.robots, exclude: this.player });
+        const moveShape = this.player.getMoveCollider(PPU);
+        const kr = moveWithEntityCollision(
+          this.world,
+          this.player.x,
+          this.player.z,
+          this.player.knockVX * dt,
+          this.player.knockVZ * dt,
+          moveShape,
+          moveShape,
+          knockTargets,
+          this.player,
+        );
+        this.player.x = kr.x;
+        this.player.z = kr.z;
+        const friction = Math.exp(-11 * dt);
+        this.player.knockVX *= friction;
+        this.player.knockVZ *= friction;
+      } else {
+        this.player.knockVX = 0;
+        this.player.knockVZ = 0;
+      }
+
+      const locomotion = updateLocomotion(playerPrevX, playerPrevZ, this.player.x, this.player.z, dt);
+      this.player.isMoving = locomotion.moving;
+      this.player.moveSpeed = locomotion.speed;
+
+      if (this.player.isMoving) {
+        const walkSpeed = this.player.speed * this.player.getSpeedMult(time);
+        const sprintSpeed = walkSpeed * this.player.sprintMult;
+        this.player.isSprinting = isSprintAnimSpeed(this.player.moveSpeed, walkSpeed, sprintSpeed);
+
         const walkRate = this.player.isSprinting ? 9 : 6;
         this.player.walkPhase += dt * walkRate;
 
@@ -985,9 +1179,8 @@ class Game {
         this._lastBounceLand = -1;
       }
 
-      this.player.isMoving = wantsMove && didDisplace(playerPrevX, playerPrevZ, this.player.x, this.player.z);
-
       this._updateCameraFollow(dt);
+      this._refreshAimVisibility();
       this._syncAim(dt);
 
       const fireEdge = this.mouseDown && !this.prevMouseDown;
@@ -996,12 +1189,19 @@ class Game {
         ? this.mouseDown
         : fireEdge;
 
-      if (this.player.isMeleeActive()) {
-        if (this.mouseDown && this.player.canMeleeCharge(time)) {
-          this.player.startMeleeCharge(time);
-        }
-        if (fireRelease && this.player.isMeleeCharging()) {
-          this.player.releaseMeleeCharge(time);
+      if (this.player.usesMeleeCombat()) {
+        const melee = this.player.getActiveMelee();
+        if (melee?.noCharge) {
+          if (fireEdge && this.player.canMeleeCharge(time)) {
+            this.player.startInstantMeleeSwing(time);
+          }
+        } else if (this.player.isMeleeActive()) {
+          if (this.mouseDown && this.player.canMeleeCharge(time)) {
+            this.player.startMeleeCharge(time);
+          }
+          if (fireRelease && this.player.isMeleeCharging()) {
+            this.player.releaseMeleeCharge(time);
+          }
         }
         this._updateMeleeStrike(time);
       } else if (wantsShoot) {
@@ -1016,6 +1216,7 @@ class Game {
     } else {
       this.player.isMoving = false;
       this.player.isSprinting = false;
+      this.player.moveSpeed = 0;
       this.player.moveDirX = 0;
       this.player.moveDirZ = 0;
       this._lastWalkStep = -1;
@@ -1038,6 +1239,7 @@ class Game {
     for (const robot of this.robots) {
       robot.update(dt, this.player, this.world, this.robots, (r) => {
         if (this.player.takeDamage(r.meleeDamage, time)) {
+          this.player.applyMeleeKnockback(r.x, r.z, 2.2 + r.meleeDamage * 0.04);
           this.audio.playerHurt();
           this.el.damageFlash.classList.add('active');
           setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
@@ -1106,6 +1308,9 @@ class Game {
     updateParticles(this.particles, dt, this.world, {
       onCasingLand: () => this.audio.casingLand(),
     });
+    this.corpses?.update(dt, time, (x, z) => {
+      this.particles.push(...createRobotSmoke(x, z - 0.15, 0.22));
+    });
   }
 
   _enemyShoot(robot, angle, damage = 10) {
@@ -1129,15 +1334,90 @@ class Game {
     if (bullet) bullet.active = false;
     if (!robot.alive) {
       this.kills++;
+      const time = performance.now() / 1000;
+      this.corpses.spawnFromRobot(robot, time);
+      const idx = this.robots.indexOf(robot);
+      if (idx >= 0) this.robots.splice(idx, 1);
       this.audio.explosion();
-      const spread = robot.radius * 1.35;
       this.particles.push(...createExplosion(robot.x, robot.z));
-      this.particles.push(...createRobotDeathFx(robot.x, robot.z, spread));
+      this.particles.push(...createRobotDeathFx(robot.x, robot.z, robot.radius * 1.1));
+      this.particles.push(...createRobotSmoke(robot.x, robot.z, 0.55));
     }
   }
 
   _chestScreenPos(chest) {
     return this._worldToScreen(chest.x, chest.z);
+  }
+
+  _corpseScreenPos(corpse) {
+    return this._worldToScreen(corpse.x, corpse.z);
+  }
+
+  _getNearbyCorpse() {
+    if (!this.corpses?.corpses?.length) return null;
+    return this.corpses.getNearby(this.player);
+  }
+
+  _getHoveredCorpse() {
+    if (!this.corpses?.corpses?.length) return null;
+    let best = null;
+    let bestD = Infinity;
+    for (const corpse of this.corpses.corpses) {
+      const s = this._corpseScreenPos(corpse);
+      const dx = this.mouse.sx - s.x;
+      const dy = this.mouse.sy - s.y;
+      const hitR = 18;
+      const d = dx * dx + dy * dy;
+      if (d > hitR * hitR) continue;
+      if (d < bestD) {
+        bestD = d;
+        best = corpse;
+      }
+    }
+    return best;
+  }
+
+  _getLootContainerUnderCursor() {
+    const corpse = this._getHoveredCorpse();
+    if (corpse && this.corpses.isInInteractRange(this.player, corpse)) return corpse;
+    const chest = this._getChestUnderCursor();
+    if (chest && this.chests.isInInteractRange(this.player, chest)) return chest;
+    return null;
+  }
+
+  _getHoveredGroundDrop() {
+    if (!this.groundDrops?.drops?.length) return null;
+    return this.groundDrops.getHovered(this.mouse, this);
+  }
+
+  _getNearbyGroundDrop() {
+    if (!this.groundDrops?.drops?.length) return null;
+    return this.groundDrops.getNearby(this.player);
+  }
+
+  _tryPickupGroundDrop(drop = null) {
+    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    const target = drop
+      ?? this._getHoveredGroundDrop()
+      ?? (this.mobile ? this._getNearbyGroundDrop() : null);
+    if (!target || !this.groundDrops.isInPickupRange(this.player, target)) return false;
+    const result = this.player.tryStoreItem(target.item);
+    if (!result.ok) {
+      this.items.setPickupMsg('Inventory full', { error: true, duration: 1.8 });
+      return false;
+    }
+    if (result.remainder) {
+      target.item = result.remainder;
+    } else {
+      this.groundDrops.remove(target);
+    }
+    this.audio.inventoryPlace();
+    this.inventoryUI?.render();
+    return true;
+  }
+
+  _tryDropFromInventoryDrag(e, stashedItem) {
+    return this.inventoryUI?.tryDropOnGround(e, stashedItem) ?? false;
   }
 
   _getNearbyDoor() {
@@ -1189,7 +1469,10 @@ class Game {
 
   _tryInteract() {
     if (this._tryToggleNearbyDoor()) return true;
-    return this._tryOpenNearbyChest();
+    if (this._tryPickupGroundDrop()) return true;
+    if (this._tryOpenNearbyChest()) return true;
+    if (this._tryOpenNearbyCorpse()) return true;
+    return false;
   }
 
   _getNearbyChest() {
@@ -1204,6 +1487,14 @@ class Game {
     const chest = this._getNearbyChest();
     if (!chest) return false;
     this.inventoryUI.openChest(chest);
+    return true;
+  }
+
+  _tryOpenNearbyCorpse() {
+    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    const corpse = this._getNearbyCorpse();
+    if (!corpse || !this.corpses.isInInteractRange(this.player, corpse)) return false;
+    this.inventoryUI.openChest(corpse);
     return true;
   }
 
@@ -1239,11 +1530,17 @@ class Game {
     const door = this._getInteractDoor();
     const nearbyChest = this._getNearbyChest();
     const hoveredChest = this._getHoveredChest();
+    const nearbyCorpse = this._getNearbyCorpse();
+    const hoveredCorpse = this._getHoveredCorpse();
     const canDoor = !!door;
     const canChestMobile = this.mobile && nearbyChest && !door;
     const canChestDesktop = !this.mobile && hoveredChest
       && this.chests.isInInteractRange(this.player, hoveredChest);
     const canChest = canChestMobile || canChestDesktop;
+    const canCorpseMobile = this.mobile && nearbyCorpse && !door && !canChest;
+    const canCorpseDesktop = !this.mobile && hoveredCorpse
+      && this.corpses.isInInteractRange(this.player, hoveredCorpse);
+    const canCorpse = (canCorpseMobile || canCorpseDesktop) && !canChest;
 
     if (canDoor) {
       return {
@@ -1262,6 +1559,28 @@ class Game {
           halfW: Math.round(CHEST_OPAQUE_HALF_W * SPRITE_CHEST) + 4,
           halfH: Math.round(CHEST_OPAQUE_HALF_H * SPRITE_CHEST) + 6,
         },
+      };
+    }
+    if (canCorpse) {
+      const corpse = canCorpseDesktop ? hoveredCorpse : nearbyCorpse;
+      const s = this._corpseScreenPos(corpse);
+      return {
+        kind: 'corpse',
+        box: { x: s.x, y: s.y, halfW: 16, halfH: 14 },
+      };
+    }
+    const hoveredDrop = this._getHoveredGroundDrop();
+    const nearbyDrop = this._getNearbyGroundDrop();
+    const canDropMobile = this.mobile && nearbyDrop && !door && !canChest && !canCorpse;
+    const canDropDesktop = !this.mobile && hoveredDrop
+      && this.groundDrops.isInPickupRange(this.player, hoveredDrop);
+    const canPickupDrop = (canDropMobile || canDropDesktop) && !canChest && !canCorpse;
+    if (canPickupDrop) {
+      const drop = canDropDesktop ? hoveredDrop : nearbyDrop;
+      const s = this._worldToScreen(drop.x, drop.z);
+      return {
+        kind: 'drop',
+        box: { x: s.x, y: s.y - 4, halfW: 12, halfH: 10 },
       };
     }
     return null;
@@ -1444,7 +1763,7 @@ class Game {
 
   _getCursorSprite() {
     if (!this.player) return 'cursor';
-    if (this.player.isMeleeActive()) return 'cursor_melee';
+    if (this.player.isMeleeActive() || this.player.isUnarmed()) return 'cursor_melee';
     if (this.player.weaponKey === 'm870') return 'cursor_shotgun';
     return 'cursor';
   }
@@ -1530,7 +1849,7 @@ class Game {
   }
 
   _isShotFlashFrame(drawTime, weaponDraw) {
-    if (this.player.isMeleeActive() || drawTime >= this.player.shotFlashUntil) return false;
+    if (this.player.isMeleeActive() || this.player.isUnarmed() || drawTime >= this.player.shotFlashUntil) return false;
     const cfg = WEAPONS[this.player.weaponKey];
     return !!(cfg?.shotSprite && weaponDraw.sheet === cfg.shotSprite);
   }
@@ -1548,17 +1867,25 @@ class Game {
         : null;
     const reloadPose = getReloadPoseBlend(this.player, drawTime);
 
-    if (this.player.isMeleeActive()) {
-      const drop = this.player.getMeleeSwingDrop(drawTime);
-      const bladeTilt = this.player.getMeleeBladeTilt(drawTime);
-      const meleePose = getMeleeHoldPose(this.player, lunge);
+    if (this.player.isMeleeActive() || this.player.isUnarmed()) {
+      const isHand = !!this.player.getActiveMelee()?.noCharge;
+      const punchExtend = isHand
+        ? this.player.getMeleeSwingLunge(drawTime)
+        : lunge;
+      const drop = isHand ? 0 : this.player.getMeleeSwingDrop(drawTime);
+      const bladeTilt = isHand ? 0 : this.player.getMeleeBladeTilt(drawTime);
+      const meleePose = isHand
+        ? getHandHoldPose(this.player, punchExtend)
+        : getMeleeHoldPose(this.player, lunge);
       const meleeOffX = Math.round((meleePose.worldX - this.player.x) * PPU);
       const meleeOffY = Math.round((meleePose.worldZ - this.player.z) * PPU);
+      const bodyBounce = Math.round(getPlayerBounceY(this.player));
+      const handBounce = isHand && this.player.isMoving ? -bodyBounce : bodyBounce;
       return {
         isMelee: true,
         isShotFlash: false,
         sx: playerGs.x + meleeOffX,
-        sy: playerGs.y + meleeOffY + drop + playerBounce + idleBreath,
+        sy: playerGs.y + meleeOffY + drop + handBounce + idleBreath,
         aimAngle: meleePose.angle,
         aimFlip: meleePose.flipX,
         pivot: 'shoulder',
@@ -1778,21 +2105,21 @@ class Game {
       for (const wall of building.walls) {
         const drawWall = () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites);
         if (wallDrawsInFront(wall, playerSortZ, playerInside, playerX, playerZ, building)) continue;
-        const sortBias = wall.extendNorth ? 1 : 0;
+        const sortBias = SORT_WALL_BACK;
         const wallZ = wallBackDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building);
         drawList.push({ z: wallZ, sortBias, draw: drawWall });
       }
       if (!doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
         drawList.push({
           z: doorBackDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
-          sortBias: 0,
+          sortBias: SORT_WALL_BACK,
           draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
         });
       }
       for (const piece of building.decor ?? []) {
         drawList.push({
           z: piece.sortZ,
-          sortBias: piece.sortBias ?? 1,
+          sortBias: piece.sortBias ?? SORT_ENTITY,
           draw: () => drawDecorPiece(ctx, this.sprites, piece, tilePx, worldToScreen),
         });
       }
@@ -1809,24 +2136,31 @@ class Game {
       return true;
     });
     for (const f of ysortFoliage) {
-      drawList.push({
-        z: f.sortZ ?? f.z,
-        sortBias: 0,
-        draw: () => {
-          const s = this._worldToScreen(f.x, f.z);
-          const size = tilePx * (f.drawSize ?? 1);
-          const feetX = Math.round(s.x);
-          const feetY = Math.round(s.y);
-          if (isTreeFoliage(f.kind)) {
+      const sortZ = f.sortZ ?? f.z;
+      if (isTreeFoliage(f.kind)) {
+        drawList.push({
+          z: sortZ,
+          sortBias: SORT_SHADOW,
+          draw: () => {
+            const s = this._worldToScreen(f.x, f.z);
+            const size = tilePx * (f.drawSize ?? 1);
             drawPixelEllipseShadow(
               ctx,
-              feetX,
-              feetY,
+              Math.round(s.x),
+              Math.round(s.y),
               size * 0.36,
               size * 0.13,
               tilePx,
             );
-          }
+          },
+        });
+      }
+      drawList.push({
+        z: sortZ,
+        sortBias: SORT_WALL_BACK,
+        draw: () => {
+          const s = this._worldToScreen(f.x, f.z);
+          const size = tilePx * (f.drawSize ?? 1);
           const tint = f.tintKey ? unpackTintGradient(f.tintKey) : null;
           const drawX = Math.round(s.x - size * 0.5);
           const drawY = Math.round(s.y - size);
@@ -1835,7 +2169,7 @@ class Game {
       });
     }
     for (const chest of this.chests.chests) {
-      drawList.push({ z: chest.z, sortBias: 1, draw: () => {
+      drawList.push({ z: chest.z, sortBias: SORT_ENTITY, draw: () => {
         const s = this._chestScreenPos(chest);
         this.sprites.draw(
           ctx,
@@ -1849,12 +2183,99 @@ class Game {
         );
       }});
     }
+    for (const corpse of this.corpses?.corpses ?? []) {
+      const corpseScale = CORPSE_DRAW_SCALE * (getEnemyDrawScale(corpse.type) / getEnemyDrawScale('spider'));
+      const corpseSortZ = this.corpses.sortZ(corpse);
+      drawList.push({ z: corpseSortZ, sortBias: SORT_ENTITY, draw: () => {
+        const s = this._corpseScreenPos(corpse);
+        this.sprites.draw(
+          ctx,
+          corpseSpriteName(corpse.type),
+          s.x,
+          s.y,
+          corpseScale,
+          0,
+          false,
+          'center',
+        );
+      }});
+    }
+    const dropDrawTime = performance.now() / 1000;
+    for (const drop of this.groundDrops?.drops ?? []) {
+      const bob = Math.sin(dropDrawTime * 2.4 + drop.bobPhase) * 1.1;
+      drawList.push({ z: drop.sortZ, sortBias: SORT_ENTITY, draw: () => {
+        const s = this._worldToScreen(drop.x, drop.z);
+        drawPixelEllipseShadow(
+          ctx,
+          Math.round(s.x),
+          Math.round(s.y),
+          GROUND_DROP_DISPLAY_PX * 0.45,
+          GROUND_DROP_DISPLAY_PX * 0.15,
+          tilePx,
+        );
+        this.sprites.drawGroundItem(
+          ctx,
+          drop.sprite,
+          s.x,
+          s.y,
+          GROUND_DROP_DISPLAY_PX,
+          bob,
+          GROUND_DROP_RES_PX,
+        );
+        this.sprites.drawGroundItemLabel(ctx, drop.label, s.x, s.y, bob, GROUND_DROP_DISPLAY_PX);
+      }});
+    }
     for (const robot of this.robots) {
       if (!robot.alive && !robot.emerging) continue;
       const enemyNativePx = getEnemyNativePx(robot.type);
       const enemyDrawScale = getEnemyDrawScale(robot.type);
       const robotSortZ = this._feetSortZ(robot.x, robot.z, enemyNativePx, enemyDrawScale);
-      drawList.push({ z: robotSortZ, sortBias: 1, draw: () => {
+      const isSpider = robot.type === 'spider';
+      const isScout = robot.type === 'scout';
+      drawList.push({ z: robotSortZ, sortBias: SORT_SHADOW, draw: () => {
+        if (!robot.alive && !robot.emerging) return;
+        const emerge = robot.getEmergeT();
+        const shadowLift = isScout ? 4 : (isSpider ? 4 : 0);
+        const shadowRx = (isScout ? 15 : 10) * emerge;
+        const shadowRy = (isScout ? 5.5 : 4) * emerge;
+        if (shadowRx < 2 || shadowRy < 2) return;
+        let visMul = 1;
+        if (useVisFog && visPoly) {
+          const inVis = pointInVisibilityPolygon(robot.x, entityFeetZ(robot), visPoly);
+          const target = inVis ? 1 : 0;
+          if (robot._visAlpha == null) robot._visAlpha = target;
+          visMul = robot._visAlpha;
+        }
+        if (visMul <= 0.06) return;
+        const shake = robot.getEmergeShake();
+        const s = this._worldToScreen(robot.x, robot.z);
+        const bury = (1 - emerge) * 32;
+        const enemyDrawScale = getEnemyDrawScale(robot.type);
+        const scale = enemyDrawScale * (0.15 + emerge * 0.85);
+        const chargeShake = robot.jump?.charging
+          ? Math.sin(performance.now() / 1000 * 28) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
+          : 0;
+        const drawX = Math.round(s.x + shake.x + chargeShake);
+        const shootPhase = robot.shoot?.phase ?? null;
+        const robotMoving = robot.moving && !robot.emerging
+          && shootPhase !== 'charging' && shootPhase !== 'firing';
+        const scoutChaseWalk = isScout && robot.chasing && robotMoving;
+        const scoutWalkMult = scoutChaseWalk ? 1.75 : 1;
+        const walkBounce = isScout
+          ? getScoutWalkBounceY(performance.now() / 1000 * scoutWalkMult, robotMoving && !robot.jump?.active && !robot.jump?.charging)
+          : getWalkBounceY(robot.walkPhase, robotMoving && !robot.jump?.active && !robot.jump?.charging);
+        const walkBouncePx = Math.round(walkBounce);
+        const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
+        const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
+        const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
+        const anchorY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob);
+        const feetY = Math.round(anchorY + spriteFeetOffset(enemyNativePx, scale) + walkBouncePx);
+        ctx.save();
+        ctx.globalAlpha = visMul;
+        drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx);
+        ctx.restore();
+      }});
+      drawList.push({ z: robotSortZ, sortBias: SORT_ENTITY, draw: () => {
         const drawTime = performance.now() / 1000;
         const emerge = robot.getEmergeT();
         const shake = robot.getEmergeShake();
@@ -1882,7 +2303,6 @@ class Game {
         const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
         const anchorY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob);
         const drawY = anchorY + walkBouncePx;
-        const feetY = Math.round(anchorY + spriteFeetOffset(enemyNativePx, scale));
         if (robot.emerging) {
           const hole = 1 - emerge;
           ctx.fillStyle = `rgba(18, 14, 10, ${0.55 * hole})`;
@@ -1901,16 +2321,6 @@ class Game {
           robot._visAlpha += (1 - robot._visAlpha) * visFadeStep;
           visMul = robot._visAlpha;
         }
-        const isSpider = robot.type === 'spider';
-        const shadowLift = isScout ? 4 : (isSpider ? 4 : 0);
-        const shadowRx = (isScout ? 15 : 10) * emerge;
-        const shadowRy = (isScout ? 5.5 : 4) * emerge;
-        if (shadowRx >= 2 && shadowRy >= 2 && visMul > 0.06) {
-          ctx.save();
-          ctx.globalAlpha = visMul;
-          drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx);
-          ctx.restore();
-        }
         const bodySheet = getEnemyBodySheet(robot.type, robotMoving, shootPhase);
         const bodyAnim = getEnemyBodyAnim(
           robot.type,
@@ -1918,7 +2328,9 @@ class Game {
           shootPhase,
           drawTime,
           robot.shoot?.animStart,
-          { walkSpeedMult: scoutWalkMult },
+          isScout
+            ? { walkSpeedMult: scoutWalkMult }
+            : { walkPhase: robot.walkPhase },
         );
         ctx.globalAlpha = (0.3 + emerge * 0.7) * visMul;
         this.sprites.draw(
@@ -1933,6 +2345,22 @@ class Game {
           0,
           bodyAnim,
         );
+        const statusIcon = getEnemyStatusIcon(robot);
+        if (statusIcon && emerge > 0.85) {
+          const headLift = Math.round(spriteFeetOffset(enemyNativePx, scale) + walkBouncePx);
+          const iconY = drawY - headLift - 14;
+          const bob = Math.sin(drawTime * 4.5 + robot.x) * 1.5;
+          this.sprites.draw(
+            ctx,
+            statusIcon,
+            drawX,
+            iconY + bob,
+            ENEMY_STATUS_ICON_SCALE,
+            0,
+            false,
+            'center',
+          );
+        }
         ctx.globalAlpha = 1;
       }});
     }
@@ -1942,14 +2370,61 @@ class Game {
     const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
     const idleBreath = Math.round(this._weaponBreathY ?? 0);
     const playerAnim = getPlayerAnim(this.player, drawTime);
-    drawList.push({ z: playerSortZ, sortBias: 1, draw: () => {
+    drawList.push({ z: playerSortZ, sortBias: SORT_SHADOW, draw: () => {
       const s = this._worldToScreen(this.player.x, this.player.z);
       const feetY = Math.round(s.y + playerBounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
       drawPixelEllipseShadow(ctx, s.x, feetY, 10, 4, tilePx);
+    }});
+    if (this.lan) {
+      for (const peer of this.lan.remoteDrawList()) {
+        const px = peer._renderX ?? peer.x;
+        const pz = peer._renderZ ?? peer.z;
+        const peerSortZ = this._feetSortZ(px, pz, CHAR_NATIVE_PX, SPRITE_PLAYER);
+        const peerBounce = Math.round(getWalkBounceY(peer.walkPhase ?? 0, true));
+        const peerFlip = getFlipXFromAngle(peer._renderAngle ?? peer.angle);
+        drawList.push({
+          z: peerSortZ,
+          sortBias: SORT_SHADOW,
+          draw: () => {
+            const s = this._worldToScreen(px, pz);
+            const feetY = Math.round(s.y + peerBounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
+            drawPixelEllipseShadow(ctx, s.x, feetY, 10, 4, tilePx);
+          },
+        });
+        drawList.push({
+          z: peerSortZ,
+          sortBias: SORT_ENTITY,
+          draw: () => {
+            const s = this._worldToScreen(px, pz);
+            const fakePlayer = {
+              isMoving: peer.isMoving,
+              isSprinting: peer.isSprinting,
+              moveDirX: peer.moveDirX,
+              moveDirZ: peer.moveDirZ,
+              angle: peer._renderAngle ?? peer.angle,
+              weaponSlot: 'gun',
+              weaponKey: 'glock',
+            };
+            const sheet = getPlayerSheet(fakePlayer, drawTime);
+            const anim = getPlayerAnim(fakePlayer, drawTime);
+            ctx.save();
+            ctx.globalAlpha = 0.92;
+            this.sprites.draw(ctx, sheet, s.x, s.y + peerBounce, SPRITE_PLAYER, 0, peerFlip, 'center', 0, anim);
+            ctx.fillStyle = '#a8d4ff';
+            ctx.font = '8px "Press Start 2P", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(peer.name ?? 'Player', s.x, s.y + peerBounce - 28);
+            ctx.restore();
+          },
+        });
+      }
+    }
+    drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, draw: () => {
+      const s = this._worldToScreen(this.player.x, this.player.z);
       this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim);
     }});
     const gunClip = insideBuilding ? buildingGunClipBounds(insideBuilding) : null;
-    drawList.push({ z: playerSortZ + 0.02, sortBias: 2, draw: () => {
+    drawList.push({ z: playerSortZ + 0.02, sortBias: SORT_GUN, draw: () => {
       const pose = this._getGunScreenPose(drawTime);
       this._drawWeaponSprite(ctx, pose, gunClip);
     }});
@@ -1959,14 +2434,14 @@ class Game {
         if (!wallDrawsInFront(wall, playerSortZ, playerInside, playerX, playerZ, building)) continue;
         drawList.push({
           z: wallFrontDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building),
-          sortBias: 6,
+          sortBias: SORT_WALL_FRONT,
           draw: () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites),
         });
       }
       if (doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
         drawList.push({
           z: doorFrontDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
-          sortBias: 6,
+          sortBias: SORT_WALL_FRONT,
           draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
         });
       }
@@ -1986,7 +2461,7 @@ class Game {
       }
       drawList.push({
         z: sortZ,
-        sortBias: 1,
+        sortBias: SORT_ENTITY,
         draw: () => {
           const visMul = this._visibilityMul(p.x, p.z, useVisFog, visPoly);
           this._drawParticle(ctx, p, visMul);
@@ -1998,7 +2473,7 @@ class Game {
       const bulletZ = bulletDrawSortZ(b.x, b.z, visibleBuildings);
       drawList.push({
         z: bulletZ,
-        sortBias: 1,
+        sortBias: SORT_ENTITY,
         draw: () => {
           if (this._visibilityMul(b.x, b.z, useVisFog, visPoly) <= 0) return;
           this._drawBulletTrail(ctx, b);
@@ -2011,10 +2486,6 @@ class Game {
     }
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();
-
-if (useVisFog && visPoly) {
-  drawVisibilityOverlay(ctx, visPoly, worldToScreen, INTERNAL_W, INTERNAL_H, VISION_DARKNESS);
-}
 
     for (const building of visibleBuildings) {
       const alpha = this.buildings?.roofAlphaFor(building) ?? 1;
@@ -2049,8 +2520,9 @@ if (useVisFog && visPoly) {
   }
 
   _drawPlayerCooldown(ctx, time) {
-    if (!this.player || this.player.isMeleeActive()) return;
+    if (!this.player || this.player.isMeleeActive() || this.player.isUnarmed()) return;
     const gun = this.player.getWeapon();
+    if (!gun) return;
     const reloading = gun.reloading;
     const reloadP = this.player.getReloadProgress(time);
     const fireT = this.player.getFireCooldownT(time);
@@ -2120,8 +2592,8 @@ if (useVisFog && visPoly) {
     const hpPct = (this.player.health / this.player.maxHealth) * 100;
     this.el.healthBar.style.width = `${hpPct}%`;
     this.el.healthText.textContent = Math.ceil(this.player.health) + (this.player.shield > 0 ? ` (+${Math.ceil(this.player.shield)})` : '');
-    this.el.weaponName.textContent = w.name;
-    if (this.player.isMeleeActive()) {
+    this.el.weaponName.textContent = w?.name ?? 'Hand';
+    if (this.player.isMeleeActive() || this.player.isUnarmed()) {
       this.el.ammoCurrent.textContent = '—';
       this.el.ammoReserve.textContent = '—';
       this.el.ammoCurrent.style.color = '#e8e4dc';
@@ -2129,13 +2601,20 @@ if (useVisFog && visPoly) {
       this._drawAmmoHudIcon(null);
     } else {
       const gun = this.player.getWeapon();
-      const reserve = this.player.getReserveAmmo();
-      this.el.ammoCurrent.textContent = `${gun.ammo}/${gun.magSize}`;
-      this.el.ammoReserve.textContent = reserve;
-      this.el.ammoCurrent.style.color = gun.ammo === 0 ? '#ff4040' : '#e8e4dc';
-      this.el.ammoReserve.style.color = reserve > 0 ? '#8899aa' : '#556066';
-      this.el.reloadIndicator.classList.toggle('hidden', !gun.reloading);
-      this._drawAmmoHudIcon(getWeaponAmmoType(this.player.weaponKey));
+      if (!gun) {
+        this.el.ammoCurrent.textContent = '—';
+        this.el.ammoReserve.textContent = '0';
+        this.el.reloadIndicator.classList.add('hidden');
+        this._drawAmmoHudIcon(null);
+      } else {
+        const reserve = this.player.getReserveAmmo();
+        this.el.ammoCurrent.textContent = `${gun.ammo}/${gun.magSize}`;
+        this.el.ammoReserve.textContent = reserve;
+        this.el.ammoCurrent.style.color = gun.ammo === 0 ? '#ff4040' : '#e8e4dc';
+        this.el.ammoReserve.style.color = reserve > 0 ? '#8899aa' : '#556066';
+        this.el.reloadIndicator.classList.toggle('hidden', !gun.reloading);
+        this._drawAmmoHudIcon(getWeaponAmmoType(this.player.weaponKey));
+      }
     }
 
     const biome = getBiome(this.player.x, this.player.z);
@@ -2166,6 +2645,8 @@ if (useVisFog && visPoly) {
 
     const hoveredChest = this._getHoveredChest();
     const nearbyChest = this._getNearbyChest();
+    const hoveredCorpse = this._getHoveredCorpse();
+    const nearbyCorpse = this._getNearbyCorpse();
     const interactDoor = this._getInteractDoor();
     const canOpenChestDesktop = !this.inventoryUI.open
       && !this.mobile
@@ -2173,24 +2654,38 @@ if (useVisFog && visPoly) {
       && this.chests.isInInteractRange(this.player, hoveredChest);
     const canOpenChestMobile = !this.inventoryUI.open && this.mobile && nearbyChest && !interactDoor;
     const canOpenChest = canOpenChestDesktop || canOpenChestMobile;
+    const canOpenCorpseDesktop = !this.inventoryUI.open
+      && !this.mobile
+      && hoveredCorpse
+      && this.corpses.isInInteractRange(this.player, hoveredCorpse);
+    const canOpenCorpseMobile = !this.inventoryUI.open && this.mobile && nearbyCorpse && !interactDoor && !canOpenChest;
+    const canOpenCorpse = canOpenCorpseDesktop || canOpenCorpseMobile;
+    const hoveredDrop = this._getHoveredGroundDrop();
+    const nearbyDrop = this._getNearbyGroundDrop();
+    const canPickupDropDesktop = !this.inventoryUI.open
+      && !this.mobile
+      && hoveredDrop
+      && this.groundDrops.isInPickupRange(this.player, hoveredDrop);
+    const canPickupDropMobile = !this.inventoryUI.open && this.mobile && nearbyDrop && !interactDoor && !canOpenChest && !canOpenCorpse;
+    const canPickupDrop = canPickupDropDesktop || canPickupDropMobile;
     const canToggleDoor = !this.inventoryUI.open && interactDoor;
     const mbInteract = document.getElementById('mb-interact');
-    mbInteract?.classList.toggle('mb-nearby', canToggleDoor || canOpenChestMobile);
-    const showPrompt = canToggleDoor || canOpenChest;
+    mbInteract?.classList.toggle('mb-nearby', canToggleDoor || canOpenChestMobile || canOpenCorpseMobile || canPickupDropMobile);
+    const showPrompt = canToggleDoor || canOpenChest || canOpenCorpse || canPickupDrop;
     this.el.interactPrompt.classList.toggle('hidden', !showPrompt);
     if (showPrompt) {
       const doorVerb = interactDoor?.doorOpen ? 'close' : 'open';
       if (this.mobile) {
         this.el.interactPrompt.textContent = canToggleDoor
           ? `E to ${doorVerb} door`
-          : 'E to open';
+          : (canOpenCorpse ? 'E to loot' : (canPickupDrop ? 'E to pick up' : 'E to open'));
         this._positionInteractPromptAbovePlayer();
       } else {
         const mx = this.mouse.clientX;
         const my = this.mouse.clientY;
         this.el.interactPrompt.textContent = canToggleDoor
           ? `RMB to ${doorVerb} door`
-          : 'RMB to open';
+          : (canOpenCorpse ? 'RMB to loot' : (canPickupDrop ? 'RMB to pick up' : 'RMB to open'));
         this.el.interactPrompt.style.left = `${mx}px`;
         this.el.interactPrompt.style.top = `${my - 28}px`;
         this.el.interactPrompt.style.bottom = 'auto';
@@ -2202,8 +2697,6 @@ if (useVisFog && visPoly) {
       this.el.interactPrompt.style.bottom = '';
       this.el.interactPrompt.style.transform = '';
     }
-
-    this.minimap.render(this.player, this.robots, this.world, this.chests, this.buildings);
   }
 
   _checkGameOver() {
@@ -2213,6 +2706,8 @@ if (useVisFog && visPoly) {
   _endGame() {
     this.running = false;
     this.paused = false;
+    this.lan?.disconnect();
+    this.lan = null;
     const elapsed = (((this.playTimeBase ?? 0) + performance.now() - this.startTime) / 1000).toFixed(1);
     this.audio.lose();
     deleteSave();

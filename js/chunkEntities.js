@@ -23,6 +23,7 @@ export class ChunkEntityManager {
   reset() {}
 
   update(player) {
+    if (this.game.lan?.isClient) return;
     this._despawnFar(player);
     this._populateNearby(player);
   }
@@ -146,7 +147,11 @@ export class ChunkEntityManager {
       if (building.homeCx !== undefined && building.homeCz !== undefined) {
         clearedBuildingChunks.add(`${building.homeCx},${building.homeCz}`);
       }
-      if (building.chest) this.game.chests.remove(building.chest);
+      if (building.chests?.length) {
+        for (const chest of building.chests) this.game.chests.remove(chest);
+      } else if (building.chest) {
+        this.game.chests.remove(building.chest);
+      }
       this.game.buildings._unregisterObstacles(building);
     }
     this.game.buildings.buildings = nextBuildings;

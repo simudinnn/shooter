@@ -401,13 +401,7 @@ function pushFoliage(foliage, obstacles, tx, tz, wx, wz, fKey, jitterSalt = 0, t
 
 function pickFromVariants(tx, tz, salt, variants) {
   const s = salt | 0;
-  const h = hash01(
-    tx + s * 1009,
-    tz + s * 9176
-  );
-
-  const i = Math.floor(h * variants.length);
-  return variants[Math.max(0, Math.min(i, variants.length - 1))];
+  return variants[hash32(tx + s * 1009, tz + s * 9176) % variants.length];
 }
 
 function pickGrassVariant(tx, tz, salt = 0) {

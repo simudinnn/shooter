@@ -123,11 +123,6 @@ export class SoundManager {
       ],
       casingLand: [
       ],
-      jump: [
-        'sounds/jump-1.ogg',
-        'sounds/jump-2.ogg',
-        'sounds/jump-3.ogg',
-      ],
       regenStart: [
         'sounds/player/regen-start.ogg'
       ],
@@ -224,10 +219,6 @@ export class SoundManager {
     this.play('pickup', 0.75);
   }
 
-  mysteryOpen() {
-    this.play('mysteryOpen', 0.8);
-  }
-
   chestOpen() {
     this.play('chestOpen', 0.75);
   }
@@ -312,10 +303,6 @@ export class SoundManager {
 
     this._lastCasingLand = now;
     this.play('casingLand', 0.25, 0.95 + Math.random() * 0.15);
-  }
-
-  jump() {
-    this.play('jump', 0.6);
   }
 
   regenStart() {

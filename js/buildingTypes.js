@@ -84,13 +84,11 @@ export const BUILDING_MAX_W = 7;
 export const BUILDING_MAX_H = 5;
 
 export function rollBuildingSize(seedA, seedB) {
-  const idx = Math.floor(hash01(seedA, seedB) * BUILDING_SIZE_VARIANTS.length);
-  return BUILDING_SIZE_VARIANTS[idx];
+  return BUILDING_SIZE_VARIANTS[hash32(seedA, seedB) % BUILDING_SIZE_VARIANTS.length];
 }
 
 export function rollBuildingWidth(seedA, seedB) {
-  const idx = Math.floor(hash01(seedA, seedB) * BUILDING_WIDTH_VARIANTS.length);
-  return BUILDING_WIDTH_VARIANTS[idx];
+  return BUILDING_WIDTH_VARIANTS[hash32(seedA, seedB) % BUILDING_WIDTH_VARIANTS.length];
 }
 
 /** L/T depth so footprint width is always greater than height. */

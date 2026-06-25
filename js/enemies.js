@@ -1,5 +1,22 @@
-import { collectCollisionTargets, moveWithEntityCollision, didDisplace } from './collision.js';
-import { updateChaseNav, canMeleeTarget, ensureNavState } from './enemyNav.js';
+import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, didDisplace, MOTION_IDLE_EPS } from './collision.js';
+import {
+  updateChaseNav,
+  canMeleeTarget,
+  ensureNavState,
+  updateEnemySpotTimer,
+  shouldEnemyChase,
+  isEnemyAlert,
+  hasLostSightForGood,
+  clearEnemyCombatState,
+  getEnemyDetectRange,
+  updateEnemyLastKnown,
+  advanceEnemySearchPhase,
+  canEnemySeePlayer,
+  getEnemyStatusIcon,
+  ENEMY_ALERT_WANDER_SPEED,
+  SPIDER_DETECT_RANGE,
+  SCOUT_DETECT_RANGE,
+} from './enemyNav.js';
 import { getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset } from './sprites.js';
 import { PPU } from './renderConfig.js';
 
@@ -33,7 +50,11 @@ export class Robot {
       : 1.2 + Math.random() * 2.5;
     this.chasing = false;
     this.aggroByHit = false;
+    this.spotTimer = 0;
+    this.lostSightTimer = 0;
+    this._smoothMoveSpeed = 0;
     this.moving = false;
+    this.moveSpeed = 0;
     this.knockVX = 0;
     this.knockVZ = 0;
     this.stagger = 0;
@@ -56,6 +77,7 @@ export class Robot {
     };
     this.jumpCooldown = 0;
     this.jumpTryTimer = 0;
+    this._stuckTimer = 0;
   }
 
   get healthRatio() {
@@ -72,6 +94,18 @@ export class Robot {
       zOff: feetOff * 0.48,
       halfW: (nativePx * scale * 0.30) / PPU,
       halfH: (nativePx * scale * 0.26) / PPU,
+    };
+  }
+
+  /** Slightly larger than body — keeps distance from barrels/tables while moving. */
+  getMoveCollider() {
+    const col = this.getWorldCollider();
+    const pad = 0.24;
+    return {
+      kind: 'aabb',
+      zOff: col.zOff,
+      halfW: col.halfW + pad,
+      halfH: col.halfH + pad,
     };
   }
 
@@ -147,7 +181,7 @@ export class Robot {
     }
     const targets = collectCollisionTargets({ player, robots, exclude: this });
     const body = { kind: 'circle', radius: this.radius };
-    const worldCol = this.getWorldCollider();
+    const worldCol = this.getMoveCollider();
     const r = moveWithEntityCollision(
       world,
       this.x,
@@ -178,30 +212,37 @@ export class Robot {
     const len = Math.sqrt(vx * vx + vz * vz) || 1;
     const stepX = (vx / len) * this.speed * speedMult * dt;
     const stepZ = (vz / len) * this.speed * speedMult * dt;
+    const prevX = this.x;
+    const prevZ = this.z;
     const targets = collectCollisionTargets({ player, robots, exclude: this });
-    const body = { kind: 'circle', radius: this.radius };
-    const worldCol = this.getWorldCollider();
+    const worldCol = this.getMoveCollider();
     const r = moveWithEntityCollision(
       world,
       this.x,
       this.z,
       stepX,
       stepZ,
-      body,
+      worldCol,
       worldCol,
       targets,
       this,
     );
     this.x = r.x;
     this.z = r.z;
+    applyApproachPush(this, prevX, prevZ, this.x, this.z, this.radius, targets, 0.38);
+    this.x = r.x;
+    this.z = r.z;
+    const dep = world.depenetrateShape(this.x, this.z, worldCol);
+    this.x = dep.x;
+    this.z = dep.z;
   }
 
-  /** Pathfind toward player (or door) while chasing; returns false if aggro is dropped. */
+  /** Pathfind toward player (or door) while chasing; returns true if position changed. */
   _chaseMove(dt, player, world, robots, buildings, time) {
+    const prevX = this.x;
+    const prevZ = this.z;
     const nav = updateChaseNav(this, player, world, buildings, time);
     if (nav.forget) {
-      this.chasing = false;
-      this.aggroByHit = false;
       const n = ensureNavState(this);
       n.waypoints = null;
       n.unreachableSince = null;
@@ -210,26 +251,79 @@ export class Robot {
     const len = Math.hypot(nav.dirX, nav.dirZ) || 1;
     const steer = Math.atan2(nav.dirX / len, nav.dirZ / len) + (Math.random() - 0.5) * 0.08;
     this._move(dt, world, player, robots, Math.sin(steer), Math.cos(steer), 1);
-    return true;
+    const moved = didDisplace(prevX, prevZ, this.x, this.z, MOTION_IDLE_EPS * 3);
+    if (!moved && (nav.dirX * nav.dirX + nav.dirZ * nav.dirZ) > 0.04) {
+      this._stuckTimer = (this._stuckTimer ?? 0) + dt;
+      if (this._stuckTimer > 0.4) {
+        const n = ensureNavState(this);
+        n.waypoints = null;
+        n.lastPathAt = -99;
+        n.wpIdx = 0;
+        this._stuckTimer = 0;
+      }
+    } else {
+      this._stuckTimer = 0;
+    }
+    return moved;
+  }
+
+  /** Direct step toward the player when pathfinding stalls but we still have LOS. */
+  _directChaseMove(dt, world, player, robots, dx, dz, dist) {
+    if (dist < 0.08) return false;
+    const prevX = this.x;
+    const prevZ = this.z;
+    const nx = dx / dist;
+    const nz = dz / dist;
+    this._move(dt, world, player, robots, nx, nz, 1);
+    this.angle = Math.atan2(dx, dz);
+    return didDisplace(prevX, prevZ, this.x, this.z, MOTION_IDLE_EPS * 3);
+  }
+
+  /**
+   * Chase while hunting — path to player or last known point; alert wander after arrival.
+   */
+  _updateHuntMove(dt, player, world, robots, buildings, time, dx, dz, dist, canSee) {
+    if (isEnemyAlert(this)) {
+      return this._updateWander(dt, world, player, robots, ENEMY_ALERT_WANDER_SPEED, true);
+    }
+    let moved = this._chaseMove(dt, player, world, robots, buildings, time);
+    if (!moved && dist > 0.5 && canSee) {
+      moved = this._directChaseMove(dt, world, player, robots, dx, dz, dist);
+    }
+    return moved;
   }
 
   /** Idle / walk cycles while not chasing — pauses between direction changes. */
-  _updateWander(dt, world, player, robots, speedMult = 0.45) {
+  _updateWander(dt, world, player, robots, speedMult = 0.45, aggressive = false) {
     this.wanderTimer -= dt;
     if (this.wanderTimer <= 0) {
       if (this.wanderPhase === 'moving') {
         this.wanderPhase = 'idle';
-        this.wanderTimer = 0.7 + Math.random() * 2.2;
+        this.wanderTimer = aggressive
+          ? 0.12 + Math.random() * 0.35
+          : 0.7 + Math.random() * 2.2;
       } else {
         this.wanderPhase = 'moving';
-        this.wanderAngle += (Math.random() - 0.5) * 2.4;
-        this.wanderTimer = 1.4 + Math.random() * 3.2;
+        this.wanderAngle += (Math.random() - 0.5) * (aggressive ? 3.4 : 2.4);
+        this.wanderTimer = aggressive
+          ? 0.45 + Math.random() * 0.95
+          : 1.4 + Math.random() * 3.2;
       }
     }
     if (this.wanderPhase !== 'moving') return false;
     this._move(dt, world, player, robots, Math.sin(this.wanderAngle), Math.cos(this.wanderAngle), speedMult);
     this.angle = this.wanderAngle;
     return true;
+  }
+
+  _applyLocomotion(prevX, prevZ, dt, walkRate = 0) {
+    const dx = this.x - prevX;
+    const dz = this.z - prevZ;
+    this.moveSpeed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
+    this.moving = (dx * dx + dz * dz) > MOTION_IDLE_EPS * MOTION_IDLE_EPS;
+    if (this.moving && walkRate > 0) {
+      this.walkPhase += dt * walkRate;
+    }
   }
 
   _endJump() {
@@ -252,9 +346,17 @@ export class Robot {
     this.angle = Math.atan2(dx, dz);
   }
 
-  _launchJump() {
+  _launchJump(world) {
     const speed = 21 + Math.random() * 7;
     const duration = 0.48 + Math.random() * 0.2;
+    const worldCol = this.getMoveCollider();
+    const landX = this.x + this.jump.dirX * speed * duration * 0.55;
+    const landZ = this.z + this.jump.dirZ * speed * duration * 0.55;
+    if (world?.checkCollisionShape(landX, landZ, worldCol, false)) {
+      this._endJump();
+      this.jumpCooldown = 0.6;
+      return;
+    }
     this.jump.charging = false;
     this.jump.active = true;
     this.jump.vx = this.jump.dirX * speed;
@@ -264,56 +366,66 @@ export class Robot {
     this.jumpCooldown = 1.2 + Math.random() * 1.5;
   }
 
-  _updateJumpCharge(dt) {
+  _updateJumpCharge(dt, world) {
     this.jump.chargeLeft -= dt;
     const chargeT = 1 - this.jump.chargeLeft / 0.5;
     this.bob = -0.12 - chargeT * 0.28;
     this.moving = false;
-    if (this.jump.chargeLeft <= 0) this._launchJump();
+    if (this.jump.chargeLeft <= 0) this._launchJump(world);
   }
 
   _updateJump(dt, world, player, robots) {
     const prevX = this.x;
     const prevZ = this.z;
-    const stepX = this.jump.vx * dt;
-    const stepZ = this.jump.vz * dt;
-    const nextX = prevX + stepX;
-    const nextZ = prevZ + stepZ;
+    const worldCol = this.getMoveCollider();
+    const steps = 4;
+    const subDt = dt / steps;
 
-    const col = this.getWorldCollider();
-    const zOff = col.zOff ?? 0;
-    const effR = col.kind === 'aabb' ? Math.max(col.halfW, col.halfH) : col.radius;
-    if (world.segmentBlocked(prevX, prevZ + zOff, nextX, nextZ + zOff, effR, true)) {
-      const wallStop = world.moveAxisShape(prevX, prevZ, stepX, stepZ, col);
-      this.x = wallStop.x;
-      this.z = wallStop.z;
-      this._endJump();
-      return;
+    for (let s = 0; s < steps; s++) {
+      const prevRX = this.x;
+      const prevRZ = this.z;
+      const stepX = this.jump.vx * subDt;
+      const stepZ = this.jump.vz * subDt;
+      const nextX = this.x + stepX;
+      const nextZ = this.z + stepZ;
+      if (world.checkCollisionShape(nextX, nextZ, worldCol, false)) {
+        this._endJump();
+        return;
+      }
+      const targets = collectCollisionTargets({ player, robots, exclude: this });
+      const r = moveWithEntityCollision(
+        world,
+        this.x,
+        this.z,
+        stepX,
+        stepZ,
+        worldCol,
+        worldCol,
+        targets,
+        this,
+      );
+      this.x = r.x;
+      this.z = r.z;
+      if (player?.alive) {
+        const pdx = player.x - this.x;
+        const pdz = player.z - this.z;
+        const hitR = this.radius + player.radius;
+        if (pdx * pdx + pdz * pdz < hitR * hitR) {
+          this.x = prevRX;
+          this.z = prevRZ;
+          this._endJump();
+          return;
+        }
+      }
+      if (!didDisplace(prevRX, prevRZ, this.x, this.z, MOTION_IDLE_EPS * 3) && Math.hypot(stepX, stepZ) > 0.008) {
+        this._endJump();
+        return;
+      }
     }
 
-    const targets = collectCollisionTargets({ player, robots, exclude: this });
-    const body = { kind: 'circle', radius: this.radius };
-    const worldCol = this.getWorldCollider();
-    const r = moveWithEntityCollision(
-      world,
-      prevX,
-      prevZ,
-      stepX,
-      stepZ,
-      body,
-      worldCol,
-      targets,
-      this,
-    );
-    this.x = r.x;
-    this.z = r.z;
-
-    const moved = Math.hypot(r.x - prevX, r.z - prevZ);
-    const intended = Math.hypot(stepX, stepZ);
-    if (intended > 0.008 && moved < intended * 0.25) {
-      this._endJump();
-      return;
-    }
+    const dep = world.depenetrateShape(this.x, this.z, worldCol);
+    this.x = dep.x;
+    this.z = dep.z;
 
     this.jump.until -= dt;
     if (this.jump.until <= 0) {
@@ -323,8 +435,7 @@ export class Robot {
     const dur = this.jump.duration || 0.5;
     const t = 1 - this.jump.until / dur;
     this.bob = Math.sin(t * Math.PI) * 0.72;
-    this.moving = didDisplace(prevX, prevZ, this.x, this.z);
-    if (this.moving) this.walkPhase += dt * 14;
+    this._applyLocomotion(prevX, prevZ, dt, 14);
   }
 
   update(dt, player, world, robots, onMeleeHit, onShoot = null, buildings = null, time = 0) {
@@ -342,7 +453,7 @@ export class Robot {
     }
 
     if (this.jump.charging) {
-      this._updateJumpCharge(dt);
+      this._updateJumpCharge(dt, world);
       this.moving = false;
       return;
     }
@@ -375,18 +486,24 @@ export class Robot {
     const dx = player.x - this.x;
     const dz = player.z - this.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-    const stealth = player.getStealthMult?.() ?? 1;
-    const detectRange = (this.type === 'spider' ? 20 : 48) * stealth;
-    const chaseRange = (this.type === 'spider' ? 58 : 58) * stealth;
-    const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
+    const chaseRange = 58 * (player.getStealthMult?.() ?? 1);
+    const detectRange = getEnemyDetectRange(this, player, SPIDER_DETECT_RANGE);
+    const canSee = canEnemySeePlayer(this, player, world, buildings, detectRange);
+    updateEnemySpotTimer(this, canSee, dt);
+    updateEnemyLastKnown(this, player, canSee);
 
-    if (hasLOS || (this.chasing && dist < chaseRange) || this.aggroByHit) {
+    const search = advanceEnemySearchPhase(this, canSee, dt);
+    if (search.forget) {
+      clearEnemyCombatState(this);
+    }
+
+    if (shouldEnemyChase(this, dist, chaseRange, canSee)) {
       this.chasing = true;
       this.angle = Math.atan2(dx, dz);
 
       const jumpMin = 2.6;
       const jumpMax = 7.2;
-      if (this.type === 'spider' && dist < jumpMax && dist > jumpMin && this.jumpCooldown <= 0 && !this.jump.charging && !this.jump.active) {
+      if (!isEnemyAlert(this) && this.type === 'spider' && dist < jumpMax && dist > jumpMin && this.jumpCooldown <= 0 && !this.jump.charging && !this.jump.active) {
         this.jumpTryTimer -= dt;
         if (this.jumpTryTimer <= 0) {
           this.jumpTryTimer = 0.38 + Math.random() * 0.32;
@@ -399,14 +516,11 @@ export class Robot {
         this.jumpTryTimer = 0;
       }
 
-      if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-        moving = this._updateWander(dt, world, player, robots, 0.45);
-      } else {
-        moving = true;
-      }
+      moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz, dist, canSee);
 
       if (
-        dist < this.meleeRange + player.radius
+        canSee
+        && dist < this.meleeRange + player.radius
         && this.meleeCooldown <= 0
         && canMeleeTarget(world, this.x, this.z, player.x, player.z)
       ) {
@@ -415,12 +529,9 @@ export class Robot {
       }
     } else if (!this.chasing) {
       moving = this._updateWander(dt, world, player, robots, 0.45);
-    } else if (dist > chaseRange + 4 && !this.aggroByHit) {
-      this.chasing = false;
     }
 
-    this.walkPhase += dt * (moving ? 6 : 0);
-    this.moving = moving && didDisplace(prevX, prevZ, this.x, this.z);
+    this._applyLocomotion(prevX, prevZ, dt, moving ? (this.chasing ? 10 : 6) : 0);
   }
 
   static findSpawnPoint(world, existing, minPlayerDist = 14, player = null) {
@@ -545,7 +656,8 @@ export class Scout extends Robot {
     if (this.stagger > 0) {
       this.stagger -= dt;
       this._applyKnockback(dt, world, player, robots);
-      if (this.moving) this.walkPhase += dt * 6;
+      this.moving = false;
+      this.moveSpeed = 0;
       return;
     }
 
@@ -565,13 +677,22 @@ export class Scout extends Robot {
     const dx = player.x - this.x;
     const dz = player.z - this.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-    const stealth = player.getStealthMult?.() ?? 1;
-    const detectRange = 20 * stealth;
-    const chaseRange = 58 * stealth;
-    const hasLOS = dist < detectRange && world.hasLineOfSight(this.x, this.z, player.x, player.z, 0.3);
+    const chaseRange = 58 * (player.getStealthMult?.() ?? 1);
+    const detectRange = getEnemyDetectRange(this, player, SCOUT_DETECT_RANGE);
+    const canSee = canEnemySeePlayer(this, player, world, buildings, detectRange);
+    updateEnemySpotTimer(this, canSee, dt);
+    updateEnemyLastKnown(this, player, canSee);
+
+    const search = advanceEnemySearchPhase(this, canSee, dt);
+    if (search.forget) {
+      clearEnemyCombatState(this);
+      this._abortShoot(true);
+    }
+
     const meleeDist = this.meleeRange + player.radius;
     const inAttack = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';
-    if (hasLOS || (this.chasing && dist < chaseRange) || this.aggroByHit || inAttack) {
+
+    if (shouldEnemyChase(this, dist, chaseRange, canSee) || inAttack) {
       this.chasing = true;
       this.angle = Math.atan2(dx, dz);
 
@@ -592,13 +713,9 @@ export class Scout extends Robot {
             this.bob = 0;
           }
         }
-      } else if (dist < meleeDist) {
+      } else if (canSee && dist < meleeDist) {
         this._abortShoot();
-        if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-          moving = this._updateWander(dt, world, player, robots, 0.45);
-        } else {
-          moving = true;
-        }
+        moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz, dist, canSee);
         if (
           moving
           && this.meleeCooldown <= 0
@@ -607,38 +724,29 @@ export class Scout extends Robot {
           onMeleeHit(this);
           this.meleeCooldown = this.attackRate;
         }
-      } else if (hasLOS && dist < detectRange && onShoot) {
+      } else if (canSee && dist < detectRange && onShoot) {
         if (this.shoot.reloadLeft > 0) {
           this.shoot.reloadLeft -= dt;
           this._abortShoot();
-          if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-            moving = this._updateWander(dt, world, player, robots, 0.45);
-          } else {
-            moving = true;
-          }
+          moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz, dist, canSee);
         } else if (this.shoot.phase === 'ready') {
           this.shoot.phase = 'charging';
           this.shoot.chargeLeft = this.shoot.chargeDuration;
           this.shoot.animStart = performance.now() / 1000;
         }
+      } else if (isEnemyAlert(this)) {
+        this._abortShoot();
+        moving = this._updateWander(dt, world, player, robots, ENEMY_ALERT_WANDER_SPEED, true);
       } else {
         this._abortShoot();
-        if (!this._chaseMove(dt, player, world, robots, buildings, time)) {
-          moving = this._updateWander(dt, world, player, robots, 0.45);
-        } else {
-          moving = true;
-        }
+        moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz, dist, canSee);
       }
     } else if (!this.chasing) {
       this._abortShoot();
       moving = this._updateWander(dt, world, player, robots, 0.45);
-    } else if (dist > chaseRange + 4 && !this.aggroByHit && !inAttack) {
-      this.chasing = false;
-      this._abortShoot();
     }
 
-    this.walkPhase += dt * (moving ? (this.chasing ? 10 : 6) : 0);
-    this.moving = moving && didDisplace(prevX, prevZ, this.x, this.z);
+    this._applyLocomotion(prevX, prevZ, dt, moving ? (this.chasing ? 10 : 6) : 0);
   }
 }
 

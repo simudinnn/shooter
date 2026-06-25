@@ -572,7 +572,7 @@ export class BuildingManager {
     this._clearFoliageForBuilding(world, building);
     this.buildings.push(building);
     this.chests?.spawnInBuilding(building, chunk);
-    const reserved = building.chestTile ? [building.chestTile] : [];
+    const reserved = [...(building.chestTiles ?? (building.chestTile ? [building.chestTile] : []))];
     const interiorProps = buildBuildingInteriorProps(
       building.originX,
       building.originZ,
@@ -702,7 +702,7 @@ export class BuildingManager {
   }
 
   remove(building) {
-    if (building.chest) this.chests?.remove(building.chest);
+    this.chests?.removeAllFromBuilding(building);
     this._unregisterObstacles(building);
     const i = this.buildings.indexOf(building);
     if (i >= 0) this.buildings.splice(i, 1);
@@ -731,8 +731,14 @@ export class BuildingManager {
     this._syncDoorObstacle(building);
     this._clearFoliageForBuilding(world, building);
 
-    if (saved.chestTile) building.chestTile = { ...saved.chestTile };
-    const reserved = building.chestTile ? [building.chestTile] : [];
+    if (saved.chestTiles?.length) {
+      building.chestTiles = saved.chestTiles.map((t) => ({ ...t }));
+      building.chestTile = building.chestTiles[0];
+    } else if (saved.chestTile) {
+      building.chestTiles = [{ ...saved.chestTile }];
+      building.chestTile = building.chestTiles[0];
+    }
+    const reserved = [...(building.chestTiles ?? [])];
     const interiorProps = buildBuildingInteriorProps(
       building.originX,
       building.originZ,
@@ -763,10 +769,13 @@ export class BuildingManager {
     this._registerDecorObstacles(building);
     this.buildings.push(building);
 
-    if (saved.chest) {
-      this.chests?.restoreInBuilding(saved.chest, building);
-      chunk.chestsSpawned = true;
+    const savedChests = saved.chests?.length
+      ? saved.chests
+      : (saved.chest ? [saved.chest] : []);
+    for (const chestSave of savedChests) {
+      this.chests?.restoreInBuilding(chestSave, building);
     }
+    if (savedChests.length) chunk.chestsSpawned = true;
     return building;
   }
 

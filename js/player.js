@@ -1,12 +1,9 @@
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
+import { bulletOwnerFeetZ } from './bulletCollision.js';
 import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME } from './sprites.js';
 import { AMMO_STACK_MAX, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
+import { MATERIAL_STACK_MAX, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
 
-export const ROLL_DURATION = 0.46;
-export const ROLL_SPEED = 24;
-export const JUMP_DURATION = 0.42;
-export const JUMP_SPEED = 10;
-export const SNEAK_MULT = 0.52;
 export const GUN_HOLD_OFFSET = 1.1;
 /** Extra distance from gun hold point to barrel tip (world units). */
 export const BARREL_TIP_OFFSET = 0.55;
@@ -217,6 +214,23 @@ export const MELEE_WEAPONS = {
 
 export const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 
+/** Default when main hand has no gun — not storable in inventory. */
+export const HAND_MELEE = {
+  name: 'Hand',
+  damage: 5,
+  range: 1.9,
+  arc: Math.PI * 0.55,
+  swingDuration: 0.2,
+  swingDownRatio: 0.42,
+  swingAngle: Math.PI / 3.2,
+  maxChargeTime: 0,
+  noCharge: true,
+  minDamageMult: 1,
+  maxDamageMult: 1,
+  maxRaiseAngle: 0,
+  sprite: 'hand',
+};
+
 /** @deprecated use getActiveMelee() */
 export const MELEE_WEAPON = MELEE_WEAPONS.knife;
 
@@ -246,9 +260,12 @@ export class Player {
     this.radius = PLAYER_HIT_RADIUS;
     this.isMoving = false;
     this.isSprinting = false;
+    this.moveSpeed = 0;
     this.walkPhase = 0;
     this.moveDirX = 0;
     this.moveDirZ = 0;
+    this.knockVX = 0;
+    this.knockVZ = 0;
     this.weaponSlot = 'gun';
     this.melee = {
       charging: false,
@@ -262,11 +279,6 @@ export class Player {
     this.shotFlashUntil = 0;
     this.casingMidEmitted = false;
     this.casingCooldownWeaponKey = null;
-    this.isCrouching = false;
-    this.isSneaking = false;
-    this.sneakMult = SNEAK_MULT;
-    this.roll = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: ROLL_DURATION };
-    this.jump = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: JUMP_DURATION, inPlace: false };
     this.reloadAim = {
       phase: 'idle',
       fromAngle: 0,
@@ -313,8 +325,6 @@ export class Player {
       swingCharge: 0,
       hitApplied: false,
     };
-    this.roll = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: ROLL_DURATION };
-    this.jump = { active: false, until: 0, dirX: 0, dirZ: 0, startTime: 0, duration: JUMP_DURATION, inPlace: false };
     this.reloadAim = { phase: 'idle', fromAngle: 0, lowerStart: 0 };
 
     if (data.weaponKey && WEAPONS[data.weaponKey]) {
@@ -627,6 +637,28 @@ export class Player {
     return amount - left;
   }
 
+  addMaterialToInventory(key, amount = 1) {
+    let left = Math.max(1, Math.floor(amount));
+    for (let i = 0; i < this.itemSlots.length && left > 0; i++) {
+      if (!this.isItemSlotUnlocked(i)) continue;
+      const slot = this.itemSlots[i];
+      if (slot?.kind !== 'material' || slot.key !== key) continue;
+      const room = MATERIAL_STACK_MAX - (slot.amount ?? 1);
+      if (room <= 0) continue;
+      const add = Math.min(room, left);
+      slot.amount = (slot.amount ?? 1) + add;
+      left -= add;
+    }
+    while (left > 0) {
+      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      if (idx < 0) break;
+      const add = Math.min(left, MATERIAL_STACK_MAX);
+      this.itemSlots[idx] = { kind: 'material', key, amount: add };
+      left -= add;
+    }
+    return amount - left;
+  }
+
   /** Move an item into inventory, merging stacks when possible. */
   tryStoreItem(item) {
     if (!item) return { ok: false, remainder: null };
@@ -646,6 +678,18 @@ export class Player {
       if (stored >= amount) return { ok: true, remainder: null };
       if (stored > 0) {
         return { ok: true, remainder: { kind: 'bandage', amount: amount - stored } };
+      }
+      return { ok: false, remainder: item };
+    }
+    if (item.kind === 'material') {
+      const normalized = normalizeMaterialItem(item);
+      const stored = this.addMaterialToInventory(normalized.key, normalized.amount);
+      if (stored >= normalized.amount) return { ok: true, remainder: null };
+      if (stored > 0) {
+        return {
+          ok: true,
+          remainder: { kind: 'material', key: normalized.key, amount: normalized.amount - stored },
+        };
       }
       return { ok: false, remainder: item };
     }
@@ -670,8 +714,20 @@ export class Player {
   }
 
   getActiveMelee() {
-    if (!this.meleeKey) return null;
-    return MELEE_WEAPONS[this.meleeKey] ?? null;
+    if (this.isMeleeActive() && this.meleeKey) {
+      return MELEE_WEAPONS[this.meleeKey] ?? null;
+    }
+    if (this.isUnarmed()) return HAND_MELEE;
+    return null;
+  }
+
+  isUnarmed() {
+    return (this.weaponSlot === 'gun' && !this.weaponKey)
+      || (this.weaponSlot === 'melee' && !this.meleeKey);
+  }
+
+  usesMeleeCombat() {
+    return this.isMeleeActive() || this.isUnarmed();
   }
 
   equipMelee(key) {
@@ -684,12 +740,13 @@ export class Player {
   }
 
   getWeaponDraw(time = 0) {
-    if (this.isMeleeActive()) {
-      const melee = this.getActiveMelee();
+    if (this.isMeleeActive() && this.meleeKey) {
+      const melee = MELEE_WEAPONS[this.meleeKey];
       if (melee) return { sheet: melee.sprite };
     }
+    if (this.isUnarmed()) return { sheet: HAND_MELEE.sprite };
     const cfg = WEAPONS[this.weaponKey];
-    if (!cfg) return { sheet: 'm16' };
+    if (!cfg) return { sheet: HAND_MELEE.sprite };
 
     if (this.weapon?.reloading) {
       const sprite = cfg.sprite;
@@ -709,7 +766,7 @@ export class Player {
       return { sheet: cfg.shotSprite };
     }
 
-    if (cfg.casingMode === 'mid_cooldown' && this.weapon.lastShot != null) {
+    if (cfg.casingMode === 'mid_cooldown' && this.weapon?.lastShot != null) {
       const elapsed = time - this.weapon.lastShot;
       const cycleSheet = `${cfg.sprite}_cycle`;
       const cycleStart = SHOT_FLASH_DURATION;
@@ -727,7 +784,8 @@ export class Player {
 
   toggleWeaponSlot() {
     if (this.isMeleeActive()) return this.setWeaponSlot('gun');
-    return this.equipMelee(this.meleeKey);
+    if (this.meleeKey) return this.equipMelee(this.meleeKey);
+    return this.setWeaponSlot('melee');
   }
 
   swapItemSlots(a, b) {
@@ -744,99 +802,12 @@ export class Player {
     return this.equipMeleeFromSlot(slotIndex);
   }
 
-  isRolling(time) {
-    return this.roll.active && time < this.roll.until;
-  }
-
-  isJumping(time) {
-    return this.jump.active && time < this.jump.until;
-  }
-
-  getJumpT(time) {
-    if (!this.isJumping(time)) return 0;
-    const dur = this.jump.duration || JUMP_DURATION;
-    return Math.min(1, (time - this.jump.startTime) / dur);
-  }
-
-  isMobilityLocked(time) {
-    return this.isRolling(time) || this.isJumping(time);
-  }
-
   getStealthMult() {
     return 1;
   }
 
-  canRoll(time) {
-    if (!this.alive || this.isMobilityLocked(time)) return false;
-    return true;
-  }
-
-  canJump(time) {
-    if (!this.alive || this.isMobilityLocked(time)) return false;
-    if (this.weapon?.reloading) return false;
-    return true;
-  }
-
-  startRoll(time, dirX, dirZ) {
-    if (!this.canRoll(time)) return false;
-    const len = Math.hypot(dirX, dirZ);
-    if (len < 0.01) return false;
-    this.roll.active = true;
-    this.roll.duration = ROLL_DURATION;
-    this.roll.until = time + ROLL_DURATION;
-    this.roll.startTime = time;
-    this.roll.dirX = dirX / len;
-    this.roll.dirZ = dirZ / len;
-    this.moveDirX = this.roll.dirX;
-    this.moveDirZ = this.roll.dirZ;
-    this.invulnTimer = Math.max(this.invulnTimer, time + ROLL_DURATION);
-    this.melee.charging = false;
-    this.isCrouching = false;
-    this.isSneaking = false;
-    return true;
-  }
-
-  startJump(time, hasMoveIntent = false, dirX = 0, dirZ = 0) {
-    if (!this.canJump(time)) return false;
-    this.jump.inPlace = !hasMoveIntent;
-    if (hasMoveIntent) {
-      let dx = dirX;
-      let dz = dirZ;
-      const inLen = Math.hypot(dx, dz);
-      if (inLen < 0.01) {
-        dx = this.moveDirX;
-        dz = this.moveDirZ;
-      }
-      if (Math.hypot(dx, dz) < 0.01) {
-        dx = Math.sin(this.angle);
-        dz = Math.cos(this.angle);
-      }
-      const len = Math.hypot(dx, dz) || 1;
-      this.jump.dirX = dx / len;
-      this.jump.dirZ = dz / len;
-    } else {
-      this.jump.dirX = 0;
-      this.jump.dirZ = 0;
-    }
-    this.jump.active = true;
-    this.jump.duration = JUMP_DURATION;
-    this.jump.until = time + JUMP_DURATION;
-    this.jump.startTime = time;
-    this.invulnTimer = Math.max(this.invulnTimer, time + JUMP_DURATION * 0.65);
-    this.melee.charging = false;
-    this.isCrouching = false;
-    this.isSneaking = false;
-    return true;
-  }
-
-  updateMobility(time) {
-    if (this.roll.active && time >= this.roll.until) this.roll.active = false;
-    if (this.jump.active && time >= this.jump.until) this.jump.active = false;
-  }
-
   setWeaponSlot(slot) {
     if (slot !== 'gun' && slot !== 'melee') return false;
-    if (slot === 'melee' && !this.meleeKey) return false;
     if (slot === 'melee') {
       this._abortReloadForMeleeSwitch();
       if (this.weaponSlot === 'gun') {
@@ -855,7 +826,7 @@ export class Player {
 
   /** Charging or mid-swing — skip idle breath on the held weapon. */
   isMeleeAnimating(time = 0) {
-    if (!this.isMeleeActive()) return false;
+    if (!this.usesMeleeCombat()) return false;
     return this.melee.charging || time < this.melee.swingUntil;
   }
 
@@ -905,14 +876,14 @@ export class Player {
   }
 
   getDisplayWeapon() {
-    const melee = this.getActiveMelee();
-    if (this.isMeleeActive() && melee) return melee;
-    return this.weapon;
+    if (this.isMeleeActive()) {
+      return this.getActiveMelee() ?? HAND_MELEE;
+    }
+    if (this.weapon) return this.weapon;
+    return HAND_MELEE;
   }
 
   canMeleeCharge(time) {
-    if (this.isMobilityLocked(time)) return false;
-    if (this.isJumping(time)) return false;
     if (this.isMeleeSwinging(time)) return false;
     if (this.melee.charging) return false;
     return true;
@@ -923,6 +894,8 @@ export class Player {
   }
 
   startMeleeCharge(time) {
+    const melee = this.getActiveMelee();
+    if (!melee || melee.noCharge) return false;
     if (!this.canMeleeCharge(time)) return false;
     this.melee.charging = true;
     this.melee.chargeStart = time;
@@ -930,10 +903,22 @@ export class Player {
     return true;
   }
 
+  startInstantMeleeSwing(time) {
+    const melee = this.getActiveMelee();
+    if (!melee || !this.canMeleeCharge(time)) return false;
+    this.melee.charging = false;
+    this.melee.swingCharge = 1;
+    this.melee.swingStart = time;
+    this.melee.swingUntil = time + melee.swingDuration;
+    this.melee.hitApplied = false;
+    return true;
+  }
+
   releaseMeleeCharge(time) {
     if (!this.melee.charging) return false;
     this.melee.charging = false;
     const melee = this.getActiveMelee();
+    if (!melee) return false;
     const maxT = melee.maxChargeTime ?? 0.85;
     const raw = Math.min(1, (time - this.melee.chargeStart) / maxT);
     this.melee.swingCharge = Math.max(0.06, raw);
@@ -946,8 +931,9 @@ export class Player {
   }
 
   getMeleeChargeProgress(time) {
+    const melee = this.getActiveMelee();
+    if (!melee || melee.noCharge) return 0;
     if (this.melee.charging) {
-      const melee = this.getActiveMelee();
       const maxT = melee.maxChargeTime ?? 0.85;
       return Math.min(1, (time - this.melee.chargeStart) / maxT);
     }
@@ -956,6 +942,7 @@ export class Player {
 
   getMeleeDamageMult(charge = this.melee.swingCharge) {
     const melee = this.getActiveMelee();
+    if (!melee || melee.noCharge) return 1;
     const minM = melee.minDamageMult ?? 0.35;
     const maxM = melee.maxDamageMult ?? 1;
     const c = Math.max(0, Math.min(1, charge));
@@ -964,8 +951,9 @@ export class Player {
 
   getMeleeSwingDuration() {
     const melee = this.getActiveMelee();
+    if (!melee) return 0;
     const charge = this.melee.swingCharge;
-    return melee.swingDuration * (0.7 + 0.55 * charge);
+    return melee.swingDuration * (melee.noCharge ? 1 : (0.7 + 0.55 * charge));
   }
 
   isMeleeSwinging(time) {
@@ -981,17 +969,19 @@ export class Player {
 
   isMeleeStrikeFrame(time) {
     if (!this.isMeleeSwinging(time) || this.melee.hitApplied) return false;
-    const t = this.getMeleeSwingT(time);
     const melee = this.getActiveMelee();
+    if (!melee) return false;
+    const t = this.getMeleeSwingT(time);
     const charge = this.melee.swingCharge;
-    const downEnd = (melee.swingDownRatio ?? 0.35) * (0.88 + 0.2 * (1 - charge));
-    const strikeT = downEnd * (0.62 + 0.12 * charge);
+    const downEnd = (melee.swingDownRatio ?? 0.35) * (melee.noCharge ? 1 : (0.88 + 0.2 * (1 - charge)));
+    const strikeT = downEnd * (melee.noCharge ? 0.72 : (0.62 + 0.12 * charge));
     return t >= strikeT;
   }
 
   _meleeDownEnd(charge = this.melee.swingCharge) {
     const melee = this.getActiveMelee();
-    return (melee.swingDownRatio ?? 0.35) * (0.88 + 0.2 * (1 - charge));
+    if (!melee) return 0.35;
+    return (melee.swingDownRatio ?? 0.35) * (melee.noCharge ? 1 : (0.88 + 0.2 * (1 - charge)));
   }
 
   _meleeAnimCurve(t) {
@@ -1010,15 +1000,16 @@ export class Player {
   }
 
   getMeleeBladeTilt(time) {
+    const melee = this.getActiveMelee();
+    if (!melee) return 0;
+    if (melee.noCharge) return 0;
     if (this.melee.charging) {
-      const melee = this.getActiveMelee();
       const charge = this.getMeleeChargeProgress(time);
       const raise = (melee.maxRaiseAngle ?? Math.PI / 2.4) * charge;
       return -raise;
     }
     const t = this.getMeleeSwingT(time);
     if (t <= 0) return 0;
-    const melee = this.getActiveMelee();
     const charge = this.melee.swingCharge;
     const max = melee.swingAngle * (0.55 + 0.45 * charge);
     const startRaise = (melee.maxRaiseAngle ?? Math.PI / 2.4) * charge;
@@ -1036,6 +1027,8 @@ export class Player {
   }
 
   getMeleeSwingDrop(time) {
+    const melee = this.getActiveMelee();
+    if (melee?.noCharge) return 0;
     if (this.melee.charging) {
       return -12 * this.getMeleeChargeProgress(time);
     }
@@ -1046,6 +1039,12 @@ export class Player {
   }
 
   getMeleeSwingLunge(time) {
+    const melee = this.getActiveMelee();
+    if (melee?.noCharge) {
+      const t = this.getMeleeSwingT(time);
+      if (t <= 0) return 0;
+      return 0.52 * this._meleeAnimCurve(t).strike;
+    }
     const t = this.getMeleeSwingT(time);
     if (t <= 0) return 0;
     const charge = this.melee.swingCharge;
@@ -1374,16 +1373,26 @@ export class Player {
     if (this.health <= 0) this.alive = false;
     return true;
   }
+
+  applyMeleeKnockback(fromX, fromZ, force = 2.4) {
+    const dx = this.x - fromX;
+    const dz = this.z - fromZ;
+    const len = Math.hypot(dx, dz) || 1;
+    this.knockVX += (dx / len) * force;
+    this.knockVZ += (dz / len) * force;
+  }
 }
 
 export function findBulletSpawn(world, px, pz, angle) {
   const sin = Math.sin(angle);
   const cos = Math.cos(angle);
   const raiseZ = BULLET_SPAWN_RAISE_PX / 8;
+  const ownerFeetZ = bulletOwnerFeetZ(px, pz);
+  const spawnOpts = { ownerFeetZ };
   for (const dist of [0.16, 0.22, 0.28]) {
     const x = px + sin * dist;
     const z = pz + cos * dist - raiseZ;
-    if (!world.checkBulletSpawnCollision(px, pz, x, z, BULLET_RADIUS, angle)) {
+    if (!world.checkBulletSpawnCollision(px, pz, x, z, BULLET_RADIUS, angle, spawnOpts)) {
       return { x, z };
     }
   }
@@ -1429,6 +1438,9 @@ export class BulletPool {
     b.active = true;
     b.x = sx;
     b.z = sz;
+    b.spawnX = sx;
+    b.spawnZ = sz;
+    b.ownerFeetZ = fromPlayer ? bulletOwnerFeetZ(x, z) : z;
     b.vx = Math.sin(a) * speed;
     b.vz = Math.cos(a) * speed;
     b.damage = weapon.damage;
@@ -1461,8 +1473,9 @@ export class BulletPool {
       const nz = b.z + b.vz * dt;
       if (world.segmentBlocked(b.x, b.z, nx, nz, BULLET_RADIUS, true, b.aimAngle, {
         forwardOnly: true,
-        shooterX: b.x,
-        shooterZ: b.z,
+        shooterX: b.spawnX ?? b.x,
+        shooterZ: b.spawnZ ?? b.z,
+        ownerFeetZ: b.ownerFeetZ,
       })) {
         b.active = false;
         continue;

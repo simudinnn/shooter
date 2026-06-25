@@ -24,6 +24,16 @@
           <button type="button" id="new-game-btn">New Game</button>
           <button type="button" id="load-game-btn" class="hidden">Load Game</button>
         </div>
+        <div class="menu-lan">
+          <h3 class="menu-lan-title">LAN Co-op</h3>
+          <p class="menu-lan-hint">Host: run <code>npm run lan-server</code> in the game folder, then click Host.</p>
+          <button type="button" id="host-lan-btn" class="menu-lan-btn">Host LAN Game</button>
+          <div class="menu-lan-join">
+            <input type="text" id="lan-host-input" class="menu-lan-input" placeholder="Host IP (e.g. 192.168.1.5)" autocomplete="off" />
+            <button type="button" id="join-lan-btn" class="menu-lan-btn">Join LAN</button>
+          </div>
+          <p id="lan-status" class="menu-lan-status hidden"></p>
+        </div>
       </div>
     </div>
     <div id="pause-menu" class="hidden">
@@ -53,7 +63,6 @@
       <span id="game-clock">12:00</span>
     </div>
     <div id="hud-bottom-left">
-      <canvas id="minimap"></canvas>
       <div id="health-panel">
         <div id="health-bar-wrap">
           <div id="health-bar"></div>
@@ -108,20 +117,22 @@
   </div>
 
   <div id="mobile-controls" class="hidden">
+    <button type="button" class="mb-btn mb-small mb-pause" id="mb-pause" title="Pause">II</button>
     <div id="mobile-move" class="joystick-wrap">
       <div class="joystick-base" id="move-joystick-base">
         <div class="joystick-knob" id="move-joystick-knob"></div>
       </div>
     </div>
     <div id="mobile-actions">
-      <button type="button" class="mb-btn mb-small mb-pause" id="mb-pause" title="Pause">II</button>
       <button type="button" class="mb-btn mb-small" id="mb-gun">1</button>
       <button type="button" class="mb-btn mb-small" id="mb-knife">2</button>
       <button type="button" class="mb-btn mb-small" id="mb-reload">R</button>
       <button type="button" class="mb-btn mb-small" id="mb-interact">E</button>
       <button type="button" class="mb-btn mb-small" id="mb-inventory">INV</button>
-      <button type="button" class="mb-btn mb-small mb-autolock" id="mb-autolock" title="Toggle enemy autolock">⊕</button>
-      <button type="button" class="mb-btn mb-fire" id="mb-fire">FIRE</button>
+      <div class="mobile-fire-cluster">
+        <button type="button" class="mb-btn mb-small mb-autolock" id="mb-autolock" title="Toggle enemy autolock">⊕</button>
+        <button type="button" class="mb-btn mb-fire" id="mb-fire">FIRE</button>
+      </div>
     </div>
   </div>
 

@@ -29,7 +29,7 @@ export function getWeaponAmmoType(weaponKey) {
 
 export function ammoSpritePath(ammoType) {
   const sprite = AMMO_TYPES[ammoType]?.sprite ?? 'pistol_ammo';
-  return `assets/items/${sprite}.png`;
+  return `assets/items/weapons/${sprite}.png`;
 }
 
 export function getAmmoDisplayName(ammoType, amount) {
