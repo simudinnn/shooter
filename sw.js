@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v277';
+const CACHE = 'robot-ruins-v315';
 
 function shackSprites() {
   return [
@@ -107,6 +107,10 @@ const SHELL = [
   './js/renderConfig.js',
   './js/dayNight.js',
   './js/lanSession.js',
+  './js/netProtocol.js',
+  './js/netState.js',
+  './js/supabaseConfig.js',
+  './js/rooms.js',
   './js/main.js',
   './js/player.js',
   './js/bulletCollision.js',

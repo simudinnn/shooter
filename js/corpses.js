@@ -1,8 +1,6 @@
 import { TILE } from './worldGen.js';
 import { CHEST_SLOT_COUNT, rollWeightedLootSlot } from './loot.js';
 import { normalizeAmmoItem } from './ammo.js';
-import { makeBarrelObstacle } from './buildingGen.js';
-
 export const CORPSE_SLOT_COUNT = CHEST_SLOT_COUNT;
 export const CORPSE_INTERACT_DIST = 3;
 export const CORPSE_LIFETIME_SEC = 300;
@@ -42,13 +40,6 @@ export function corpseSpriteName(type) {
   return `${type}_dead`;
 }
 
-function makeCorpseObstacle(x, z) {
-  const obs = makeBarrelObstacle(x, z);
-  obs.halfW *= 1.2;
-  obs.halfH *= 1.2;
-  return obs;
-}
-
 export class CorpseManager {
   constructor(world) {
     this.world = world;
@@ -66,20 +57,12 @@ export class CorpseManager {
       isCorpse: true,
       smokeAcc: 0,
       sortZ: robot.z + TILE * 0.5,
-      obstacle: null,
     };
-    corpse.obstacle = makeCorpseObstacle(corpse.x, corpse.z);
-    this.world.addDynamicObstacle(corpse.obstacle);
     this.corpses.push(corpse);
     return corpse;
   }
 
   _removeCorpseAt(i) {
-    const c = this.corpses[i];
-    if (c?.obstacle) {
-      this.world.removeDynamicObstacle(c.obstacle);
-      c.obstacle = null;
-    }
     this.corpses.splice(i, 1);
   }
 

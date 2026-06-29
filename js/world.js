@@ -21,6 +21,7 @@ import {
   BULLET_FOOT_Z_OFF,
   obstacleBehindAlongAim,
 } from './bulletCollision.js';
+import { shapeOverlapsOpenDoorNavZone } from './buildingGen.js';
 
 export { TILE, CHUNK_TILES, BASE_RADIUS } from './worldGen.js';
 export const MAP_SIZE = 999999;
@@ -432,11 +433,19 @@ export class World {
     return obs.halfW > 0 && obs.halfH > 0;
   }
 
-  /** Nav pathfinding — walls, doors, and interior props (barrels, tables, …). */
+  /** Nav pathfinding — walls, doors, props, trees, rocks, chests. */
   _navObstacleBlocks(obs) {
+    if (obs.isCorpse) return false;
     if (obs.doorSeal || obs.floorEdge) return true;
     if (obs.isDecor) return true;
+    if (obs.kind === 'circle' && (obs.radius ?? 0) > 0.2) return true;
+    if (obs.kind === 'aabb' && this._aabbHardEnabled(obs)) return true;
     return false;
+  }
+
+  _ignoreObstacleInDoorway(obs, px, pz, shape, buildings) {
+    if (!buildings || (!obs.floorEdge && !obs.doorSeal)) return false;
+    return shapeOverlapsOpenDoorNavZone(buildings, px, pz, shape);
   }
 
   _bulletTestZ(z, obs, bulletCtx) {
@@ -468,7 +477,7 @@ export class World {
     return aExt === bExt;
   }
 
-  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false, _wallSoft = null, bulletCtx = null, forNav = false) {
+  _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false, _wallSoft = null, bulletCtx = null, forNav = false, buildings = null, shape = null) {
     for (const obs of obstacles) {
       if (forBullets && obs.blocksBullets === false) continue;
       if (this._losIgnoresFloorEdge(obs, bulletCtx?.losSeg)) continue;
@@ -476,6 +485,7 @@ export class World {
         && obstacleBehindAlongAim(obs, bulletCtx.shooterX, bulletCtx.shooterZ, bulletCtx.aimAngle)) {
         continue;
       }
+      if (this._ignoreObstacleInDoorway(obs, x, z, shape, buildings)) continue;
       if (forNav && !this._navObstacleBlocks(obs)) continue;
       const testZ = forBullets ? this._bulletTestZ(z, obs, bulletCtx) : z;
       if (obs.kind === 'circle' && this._circleHit(x, testZ, radius, obs.x, obs.z, obs.radius)) {
@@ -515,13 +525,16 @@ export class World {
     return { cx: acx + (nx / dist) * overlap, cz: acz + (nz / dist) * overlap };
   }
 
-  _checkShapeCollision(px, pz, shape, obstacles, soft = false, forNav = false) {
+  _checkShapeCollision(px, pz, shape, obstacles, soft = false, forNav = false, buildings = null) {
     if (!shape || shape.kind === 'circle') {
-      return this._checkObstacleCollision(px, pz, shape?.radius ?? 0, obstacles, false, soft, null, null, forNav);
+      return this._checkObstacleCollision(
+        px, pz, shape?.radius ?? 0, obstacles, false, soft, null, null, forNav, buildings, shape,
+      );
     }
     const acx = px;
     const acz = pz + shape.zOff;
     for (const obs of obstacles) {
+      if (this._ignoreObstacleInDoorway(obs, px, pz, shape, buildings)) continue;
       if (forNav && !this._navObstacleBlocks(obs)) continue;
       if (obs.kind === 'circle' && this._aabbCircleHit(acx, acz, shape.halfW, shape.halfH, obs.x, obs.z, obs.radius)) {
         return true;
@@ -536,8 +549,9 @@ export class World {
 
   checkCollisionShape(px, pz, shape, soft = false, opts = {}) {
     const forNav = opts.forNav ?? false;
+    const buildings = opts.buildings ?? null;
     const obstacles = this.collectObstaclesNear(px, pz, this._shapeReach(shape));
-    return this._checkShapeCollision(px, pz, shape, obstacles, soft, forNav);
+    return this._checkShapeCollision(px, pz, shape, obstacles, soft, forNav, buildings);
   }
 
   checkCollision(x, z, radius) {
@@ -602,12 +616,14 @@ export class World {
       return this.resolveMovement(oldX, oldZ, newX, newZ, shape?.radius ?? 0);
     }
 
+    const buildings = opts.buildings ?? null;
     let x = newX;
     let z = newZ;
     const obstacles = this.collectObstaclesNear(x, z, this._shapeReach(shape));
 
     for (let i = 0; i < 4; i++) {
       for (const obs of obstacles) {
+        if (this._ignoreObstacleInDoorway(obs, x, z, shape, buildings)) continue;
         let acx = x;
         let acz = z + shape.zOff;
         if (obs.kind === 'circle') {
@@ -625,9 +641,9 @@ export class World {
       }
     }
 
-    if (!this._checkShapeCollision(x, z, shape, obstacles, false)) return { x, z };
-    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, false)) return { x: newX, z: oldZ };
-    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, false)) return { x: oldX, z: newZ };
+    if (!this._checkShapeCollision(x, z, shape, obstacles, false, false, buildings)) return { x, z };
+    if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, false, false, buildings)) return { x: newX, z: oldZ };
+    if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, false, false, buildings)) return { x: oldX, z: newZ };
     return { x: oldX, z: oldZ };
   }
 
@@ -740,6 +756,21 @@ export class World {
     }
     if (dz !== 0) {
       const r = this.resolveMovementShape(x, z, x, z + dz, shape, opts);
+      x = r.x;
+      z = r.z;
+    }
+    return { x, z };
+  }
+
+  /** Vertical first, then horizontal — alternate slide order at corners. */
+  moveAxisShapeZX(x, z, dx, dz, shape, opts = {}) {
+    if (dz !== 0) {
+      const r = this.resolveMovementShape(x, z, x, z + dz, shape, opts);
+      x = r.x;
+      z = r.z;
+    }
+    if (dx !== 0) {
+      const r = this.resolveMovementShape(x, z, x + dx, z, shape, opts);
       x = r.x;
       z = r.z;
     }

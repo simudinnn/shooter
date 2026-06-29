@@ -15,7 +15,7 @@ export function bulletOwnerFeetZ(px, pz) {
 }
 
 /** Drop from bullet path to player foot collision height (world Z, +Z = south). */
-export const BULLET_FOOT_Z_OFF = (6 * PLAYER_SPRITE_SCALE) / 8 + BULLET_SPAWN_RAISE_PX / 8;
+export const BULLET_FOOT_Z_OFF = (6 * PLAYER_SPRITE_SCALE) / 10 + BULLET_SPAWN_RAISE_PX / 8;
 
 /** Foot-level bullet tests only on south wall strips (+Z perimeter). */
 export function bulletUsesFootLevel(obs) {

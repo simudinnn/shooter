@@ -1174,7 +1174,7 @@ export class Player {
       return false;
     }
     if (w.ammo === w.magSize || this.getReserveAmmo() <= 0) return false;
-    const aim = gunAimTransform(this.angle);
+    const aim = gunAimTransform(this.angle, this._flipX ?? false);
     w.reloading = true;
     w.reloadStart = time;
     this.reloadAim.fromAngle = aim.angle;

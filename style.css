@@ -232,6 +232,24 @@ canvas {
   border-radius: 4px;
 }
 
+.menu-room-code {
+  margin: 0.5rem 0 0;
+  font-size: 0.95rem;
+  color: #b8e986;
+  letter-spacing: 0.08em;
+}
+
+.menu-lan-advanced {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #9ab;
+}
+
+.menu-lan-advanced summary {
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
 .menu-lan-status {
   margin-top: 10px;
   font-size: 11px;

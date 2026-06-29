@@ -25,13 +25,22 @@
           <button type="button" id="load-game-btn" class="hidden">Load Game</button>
         </div>
         <div class="menu-lan">
-          <h3 class="menu-lan-title">LAN Co-op</h3>
-          <p class="menu-lan-hint">Host: run <code>npm run lan-server</code> in the game folder, then click Host.</p>
-          <button type="button" id="host-lan-btn" class="menu-lan-btn">Host LAN Game</button>
+          <h3 class="menu-lan-title">Online Multiplayer</h3>
+          <p class="menu-lan-hint">Open the <strong>http://</strong> link from the server window in your browser — not <code>ws://</code>. Set up Supabase once (see <code>js/supabaseConfig.js</code>).</p>
+          <input type="text" id="player-name-input" class="menu-lan-input" placeholder="Your name" maxlength="16" autocomplete="nickname" />
+          <button type="button" id="create-room-btn" class="menu-lan-btn">Create Room</button>
           <div class="menu-lan-join">
-            <input type="text" id="lan-host-input" class="menu-lan-input" placeholder="Host IP (e.g. 192.168.1.5)" autocomplete="off" />
-            <button type="button" id="join-lan-btn" class="menu-lan-btn">Join LAN</button>
+            <input type="text" id="room-code-input" class="menu-lan-input" placeholder="Room code" maxlength="8" autocomplete="off" />
+            <button type="button" id="join-room-btn" class="menu-lan-btn">Join Room</button>
           </div>
+          <p id="room-code-display" class="menu-room-code hidden"></p>
+          <details class="menu-lan-advanced">
+            <summary>Quick play / LAN</summary>
+            <div class="menu-lan-join">
+              <input type="text" id="lan-host-input" class="menu-lan-input" placeholder="Server IP (blank = this PC)" autocomplete="off" />
+              <button type="button" id="play-online-btn" class="menu-lan-btn">Quick Play</button>
+            </div>
+          </details>
           <p id="lan-status" class="menu-lan-status hidden"></p>
         </div>
       </div>

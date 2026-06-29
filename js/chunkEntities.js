@@ -23,7 +23,11 @@ export class ChunkEntityManager {
   reset() {}
 
   update(player) {
-    if (this.game.lan?.isClient) return;
+    if (this.game.lan?.isOnline) {
+      this._despawnBuildingsFar(player);
+      this._populateBuildingsOnly(player);
+      return;
+    }
     this._despawnFar(player);
     this._populateNearby(player);
   }
@@ -194,6 +198,11 @@ export class ChunkEntityManager {
   }
 
   _populateNearby(player) {
+    this._populateBuildingsOnly(player);
+    this._populateEnemiesOnly(player);
+  }
+
+  _populateEnemiesOnly(player) {
     const { fx, fz } = this._getPlayerForward(player);
     const { cx: pcx, cz: pcz } = this._playerChunk(player);
     const chunks = [];
@@ -210,6 +219,58 @@ export class ChunkEntityManager {
 
     for (const { chunk } of chunks) {
       if (!chunk.spidersSpawned) this._spawnChunkSpiders(chunk, player, fx, fz);
+    }
+  }
+
+  _despawnBuildingsFar(player) {
+    const d2 = this._despawnDist2();
+    const clearedBuildingChunks = new Set();
+    const nextBuildings = [];
+    for (const building of this.game.buildings.buildings) {
+      const cx = building.originX + building.footprintW * 0.5;
+      const cz = building.originZ + building.footprintH * 0.5;
+      if (this._nearbyDist2(player, cx, cz) <= d2) {
+        nextBuildings.push(building);
+        continue;
+      }
+      if (building.homeCx !== undefined && building.homeCz !== undefined) {
+        clearedBuildingChunks.add(`${building.homeCx},${building.homeCz}`);
+      }
+      if (building.chests?.length) {
+        for (const chest of building.chests) this.game.chests.remove(chest);
+      } else if (building.chest) {
+        this.game.chests.remove(building.chest);
+      }
+      this.game.buildings._unregisterObstacles(building);
+    }
+    this.game.buildings.buildings = nextBuildings;
+
+    for (const key of clearedBuildingChunks) {
+      const chunk = this.world.chunks.get(key);
+      if (!chunk) continue;
+      const hasLocal = this.game.buildings.buildings.some(
+        (b) => b.homeCx === chunk.cx && b.homeCz === chunk.cz,
+      );
+      if (!hasLocal) chunk.buildingsSpawned = false;
+    }
+  }
+
+  _populateBuildingsOnly(player) {
+    const { fx, fz } = this._getPlayerForward(player);
+    const { cx: pcx, cz: pcz } = this._playerChunk(player);
+    const chunks = [];
+    for (let cz = pcz - ENTITY_CHUNK_RADIUS; cz <= pcz + ENTITY_CHUNK_RADIUS; cz++) {
+      for (let cx = pcx - ENTITY_CHUNK_RADIUS; cx <= pcx + ENTITY_CHUNK_RADIUS; cx++) {
+        const chunk = this.world.getChunk(cx, cz);
+        if (!this._shouldPopulateChunk(chunk, player, fx, fz)) continue;
+        const center = this._chunkCenter(cx, cz);
+        const ahead = (center.x - player.x) * fx + (center.z - player.z) * fz;
+        chunks.push({ chunk, ahead });
+      }
+    }
+    chunks.sort((a, b) => b.ahead - a.ahead);
+
+    for (const { chunk } of chunks) {
       if (!chunk.buildingsSpawned) this._spawnChunkBuildings(chunk, player, fx, fz);
     }
   }

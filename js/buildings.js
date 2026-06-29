@@ -25,6 +25,7 @@ import {
   buildBuildingPieces,
   isInsideBuilding,
   entityFeetZ,
+  playerSouthEdgeZ,
   buildingFoliageClearRects,
   buildBuildingDecor,
   buildBuildingInteriorProps,
@@ -444,7 +445,11 @@ export class BuildingManager {
   }
 
   update(player, dt) {
-    const inside = this.getBuildingAt(player.x, player.z);
+    const col = player.getMoveCollider?.(8);
+    const feetZ = playerSouthEdgeZ(player.x, player.z);
+    const inside = col
+      ? this.getBuildingAt(player.x, player.z, col, feetZ)
+      : this.getBuildingAt(player.x, player.z, feetZ);
     if (inside) this.roofFadeBuilding = inside;
     else if (this.roofFadeBuilding && Math.abs(this.roofAlpha - ROOF_ALPHA_OUTSIDE) < 0.02) {
       this.roofFadeBuilding = null;
@@ -463,16 +468,18 @@ export class BuildingManager {
     return ROOF_ALPHA_OUTSIDE;
   }
 
-  getBuildingAt(px, pz, feetZ = null) {
+  getBuildingAt(px, pz, collider = null, feetZOverride = null) {
     for (const b of this.buildings) {
-      if (isInsideBuilding(b, px, pz, feetZ)) return b;
+      if (isInsideBuilding(b, px, pz, collider, feetZOverride)) return b;
     }
     return null;
   }
 
   getEntityBuildingAt(entity) {
     if (!entity) return null;
+    const col = entity.getMoveCollider?.();
     const feetZ = entityFeetZ(entity);
+    if (col) return this.getBuildingAt(entity.x, entity.z, col, feetZ);
     return this.getBuildingAt(entity.x, entity.z, feetZ);
   }
 

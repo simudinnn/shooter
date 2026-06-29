@@ -32,9 +32,9 @@ function _jitterRgb(base, salt, spread = 42) {
 }
 
 function _refreshTintPalette() {
-  _tintDry = _jitterRgb(TINT_DRY_BASE, 901, 55);
-  _tintMeadow = _jitterRgb(TINT_MEADOW_BASE, 902, 48);
-  _tintForest = _jitterRgb(TINT_FOREST_BASE, 903, 40);
+  _tintScrubA = _jitterRgb(TINT_SCRUB_A_BASE, 901, 38);
+  _tintScrubB = _jitterRgb(TINT_SCRUB_B_BASE, 902, 42);
+  _tintScrubDry = _jitterRgb(TINT_SCRUB_DRY_BASE, 903, 35);
 }
 
 /** New procedural layout (biomes, floor islands, grass tint) for each deploy. */
@@ -63,13 +63,13 @@ const FOLIAGE = {
   stump: { sprite: 'foliage_stump', blocks: true, radius: 0.4, tinted: false, ysort: false },
 };
 
-const TINT_DRY_BASE = { r: 210, g: 205, b: 120 };
-const TINT_MEADOW_BASE = { r: 130, g: 248, b: 132 };
-const TINT_FOREST_BASE = { r: 105, g: 215, b: 108 };
+const TINT_SCRUB_A_BASE = { r: 198, g: 205, b: 118 };
+const TINT_SCRUB_B_BASE = { r: 158, g: 172, b: 92 };
+const TINT_SCRUB_DRY_BASE = { r: 210, g: 198, b: 108 };
 
-let _tintDry = { ...TINT_DRY_BASE };
-let _tintMeadow = { ...TINT_MEADOW_BASE };
-let _tintForest = { ...TINT_FOREST_BASE };
+let _tintScrubA = { ...TINT_SCRUB_A_BASE };
+let _tintScrubB = { ...TINT_SCRUB_B_BASE };
+let _tintScrubDry = { ...TINT_SCRUB_DRY_BASE };
 
 /** Snap a world axis to the foliage / render pixel grid. */
 export function snapWorldAxis(v) {
@@ -171,30 +171,11 @@ export function isInBase(wx, wz) {
 
 export function getBiome(wx, wz) {
   if (isInBase(wx, wz)) return 'base';
-  const { elevation, moisture, rugged, rockIsland } = sampleTerrain(wx, wz);
-  const kind = getFloorKind(wx, wz);
-
-  if (kind === 'rock' || rockIsland > 0.52 || rugged > 0.62) return 'rock';
-  if (moisture > 0.5 && elevation < 0.58) return 'forest';
-  if (moisture < 0.28) return 'scrub';
-  return 'meadow';
+  return 'scrub';
 }
 
 export function getFloorKind(wx, wz, tx = null, tz = null) {
   if (isInBase(wx, wz)) return 'dirt';
-
-  let rockIsland;
-  let dirtIsland;
-  if (tx !== null && tz !== null) {
-    rockIsland = maxIslandAtTile(tx, tz, 'rockIsland');
-    dirtIsland = maxIslandAtTile(tx, tz, 'dirtIsland');
-  } else {
-    ({ rockIsland, dirtIsland } = sampleTerrain(wx, wz));
-  }
-
-  if (rockIsland > 0.84) return 'rock';
-  if (dirtIsland > 0.82) return 'dirt';
-
   return 'grass';
 }
 
@@ -203,20 +184,20 @@ export function getFloorSpriteName(kind) {
 }
 
 export function getGrassTint(wx, wz) {
-  const { elevation, moisture } = sampleTerrain(wx, wz);
+  const broad = fbm(wx * 0.018 + 120, wz * 0.018 - 80, 3);
+  const fine = fbm(wx * 0.065 + 340, wz * 0.065 + 210, 2);
+  const mix = broad * 0.62 + fine * 0.38;
 
-  const meadowMix = smoothstep((moisture - 0.18) / 0.45);
-  const forestMix = smoothstep((moisture - 0.48) / 0.38)
-    * (1 - smoothstep((elevation - 0.44) / 0.35));
-  const dryMix = 1 - meadowMix;
+  let tint = lerpRgb(_tintScrubA, _tintScrubB, mix);
+  const dryFade = smoothstep((0.72 - mix) / 0.35);
+  if (dryFade > 0) tint = lerpRgb(tint, _tintScrubDry, dryFade * 0.55);
 
-  let tint = lerpRgb(_tintDry, _tintMeadow, meadowMix);
-  tint = lerpRgb(tint, _tintForest, forestMix * 0.8);
+  const tileHash = hash01(Math.floor(wx / TILE), Math.floor(wz / TILE));
+  const micro = (tileHash - 0.5) * 0.08;
+  tint = lerpRgb(tint, _tintScrubDry, Math.max(0, micro));
+  tint = lerpRgb(tint, _tintScrubB, Math.max(0, -micro));
 
-  const dryPush = dryMix * smoothstep((0.3 - moisture) / 0.22);
-  if (dryPush > 0) tint = lerpRgb(tint, _tintDry, dryPush * 0.4);
-
-  const bright = 0.97 + fbm(wx * 0.02 + 300, wz * 0.02 - 120, 2) * 0.006;
+  const bright = 0.965 + fbm(wx * 0.024 + 300, wz * 0.024 - 120, 2) * 0.035;
   return {
     r: Math.min(255, Math.round(tint.r * bright)),
     g: Math.min(255, Math.round(tint.g * bright)),
@@ -250,10 +231,12 @@ function tileCenterTint(tx, tz, memo) {
 }
 
 export function getGrassTintGradient(wx, wz, tx, tz, memo = null) {
+  const a = getGrassTint(tx * TILE + TILE * 0.25, tz * TILE + TILE * 0.25);
+  const b = getGrassTint(tx * TILE + TILE * 0.75, tz * TILE + TILE * 0.75);
   const c = memo
     ? tileCenterTint(tx, tz, memo)
     : getGrassTint(tx * TILE + TILE * 0.5, tz * TILE + TILE * 0.5);
-  return { a: c, c, b: c };
+  return { a, c, b };
 }
 
 export function packTint(tint) {
@@ -431,24 +414,18 @@ function pickFoliageForTile(tx, tz, floorKind, foliage, obstacles, reserved, wx,
 
   const scatter = hash01(tx * 113 + 5, tz * 97 + 11);
   const accent = hash01(tx * 127 + 19, tz * 91 + 31);
-  const biome = getBiome(wx, wz);
 
   if (floorKind === 'grass') {
-    const { moisture } = sampleTerrain(wx, wz);
-
-    if (floorKind === 'grass') {
-      const tallDensity = inFoliagePatch(tx, tz, 0.11, 44, -22, 0.22);
-      if (tallDensity > 0) {
-        const tallChance = 0.02 + tallDensity * 0.1;
-        if (hash01(tx * 59 + 41, tz * 83 + 47) < tallChance) {
-          if (tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickTallGrassVariant(tx, tz, 41), 41, tintMemo)) return;
-        }
+    const tallDensity = inFoliagePatch(tx, tz, 0.11, 44, -22, 0.22);
+    if (tallDensity > 0) {
+      const tallChance = 0.02 + tallDensity * 0.1;
+      if (hash01(tx * 59 + 41, tz * 83 + 47) < tallChance) {
+        if (tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickTallGrassVariant(tx, tz, 41), 41, tintMemo)) return;
       }
     }
 
     if (!isInBase(wx, wz)) {
-      const bushThreshold = biome === 'forest' ? 0.28 : biome === 'meadow' ? 0.34 : 0.4;
-      const bushDensity = inFoliagePatch(tx, tz, 0.09, 120, 80, bushThreshold);
+      const bushDensity = inFoliagePatch(tx, tz, 0.09, 120, 80, 0.4);
       if (bushDensity > 0) {
         const bushChance = 0.02 + bushDensity * 0.1;
         if (hash01(tx * 191 + 11, tz * 197 + 13) < bushChance) {
@@ -472,17 +449,6 @@ function pickFoliageForTile(tx, tz, floorKind, foliage, obstacles, reserved, wx,
   if (floorKind === 'dirt') {
     if (hash01(tx * 201 + 5, tz * 193 + 9) < 0.05 + accent * 0.05) {
       tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickPebbleVariant(tx, tz, 61), 61, tintMemo);
-    }
-    return;
-  }
-
-  if (floorKind === 'rock') {
-    const rockChance = 0.03 + accent * 0.2;
-    if (scatter < rockChance) {
-      if (tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, 'rock', 0, tintMemo)) return;
-    }
-    if (hash01(tx * 211 + 7, tz * 199 + 11) < 0.05 + accent * 0.06) {
-      tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickPebbleVariant(tx, tz, 71), 71, tintMemo);
     }
   }
 }

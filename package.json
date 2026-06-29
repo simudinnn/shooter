@@ -4,10 +4,10 @@
   "description": "2.5D top-down robot shooter",
   "type": "module",
   "scripts": {
-    "start": "npx --yes serve . -p 3000",
+    "start": "node server/dev-server.mjs",
     "start:https": "npx --yes serve . -p 3000 -S",
-    "start:network": "npx --yes serve . -p 3000 -S",
-    "dev": "npx --yes serve . -p 3000",
+    "start:network": "node server/dev-server.mjs",
+    "dev": "node server/dev-server.mjs",
     "lan-server": "node server/lan-server.mjs",
     "pwa:icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-pwa-icons.ps1",
     "inventory:template": "powershell -ExecutionPolicy Bypass -File scripts/generate-inventory-template.ps1",

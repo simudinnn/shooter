@@ -29,7 +29,7 @@ export const CHEST_KIT_KEYS = ['repair_kit', 'sewing_kit', 'splint_kit', 'upgrad
 
 const CHEST_LOOT_KEYS = [...CHEST_MATERIAL_KEYS, ...CHEST_KIT_KEYS];
 
-export const LOOT_EMPTY_WEIGHT = 130;
+export const LOOT_EMPTY_WEIGHT = 700;
 
 const RARITY_WEIGHT = {
   common: 50,
@@ -40,19 +40,19 @@ const RARITY_WEIGHT = {
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
-  { key: 'metal', rarity: 'common', min: 1, max: 8 },
-  { key: 'plastic', rarity: 'common', min: 1, max: 8 },
-  { key: 'fabric', rarity: 'common', min: 1, max: 8 },
-  { key: 'glass', rarity: 'common', min: 1, max: 5 },
+  { key: 'metal', rarity: 'common', min: 1, max: 3 },
+  { key: 'plastic', rarity: 'common', min: 1, max: 3 },
+  { key: 'fabric', rarity: 'common', min: 1, max: 3 },
+  { key: 'glass', rarity: 'common', min: 1, max: 3 },
   { key: 'nails', rarity: 'common', min: 1, max: 2 },
   { key: 'wires', rarity: 'common', min: 1, max: 3 },
-  { key: 'chemicals', rarity: 'common', min: 1, max: 3 },
-  { key: 'cloth', rarity: 'common', min: 1, max: 3 },
+  { key: 'chemicals', rarity: 'common', min: 1, max: 2 },
+  { key: 'cloth', rarity: 'common', min: 1, max: 2 },
   { key: 'wood', rarity: 'uncommon', min: 1, max: 2 },
   { key: 'adhesive', rarity: 'uncommon', min: 1, max: 2 },
   { key: 'plank', rarity: 'uncommon', min: 1, max: 2 },
   { key: 'rope', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'rubber', rarity: 'uncommon', min: 1, max: 5 },
+  { key: 'rubber', rarity: 'uncommon', min: 1, max: 2 },
   { key: 'tape', rarity: 'uncommon', min: 1, max: 2 },
   { key: 'electrical_comp', rarity: 'uncommon', min: 1, max: 1 },
   { key: 'spring', rarity: 'uncommon', min: 1, max: 2 },

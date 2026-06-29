@@ -88,7 +88,7 @@ export function collectCollisionTargets({ player, robots, exclude = null }) {
 }
 
 /** Push other entities when moving into them (fraction of overlap). */
-export function applyApproachPush(mover, prevX, prevZ, newX, newZ, moverRadius, targets, strength = 0.36) {
+export function applyApproachPush(mover, prevX, prevZ, newX, newZ, moverRadius, targets, strength = 0.36, world = null, ppu = 8) {
   const vx = newX - prevX;
   const vz = newZ - prevZ;
   const vlen = Math.hypot(vx, vz);
@@ -114,13 +114,38 @@ export function applyApproachPush(mover, prevX, prevZ, newX, newZ, moverRadius, 
     if (approach < 0.18) continue;
 
     const push = overlap * strength * approach;
-    ent.x += ux * push;
-    ent.z += uz * push;
+    const nextX = ent.x + ux * push;
+    const nextZ = ent.z + uz * push;
+    if (world && typeof ent.getMoveCollider === 'function') {
+      const shape = ent.getMoveCollider(ppu);
+      const resolved = world.resolveMovementShape(ent.x, ent.z, nextX, nextZ, shape);
+      ent.x = resolved.x;
+      ent.z = resolved.z;
+    } else {
+      ent.x = nextX;
+      ent.z = nextZ;
+    }
   }
 }
 
 export function moveWithEntityCollision(world, x, z, dx, dz, entityShape, worldShape, targets, exclude = null, opts = {}) {
-  const moved = world.moveAxisShape(x, z, dx, dz, worldShape, opts);
+  let moved;
+  if (opts.axisSlide) {
+    moved = world.moveAxisShape(x, z, dx, dz, worldShape, opts);
+    const movedLen = Math.hypot(moved.x - x, moved.z - z);
+    if (movedLen < 1e-5 && Math.abs(dx) > 1e-5 && Math.abs(dz) > 1e-5) {
+      const alt = world.moveAxisShapeZX(x, z, dx, dz, worldShape, opts);
+      if (Math.hypot(alt.x - x, alt.z - z) > movedLen) moved = alt;
+    }
+  } else if (Math.abs(dx) > 1e-5 && Math.abs(dz) > 1e-5) {
+    const diag = world.resolveMovementShape(x, z, x + dx, z + dz, worldShape, opts);
+    const axis = world.moveAxisShape(x, z, dx, dz, worldShape, opts);
+    const diagLen = Math.hypot(diag.x - x, diag.z - z);
+    const axisLen = Math.hypot(axis.x - x, axis.z - z);
+    moved = diagLen >= axisLen * 0.92 ? diag : axis;
+  } else {
+    moved = world.moveAxisShape(x, z, dx, dz, worldShape, opts);
+  }
   let pos = resolveEntityPositionShape(moved.x, moved.z, entityShape, targets, exclude);
   if (world.checkCollisionShape(pos.x, pos.z, worldShape, false, opts)) pos = moved;
   return pos;

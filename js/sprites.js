@@ -216,8 +216,6 @@ export const ENEMY_DRAW_SCALE = {
   scout: 1.6
 };
 
-export const SCOUT_WALK_FPS = 6;
-
 export function getEnemyNativePx(type) {
   return type === 'scout' ? SCOUT_NATIVE_PX : CHAR_NATIVE_PX;
 }
@@ -875,8 +873,27 @@ function buildFallback(name) {
   return c;
 }
 
+/** Deadzone around north/south facings — avoids rapid flipX toggling (degrees from ±Z). */
+export const FLIP_DEADZONE_DEG = 12;
+export const FLIP_X_DEADZONE = Math.sin((FLIP_DEADZONE_DEG * Math.PI) / 180);
+
+export function resolveFlipX(angle, prevFlip = false) {
+  const s = Math.sin(angle);
+  if (s > FLIP_X_DEADZONE) return false;
+  if (s < -FLIP_X_DEADZONE) return true;
+  return prevFlip;
+}
+
 export function isLookingRight(angle) {
-  return Math.sin(angle) >= 0;
+  return Math.sin(angle) > FLIP_X_DEADZONE;
+}
+
+export function getFlipXFromAngle(angle, prevFlip = false) {
+  return resolveFlipX(angle, prevFlip);
+}
+
+export function getPlayerFlipX(player) {
+  return resolveFlipX(player.angle, player._flipX ?? false);
 }
 
 function getMoveSide(moveDirX) {
@@ -890,14 +907,6 @@ export function isMovingForward(player) {
   if (!moveSide) return true;
   const lookRight = isLookingRight(player.angle);
   return (lookRight && moveSide === 'r') || (!lookRight && moveSide === 'l');
-}
-
-export function getFlipXFromAngle(angle) {
-  return !isLookingRight(angle);
-}
-
-export function getPlayerFlipX(player) {
-  return getFlipXFromAngle(player.angle);
 }
 
 /** Melee / hand sprites use a fixed horizontal draw angle; flipX handles left vs right. */
@@ -956,17 +965,6 @@ export function getWalkBounceY(walkPhase, moving, amp = 1.8) {
   return -amp + amp * Math.pow(u, 2.8);
 }
 
-/** Scout walk — synced to walk flipbook fps; heavier landing, shadow stays grounded. */
-export function getScoutWalkBounceY(animTime, moving, fps = SCOUT_WALK_FPS, amp = 2.2) {
-  if (!moving) return 0;
-  const t = (animTime * fps) % 1;
-  if (t < 0.18) {
-    return -Math.pow(t / 0.18, 0.5) * amp;
-  }
-  const u = (t - 0.18) / 0.82;
-  return -amp + amp * Math.pow(u, 3.6);
-}
-
 export function getPlayerBounceY(player) {
   const amp = player.isSprinting ? 2.8 : 1.8;
   return getWalkBounceY(player.walkPhase, player.isMoving, amp);
@@ -1000,9 +998,9 @@ export function getReloadHoldScreenX(playerCenterX, flipX) {
   return playerCenterX + (flipX ? -RELOAD_HOLD_FORWARD_PX : RELOAD_HOLD_FORWARD_PX);
 }
 
-/** Gun tilts up/down; flips horizontally when aiming left. */
-export function gunAimTransform(worldAngle) {
-  const flipX = Math.sin(worldAngle) < 0;
+/** Gun tilts up/down; flipX uses the same deadzone as the player body. */
+export function gunAimTransform(worldAngle, prevFlip = false) {
+  const flipX = resolveFlipX(worldAngle, prevFlip);
   const angle = Math.asin(Math.max(-1, Math.min(1, Math.cos(worldAngle))));
   return { angle, flipX };
 }
@@ -1027,7 +1025,7 @@ export function getReloadPoseBlend(player, time = 0) {
   if (player.isMeleeActive()) return null;
   const ra = player.reloadAim;
   if (!ra) return null;
-  const aim = gunAimTransform(player.angle);
+  const aim = gunAimTransform(player.angle, player._flipX ?? false);
   const reloadTilt = reloadTiltAtFull();
 
   if (player.weapon?.reloading) {
@@ -1054,7 +1052,7 @@ export function getReloadPoseBlend(player, time = 0) {
 
 /** @deprecated use getReloadPoseBlend */
 export function getHeldWeaponAim(player, time = 0) {
-  const aim = gunAimTransform(player.angle);
+  const aim = gunAimTransform(player.angle, player._flipX ?? false);
   const pose = getReloadPoseBlend(player, time);
   if (pose) return { angle: pose.angle, flipX: pose.flipX };
   return aim;
@@ -1089,17 +1087,13 @@ export function getEnemyBodySheet(type, moving, shootPhase = null) {
   return getWalkSheet(type, moving);
 }
 
-/** Flipbook timing for enemy body sheets. */
+/** Flipbook timing for enemy body sheets — walk rate is fixed via walkPhase, not move speed. */
 export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null, opts = {}) {
   if (type === 'scout' && (shootPhase === 'charging' || shootPhase === 'firing')) {
     const elapsed = chargeAnimStart != null ? Math.max(0, time - chargeAnimStart) : 0;
     return { elapsed };
   }
-  const walkSpeedMult = opts.walkSpeedMult ?? 1;
-  if (opts.walkPhase != null) {
-    return getWalkAnim(moving, 0, opts.walkPhase);
-  }
-  return getWalkAnim(moving, time * walkSpeedMult);
+  return getWalkAnim(moving, 0, opts.walkPhase ?? 0);
 }
 
 /** Time-based flipbook anim for walk sheets (respects SPRITE_ANIM fps). */

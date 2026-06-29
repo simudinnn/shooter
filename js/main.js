@@ -14,7 +14,7 @@ import {
 import { SoundManager } from './audio.js';
 import { ItemManager } from './items.js';
 import { GroundDropManager, GROUND_DROP_DISPLAY_PX, GROUND_DROP_RES_PX } from './groundDrops.js';
-import { getEnemyStatusIcon } from './enemyNav.js';
+import { getEnemyStatusIcon, tickTileFlowField } from './enemyNav.js';
 import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_H, CHEST_DRAW_PIVOT } from './chests.js';
 import {
   BuildingManager,
@@ -39,7 +39,7 @@ import {
   entityFeetZ,
 } from './buildingGen.js';
 import { chestSpriteName } from './loot.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, getScoutWalkBounceY, getFlipXFromAngle, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE, ENEMY_STATUS_ICON_SCALE } from './sprites.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, resolveFlipX, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE, ENEMY_STATUS_ICON_SCALE } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, updateLocomotion, isSprintAnimSpeed } from './collision.js';
 import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
@@ -56,6 +56,14 @@ import {
   resolveVisionOrigin,
 } from './visibility.js';
 import { LanSession, defaultLanUrl } from './lanSession.js';
+import { clearNetEntities } from './netState.js';
+import {
+  isSupabaseConfigured,
+  createRoom,
+  findRoomByCode,
+  registerJoin,
+  closeRoom,
+} from './rooms.js';
 
 const VISION_DARKNESS = 0.15;
 /** Y-sort bias — shadows on the floor, under walls and bodies. */
@@ -172,8 +180,12 @@ class Game {
       damageFlash: document.getElementById('damage-flash'),
       newGameBtn: document.getElementById('new-game-btn'),
       loadGameBtn: document.getElementById('load-game-btn'),
-      hostLanBtn: document.getElementById('host-lan-btn'),
-      joinLanBtn: document.getElementById('join-lan-btn'),
+      playOnlineBtn: document.getElementById('play-online-btn'),
+      createRoomBtn: document.getElementById('create-room-btn'),
+      joinRoomBtn: document.getElementById('join-room-btn'),
+      playerNameInput: document.getElementById('player-name-input'),
+      roomCodeInput: document.getElementById('room-code-input'),
+      roomCodeDisplay: document.getElementById('room-code-display'),
       lanHostInput: document.getElementById('lan-host-input'),
       lanStatus: document.getElementById('lan-status'),
       resumeBtn: document.getElementById('resume-btn'),
@@ -283,6 +295,10 @@ class Game {
     this.paused = false;
     this.lan?.disconnect();
     this.lan = null;
+    if (this._activeRoom?.id) {
+      closeRoom(this._activeRoom.id);
+      this._activeRoom = null;
+    }
     this._hidePauseMenu();
     this._clearKeyboardInput();
     this.touchMove = { x: 0, z: 0 };
@@ -302,70 +318,89 @@ class Game {
     }
   }
 
-  _lanUrlFromInput() {
-    let raw = this.el.lanHostInput?.value?.trim();
-    if (!raw) raw = window.location.hostname || 'localhost';
-    raw = raw.replace(/^ws:\/\//i, '').replace(/\/$/, '');
-    if (!raw.includes(':')) raw = `${raw}:8765`;
-    return `ws://${raw}`;
+  _playerName() {
+    return this.el.playerNameInput?.value?.trim().slice(0, 16) || 'Player';
   }
 
-  async _startLanHost() {
+  _lanUrlFromInput() {
+    let raw = this.el.lanHostInput?.value?.trim();
+    if (!raw) return defaultLanUrl();
+    raw = raw.replace(/^wss?:\/\//i, '').replace(/\/$/, '');
+    const pagePort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+    if (!raw.includes(':')) raw = `${raw}:${pagePort}`;
+    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${wsProto}://${raw}`;
+  }
+
+  async _connectToRoom(room, { isHost = false } = {}) {
     this._setLanStatus('Connecting…');
-    const url = defaultLanUrl();
+    const url = (isHost ? null : room.server_url) || this._lanUrlFromInput() || defaultLanUrl();
     try {
       const lan = new LanSession(this, {
-        isHost: true,
         playerId: null,
-        playerName: 'Host',
+        playerName: this._playerName(),
         url,
+        roomId: room.id,
+        roomSeed: room.seed,
       });
       await lan.connect();
       this.lan = lan;
+      this._activeRoom = isHost ? room : null;
+      if (!isHost) await registerJoin(room.id);
       this._setLanStatus('');
       this._hideMainMenu();
-      await this._bootGame(null, { lan });
-      lan.sendStart(getWorldSeed());
+      await this._bootGame({ worldSeed: lan.sessionSeed }, { lan });
     } catch (err) {
       console.error(err);
       this.lan?.disconnect();
       this.lan = null;
-      this._setLanStatus(`LAN failed: ${err.message}. Run "npm run lan-server" on this PC first.`);
+      this._activeRoom = null;
+      this._setLanStatus(`Online failed: ${err.message}`);
       this._showMainMenu();
     }
   }
 
-  async _startLanJoin() {
-    this._setLanStatus('Connecting…');
-    const url = this._lanUrlFromInput();
+  async _createRoom() {
+    if (!isSupabaseConfigured()) {
+      this._setLanStatus('Set up Supabase first — edit js/supabaseConfig.js and run supabase/setup.sql');
+      return;
+    }
+    this._setLanStatus('Creating room…');
     try {
-      const lan = new LanSession(this, {
-        isHost: false,
-        playerId: null,
-        playerName: 'Guest',
-        url,
-      });
-      await lan.connect();
-      this.lan = lan;
-
-      const boot = async (seed) => {
-        this._setLanStatus('');
-        this._hideMainMenu();
-        await this._bootGame({ worldSeed: seed }, { lan });
-      };
-
-      if (lan.sessionSeed != null) {
-        await boot(lan.sessionSeed);
-      } else {
-        this._setLanStatus('Connected — waiting for host to start…');
-        lan.onStart(boot);
+      const room = await createRoom(this._playerName());
+      this.el.roomCodeDisplay?.classList.remove('hidden');
+      if (this.el.roomCodeDisplay) {
+        this.el.roomCodeDisplay.textContent = `Room code: ${room.code} — share with friends`;
       }
+      await this._connectToRoom(room, { isHost: true });
     } catch (err) {
       console.error(err);
-      this.lan?.disconnect();
-      this.lan = null;
-      this._setLanStatus(`Could not join: ${err.message}`);
+      this._setLanStatus(err.message);
     }
+  }
+
+  async _joinRoom() {
+    if (!isSupabaseConfigured()) {
+      this._setLanStatus('Set up Supabase first — edit js/supabaseConfig.js and run supabase/setup.sql');
+      return;
+    }
+    const code = this.el.roomCodeInput?.value?.trim();
+    if (!code) {
+      this._setLanStatus('Enter a room code');
+      return;
+    }
+    this._setLanStatus('Finding room…');
+    try {
+      const room = await findRoomByCode(code);
+      await this._connectToRoom(room, { isHost: false });
+    } catch (err) {
+      console.error(err);
+      this._setLanStatus(err.message);
+    }
+  }
+
+  async _startOnline() {
+    await this._connectToRoom({ id: 'public', seed: null }, { isHost: false });
   }
 
   _requestNewGame() {
@@ -474,8 +509,14 @@ class Game {
       this.debugCollision = !this.debugCollision;
       return;
     }
-    if (e.code === 'KeyR') this._tryStartReload(performance.now() / 1000);
-    if (e.code === 'KeyE' && this.mobile) this._tryInteract();
+    if (e.code === 'KeyR') {
+      if (this.lan?.isOnline) this.lan.queueReload();
+      else this._tryStartReload(performance.now() / 1000);
+    }
+    if (e.code === 'KeyE') {
+      if (this.lan?.isOnline) this.lan.queueInteract();
+      else if (this.mobile) this._tryInteract();
+    }
     if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
     if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
   }
@@ -497,8 +538,9 @@ class Game {
 
   _bindEvents() {
     this.el.newGameBtn?.addEventListener('click', () => this._requestNewGame());
-    this.el.hostLanBtn?.addEventListener('click', () => this._startLanHost());
-    this.el.joinLanBtn?.addEventListener('click', () => this._startLanJoin());
+    this.el.playOnlineBtn?.addEventListener('click', () => this._startOnline());
+    this.el.createRoomBtn?.addEventListener('click', () => this._createRoom());
+    this.el.joinRoomBtn?.addEventListener('click', () => this._joinRoom());
     this.el.loadGameBtn?.addEventListener('click', () => this._startLoadGame());
     this.el.resumeBtn?.addEventListener('click', () => this._hidePauseMenu());
     this.el.saveGameBtn?.addEventListener('click', () => {
@@ -523,7 +565,14 @@ class Game {
         this.audio.resume();
         if (!this.paused) this.mouseDown = true;
       } else if (e.button === 2 && this.running && !this.paused && !this.inventoryUI?.isOpen()) {
-        if (this._tryPickupGroundDrop()) {
+        if (this.lan?.isOnline) {
+          if (this._getNearbyGroundDropForInteract() || this._getInteractDoor()) {
+            this.lan.queueInteract();
+          } else {
+            const container = this._getLootContainerUnderCursor();
+            if (container) this.inventoryUI.openChest(container);
+          }
+        } else if (this._tryPickupGroundDrop()) {
           /* hovered ground drop takes priority over chest / door */
         } else if (!this._tryToggleNearbyDoor()) {
           const container = this._getLootContainerUnderCursor();
@@ -610,7 +659,10 @@ class Game {
     }, () => { this.mouseDown = false; });
 
     bindPress('mb-reload', () => {
-      if (this.running) this._tryStartReload(performance.now() / 1000);
+      if (this.running) {
+        if (this.lan?.isOnline) this.lan.queueReload();
+        else this._tryStartReload(performance.now() / 1000);
+      }
     });
 
     bindPress('mb-pause', () => this._togglePause());
@@ -620,7 +672,8 @@ class Game {
     bindPress('mb-interact', () => {
       if (this.running) {
         this.audio.resume();
-        this._tryInteract();
+        if (this.lan?.isOnline) this.lan.queueInteract();
+        else this._tryInteract();
       }
     });
 
@@ -798,6 +851,7 @@ class Game {
       this.mouse.sy = cursorSy;
       const desired = this._resolveAimAngle(cursorSx, cursorSy);
       this._rotateAimToward(desired, dt, turnRate);
+      this._syncPlayerFlip();
       return;
     }
 
@@ -805,6 +859,12 @@ class Game {
     this.mouse.wx = target.x;
     this.mouse.wz = target.z;
     this.player.angle = this._resolveAimAngle(this.mouse.sx, this.mouse.sy);
+    this._syncPlayerFlip();
+  }
+
+  _syncPlayerFlip() {
+    if (!this.player) return;
+    this.player._flipX = resolveFlipX(this.player.angle, this.player._flipX ?? false);
   }
 
   _updateCameraFollow(dt) {
@@ -1011,6 +1071,7 @@ class Game {
     if (this.mobile) document.body.classList.add('mobile-ui');
 
     this.lastTime = performance.now();
+    if (this.lan?.isOnline) clearNetEntities(this);
     this._loop();
   }
 
@@ -1051,14 +1112,16 @@ class Game {
   _update(dt, time) {
     if (this.paused) return;
 
+    const online = this.lan?.isOnline;
     this.lan?.tick(dt, this);
 
     const inventoryOpen = this.inventoryUI?.isOpen();
-    this.dayNight?.update(dt);
+    if (!online) this.dayNight?.update(dt);
     this.buildings?.update(this.player, dt);
 
     if (!inventoryOpen) {
-      const { moveX: rawMoveX, moveZ: rawMoveZ } = this._getMoveInput();
+      if (!online) {
+        const { moveX: rawMoveX, moveZ: rawMoveZ } = this._getMoveInput();
       let moveX = rawMoveX;
       let moveZ = rawMoveZ;
 
@@ -1112,6 +1175,8 @@ class Game {
           this.player.radius,
           targets,
           0.42,
+          this.world,
+          PPU,
         );
       }
 
@@ -1178,11 +1243,13 @@ class Game {
         this._lastWalkStep = -1;
         this._lastBounceLand = -1;
       }
+      }
 
       this._updateCameraFollow(dt);
       this._refreshAimVisibility();
       this._syncAim(dt);
 
+      if (!online) {
       const fireEdge = this.mouseDown && !this.prevMouseDown;
       const fireRelease = !this.mouseDown && this.prevMouseDown;
       const wantsShoot = this.player.isAutomaticWeapon()
@@ -1211,6 +1278,7 @@ class Game {
           this._tryStartReload(time);
         }
       }
+      }
 
       this.prevMouseDown = this.mouseDown;
     } else {
@@ -1225,6 +1293,7 @@ class Game {
     }
 
     if (inventoryOpen) this._updateCameraFollow(dt);
+    if (!online) {
     const reloadResult = this.player.updateReload(time);
     if (reloadResult?.ejectCasings > 0) {
       const cfg = WEAPONS[this.player.weaponKey];
@@ -1236,6 +1305,7 @@ class Game {
     this.items.update(dt);
     this.chunkEntities.update(this.player);
     this.bullets.update(dt, this.world, (b) => this._onBulletHit(b), this.player);
+    tickTileFlowField(time, this.world, this.buildings, this.player, this.robots);
     for (const robot of this.robots) {
       robot.update(dt, this.player, this.world, this.robots, (r) => {
         if (this.player.takeDamage(r.meleeDamage, time)) {
@@ -1302,6 +1372,9 @@ class Game {
         }
         robot._prevShootPhase = phase;
       }
+    }
+    } else {
+      this.chunkEntities.update(this.player);
     }
     const breathTarget = getPlayerIdleBreathY(this.player, time);
     this._weaponBreathY += (breathTarget - this._weaponBreathY) * Math.min(1, dt * 18);
@@ -1393,6 +1466,12 @@ class Game {
   _getNearbyGroundDrop() {
     if (!this.groundDrops?.drops?.length) return null;
     return this.groundDrops.getNearby(this.player);
+  }
+
+  _getNearbyGroundDropForInteract() {
+    const drop = this._getHoveredGroundDrop() ?? this._getNearbyGroundDrop();
+    if (!drop || !this.groundDrops.isInPickupRange(this.player, drop)) return null;
+    return drop;
   }
 
   _tryPickupGroundDrop(drop = null) {
@@ -1895,7 +1974,7 @@ class Game {
       };
     }
 
-    const gunAim = gunAimTransform(this.player.angle);
+    const gunAim = gunAimTransform(this.player.angle, this.player._flipX ?? false);
     const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
     const holdOffX = Math.round(Math.sin(this.player.angle) * holdDist * PPU);
     const holdOffY = Math.round(Math.cos(this.player.angle) * holdDist * PPU);
@@ -2259,11 +2338,13 @@ class Game {
         const shootPhase = robot.shoot?.phase ?? null;
         const robotMoving = robot.moving && !robot.emerging
           && shootPhase !== 'charging' && shootPhase !== 'firing';
-        const scoutChaseWalk = isScout && robot.chasing && robotMoving;
-        const scoutWalkMult = scoutChaseWalk ? 1.75 : 1;
-        const walkBounce = isScout
-          ? getScoutWalkBounceY(performance.now() / 1000 * scoutWalkMult, robotMoving && !robot.jump?.active && !robot.jump?.charging)
-          : getWalkBounceY(robot.walkPhase, robotMoving && !robot.jump?.active && !robot.jump?.charging);
+        const canWalkBounce = robotMoving
+          && !robot.jump?.active && !robot.jump?.charging;
+        const walkBounce = getWalkBounceY(
+          robot.walkPhase,
+          canWalkBounce,
+          isScout ? 2.2 : 1.8,
+        );
         const walkBouncePx = Math.round(walkBounce);
         const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
         const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
@@ -2292,11 +2373,11 @@ class Game {
           && shootPhase !== 'charging' && shootPhase !== 'firing';
         const canWalkBounce = robotMoving
           && !robot.jump?.active && !robot.jump?.charging;
-        const scoutChaseWalk = isScout && robot.chasing && robotMoving;
-        const scoutWalkMult = scoutChaseWalk ? 1.75 : 1;
-        const walkBounce = isScout
-          ? getScoutWalkBounceY(drawTime * scoutWalkMult, canWalkBounce)
-          : getWalkBounceY(robot.walkPhase, canWalkBounce);
+        const walkBounce = getWalkBounceY(
+          robot.walkPhase,
+          canWalkBounce,
+          isScout ? 2.2 : 1.8,
+        );
         const walkBouncePx = Math.round(walkBounce);
         const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
         const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
@@ -2328,9 +2409,7 @@ class Game {
           shootPhase,
           drawTime,
           robot.shoot?.animStart,
-          isScout
-            ? { walkSpeedMult: scoutWalkMult }
-            : { walkPhase: robot.walkPhase },
+          { walkPhase: robot.walkPhase },
         );
         ctx.globalAlpha = (0.3 + emerge * 0.7) * visMul;
         this.sprites.draw(
@@ -2340,7 +2419,7 @@ class Game {
           drawY,
           scale,
           0,
-          getFlipXFromAngle(robot.angle),
+          robot._flipX ?? false,
           'center',
           0,
           bodyAnim,
@@ -2381,7 +2460,7 @@ class Game {
         const pz = peer._renderZ ?? peer.z;
         const peerSortZ = this._feetSortZ(px, pz, CHAR_NATIVE_PX, SPRITE_PLAYER);
         const peerBounce = Math.round(getWalkBounceY(peer.walkPhase ?? 0, true));
-        const peerFlip = getFlipXFromAngle(peer._renderAngle ?? peer.angle);
+        const peerFlip = resolveFlipX(peer._renderAngle ?? peer.angle, peer._flipX ?? false);
         drawList.push({
           z: peerSortZ,
           sortBias: SORT_SHADOW,
@@ -2511,6 +2590,7 @@ class Game {
         viewMaxX,
         viewMinZ,
         viewMaxZ,
+        this,
       );
     }
 
@@ -2618,7 +2698,7 @@ class Game {
     }
 
     const biome = getBiome(this.player.x, this.player.z);
-    const zoneNames = { base: 'Base', meadow: 'Meadow', forest: 'Forest', scrub: 'Scrub', rock: 'Rock' };
+    const zoneNames = { base: 'Base', scrub: 'Scrub' };
     if (this.el.zoneLabel) {
       this.el.zoneLabel.textContent = zoneNames[biome] || biome;
     }
@@ -2708,6 +2788,10 @@ class Game {
     this.paused = false;
     this.lan?.disconnect();
     this.lan = null;
+    if (this._activeRoom?.id) {
+      closeRoom(this._activeRoom.id);
+      this._activeRoom = null;
+    }
     const elapsed = (((this.playTimeBase ?? 0) + performance.now() - this.startTime) / 1000).toFixed(1);
     this.audio.lose();
     deleteSave();
