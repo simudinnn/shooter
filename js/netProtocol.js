@@ -1,8 +1,9 @@
 /** Shared multiplayer protocol — dedicated server authoritative. */
 
-export const INPUT_HZ = 20;
-export const SNAPSHOT_HZ = 15;
-export const SIM_HZ = 20;
+export const INPUT_HZ = 60;
+export const SNAPSHOT_HZ = 60;
+export const SIM_HZ = 60;
+export const BUILDING_SNAPSHOT_EVERY = 6;
 
 export const MSG = {
   WELCOME: 'welcome',

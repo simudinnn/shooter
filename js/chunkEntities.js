@@ -23,11 +23,7 @@ export class ChunkEntityManager {
   reset() {}
 
   update(player) {
-    if (this.game.lan?.isOnline) {
-      this._despawnBuildingsFar(player);
-      this._populateBuildingsOnly(player);
-      return;
-    }
+    if (this.game.lan?.isOnline) return;
     this._despawnFar(player);
     this._populateNearby(player);
   }
@@ -110,7 +106,7 @@ export class ChunkEntityManager {
     return !this.game.isWorldPointOnScreen(x, z, 10);
   }
 
-  _despawnFar(player) {
+  _despawnFar(player, { includeBuildings = true } = {}) {
     const d2 = this._despawnDist2();
     const clearedSpiderChunks = new Set();
     const clearedChestChunks = new Set();
@@ -140,8 +136,13 @@ export class ChunkEntityManager {
     }
     this.game.chests.chests = nextChests;
 
+    if (includeBuildings) {
     const nextBuildings = [];
     for (const building of this.game.buildings.buildings) {
+      if (building.persistentTown || building.townAnchorId || building.townId) {
+        nextBuildings.push(building);
+        continue;
+      }
       const cx = building.originX + building.footprintW * 0.5;
       const cz = building.originZ + building.footprintH * 0.5;
       if (this._nearbyDist2(player, cx, cz) <= d2) {
@@ -159,6 +160,7 @@ export class ChunkEntityManager {
       this.game.buildings._unregisterObstacles(building);
     }
     this.game.buildings.buildings = nextBuildings;
+    }
 
     for (const key of clearedSpiderChunks) {
       const chunk = this.world.chunks.get(key);
@@ -222,14 +224,20 @@ export class ChunkEntityManager {
     }
   }
 
-  _despawnBuildingsFar(player) {
+  _despawnBuildingsFarFromAll(players) {
+    if (!players?.length) return;
     const d2 = this._despawnDist2();
     const clearedBuildingChunks = new Set();
     const nextBuildings = [];
     for (const building of this.game.buildings.buildings) {
+      if (building.persistentTown || building.townAnchorId || building.townId) {
+        nextBuildings.push(building);
+        continue;
+      }
       const cx = building.originX + building.footprintW * 0.5;
       const cz = building.originZ + building.footprintH * 0.5;
-      if (this._nearbyDist2(player, cx, cz) <= d2) {
+      const nearAny = players.some((p) => this._nearbyDist2(p, cx, cz) <= d2);
+      if (nearAny) {
         nextBuildings.push(building);
         continue;
       }
@@ -256,6 +264,7 @@ export class ChunkEntityManager {
   }
 
   _populateBuildingsOnly(player) {
+    if (this.game.buildings?._townsBootstrapped) return;
     const { fx, fz } = this._getPlayerForward(player);
     const { cx: pcx, cz: pcz } = this._playerChunk(player);
     const chunks = [];

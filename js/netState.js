@@ -1,7 +1,7 @@
 import { Robot, Scout } from './enemies.js';
 import { TILE } from './worldGen.js';
 
-const LERP_RATE = 14;
+const LERP_RATE = 28;
 
 function lerpVal(cur, target, dt, rate = LERP_RATE) {
   const t = Math.min(1, dt * rate);
@@ -29,6 +29,7 @@ export function applySnapshot(game, snap) {
   applyEnemies(game, snap.enemies ?? []);
   applyBullets(game, snap.bullets ?? []);
   applyDrops(game, snap.drops ?? []);
+  if (snap.buildings) applyBuildings(game, snap.buildings);
 }
 
 function applyPlayers(game, players) {
@@ -55,6 +56,8 @@ function applyPlayers(game, players) {
         moveDirX: 0,
         moveDirZ: 0,
         walkPhase: 0,
+        weaponKey: p.weaponKey ?? 'glock',
+        weaponSlot: p.weaponSlot ?? 'gun',
         _renderX: p.x,
         _renderZ: p.z,
         _renderAngle: p.angle,
@@ -72,6 +75,8 @@ function applyPlayers(game, players) {
     peer.moveDirX = p.moveDirX ?? 0;
     peer.moveDirZ = p.moveDirZ ?? 0;
     peer.walkPhase = p.walkPhase ?? 0;
+    peer.weaponKey = p.weaponKey ?? peer.weaponKey ?? 'glock';
+    peer.weaponSlot = p.weaponSlot ?? peer.weaponSlot ?? 'gun';
     if (peer._renderX == null) {
       peer._renderX = p.x;
       peer._renderZ = p.z;
@@ -85,6 +90,7 @@ function applyPlayers(game, players) {
     pl.health = localSnap.health;
     pl.maxHealth = localSnap.maxHealth;
     if (localSnap.weaponKey) pl.weaponKey = localSnap.weaponKey;
+    if (localSnap.weaponSlot) pl.weaponSlot = localSnap.weaponSlot;
     if (localSnap.ammo != null) pl.ammo = localSnap.ammo;
     pl.isMoving = !!localSnap.isMoving;
     pl.isSprinting = !!localSnap.isSprinting;
@@ -207,6 +213,49 @@ function applyDrops(game, drops) {
   });
 }
 
+import { repaintAllTownStreets } from './townGen.js';
+
+function applyBuildings(game, buildingSaves) {
+  if (!game.buildings || !game.world || !buildingSaves?.length) return;
+
+  const hash = `${buildingSaves.length}:${buildingSaves.map((b) =>
+    `${b.originX},${b.originZ},${b.doorOpen ? 1 : 0}`).join('|')}`;
+  if (game._lastBuildingHash === hash) return;
+  game._lastBuildingHash = hash;
+
+  const keyOf = (b) => `${b.originX},${b.originZ}`;
+  const incoming = new Map(buildingSaves.map((b) => [keyOf(b), b]));
+
+  for (const building of [...game.buildings.buildings]) {
+    if (!incoming.has(keyOf(building))) {
+      game.buildings.remove(building);
+    }
+  }
+
+  for (const saved of buildingSaves) {
+    let building = game.buildings.buildings.find(
+      (b) => b.originX === saved.originX && b.originZ === saved.originZ,
+    );
+    if (!building) {
+      game.buildings.restoreFromSave(saved, game.world);
+      if (saved.townAnchorId != null) {
+        if (!game.buildings._townAnchorsSpawned) game.buildings._townAnchorsSpawned = new Set();
+        game.buildings._townAnchorsSpawned.add(saved.townAnchorId);
+      } else if (saved.townAnchorTx != null) {
+        if (!game.buildings._townAnchorsSpawned) game.buildings._townAnchorsSpawned = new Set();
+        game.buildings._townAnchorsSpawned.add(saved.townAnchorTx);
+      }
+      continue;
+    }
+    if (building.doorOpen !== !!saved.doorOpen) {
+      building.doorOpen = !!saved.doorOpen;
+      game.buildings._syncDoorObstacle(building);
+    }
+  }
+
+  repaintAllTownStreets(game.world, game.buildings.buildings);
+}
+
 /** Smooth remote entities between snapshots. */
 export function interpolateNetState(game, dt) {
   if (!game.lan?.isOnline) return;
@@ -231,8 +280,8 @@ export function interpolateNetState(game, dt) {
       pl._netRenderX = pl._netTargetX;
       pl._netRenderZ = pl._netTargetZ;
     } else if (dist > 0.04) {
-      pl.x += dx * 0.22;
-      pl.z += dz * 0.22;
+      pl.x += dx * 0.35;
+      pl.z += dz * 0.35;
     }
     pl.angle = pl._netRenderAngle;
   }
@@ -260,6 +309,7 @@ export function clearNetEntities(game) {
   game._netEnemyMap?.clear();
   game._netBulletMap?.clear();
   game._netDropMap?.clear();
+  game._lastBuildingHash = null;
   game.robots = [];
   for (const b of game.bullets?.bullets ?? []) {
     b.active = false;

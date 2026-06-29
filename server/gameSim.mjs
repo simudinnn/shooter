@@ -11,6 +11,8 @@ import { BuildingManager } from '../js/buildings.js';
 import { ChestManager } from '../js/chests.js';
 import { DayNightCycle } from '../js/dayNight.js';
 import { ChunkEntityManager } from '../js/chunkEntities.js';
+import { captureBuildingsForNet } from '../js/saveGame.js';
+import { BUILDING_SNAPSHOT_EVERY } from '../js/netProtocol.js';
 import { isMovingForward } from '../js/sprites.js';
 
 const PPU_SIM = 8;
@@ -27,6 +29,8 @@ export class GameSim {
     this.groundDrops = new GroundDropManager(this.world);
     this.chests = new ChestManager(this.world);
     this.buildings = new BuildingManager(this.world, this.chests);
+    this.buildings.spawnAllTowns(this.world);
+    this.world.finalizeWorldGeneration();
     this.dayNight = new DayNightCycle();
     this.kills = 0;
     this.players = new Map();
@@ -35,6 +39,7 @@ export class GameSim {
     this.tick = 0;
     this._nextEntityId = 1;
     this._nextPlayerSlot = 0;
+    this._buildingsDirty = true;
 
     this.ctx = {
       world: this.world,
@@ -141,10 +146,18 @@ export class GameSim {
     this.ctx._anchorPlayer = anchor;
     this.ctx.kills = this.kills;
 
-    if (anchor) {
+    const allPlayers = [...this.players.values()].map((e) => e.player);
+    if (allPlayers.length) {
       this.buildings.update(anchor, dt);
-      this.chunkEntities._despawnFar(anchor);
-      this.chunkEntities._populateBuildingsOnly(anchor);
+      this.chunkEntities._despawnBuildingsFarFromAll(allPlayers);
+      const buildingCountBefore = this.buildings.buildings.length;
+      for (const p of allPlayers) {
+        this.chunkEntities._populateBuildingsOnly(p);
+      }
+      if (this.buildings.buildings.length !== buildingCountBefore) {
+        this._buildingsDirty = true;
+      }
+      this.chunkEntities._despawnFar(anchor, { includeBuildings: false });
       this.chunkEntities._populateEnemiesOnly(anchor);
     }
 
@@ -355,6 +368,7 @@ export class GameSim {
   _tryInteract(player, playerId) {
     const door = this.buildings.getNearbyDoor(player);
     if (door && this.buildings.toggleDoor(door, player)) {
+      this._buildingsDirty = true;
       this._pushEvent({
         event: 'door',
         originX: door.originX,
@@ -404,6 +418,7 @@ export class GameSim {
         health: p.health,
         maxHealth: p.maxHealth,
         weaponKey: p.weaponKey,
+        weaponSlot: p.weaponSlot,
         ammo: p.ammo,
         isMoving: p.isMoving,
         isSprinting: p.isSprinting,
@@ -449,7 +464,7 @@ export class GameSim {
       item: d.item,
     }));
 
-    return {
+    const snap = {
       tick: this.tick,
       time: this.time,
       kills: this.kills,
@@ -462,5 +477,12 @@ export class GameSim {
       bullets,
       drops,
     };
+
+    if (this._buildingsDirty || this.tick % BUILDING_SNAPSHOT_EVERY === 0) {
+      snap.buildings = captureBuildingsForNet(this.buildings);
+      this._buildingsDirty = false;
+    }
+
+    return snap;
   }
 }

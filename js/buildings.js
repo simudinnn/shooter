@@ -1,6 +1,7 @@
 import {
   TILE,
   CHUNK_WORLD,
+  CHUNK_TILES,
   isInBase,
   snapWorldPoint,
 } from './worldGen.js';
@@ -15,8 +16,13 @@ import {
   rollLVariant,
   shapeHeightForWidth,
   generateBuildingCells,
-  rollTownLots,
 } from './buildingTypes.js';
+import {
+  rollTownLayoutAtAnchor,
+  paintTownStreets,
+  repaintAllTownStreets,
+} from './townGen.js';
+import { getTownsInChunk, getRoadNetwork, isHighwayTile } from './highwayGen.js';
 import {
   BUILDING_ART_PX,
   CELL_DOOR,
@@ -26,7 +32,6 @@ import {
   isInsideBuilding,
   entityFeetZ,
   playerSouthEdgeZ,
-  buildingFoliageClearRects,
   buildBuildingDecor,
   buildBuildingInteriorProps,
   barrelScreenSize,
@@ -80,8 +85,8 @@ export function getDoorScreenHitBox(building, worldToScreen) {
   };
 }
 
-export const BUILDING_CHUNK_SPAWN_RATE = 0.48;
-export const TOWN_CLUSTER_CHANCE = 0.58;
+export const BUILDING_CHUNK_SPAWN_RATE = 0.55;
+export const TOWN_CLUSTER_CHANCE = 1;
 export const MAX_NEARBY_BUILDINGS = 18;
 
 const ROOF_FADE_SPEED = 4.5;
@@ -547,26 +552,77 @@ export class BuildingManager {
   }
 
   spawnInChunk(chunk, world, player, canSpawn = null, spawnBias = null) {
-    const centerX = chunk.cx * CHUNK_WORLD + CHUNK_WORLD * 0.5;
-    const centerZ = chunk.cz * CHUNK_WORLD + CHUNK_WORLD * 0.5;
-    if (isInBase(centerX, centerZ)) {
+    if (this._townsBootstrapped) {
+      chunk.buildingsSpawned = true;
+      return;
+    }
+    const anchors = getTownsInChunk(chunk.cx, chunk.cz);
+    if (anchors.length === 0) {
       chunk.buildingsSpawned = true;
       return;
     }
 
-    if (Math.random() >= BUILDING_CHUNK_SPAWN_RATE) {
+    if (!this._townAnchorsSpawned) this._townAnchorsSpawned = new Set();
+
+    if (anchors.every((a) => this._townAnchorsSpawned.has(a.id))) {
       chunk.buildingsSpawned = true;
       return;
     }
 
     if (canSpawn && !canSpawn()) return;
 
-    const asTown = Math.random() < TOWN_CLUSTER_CHANCE;
-    const spawned = asTown
-      ? this._spawnTownInChunk(chunk, world, player, canSpawn, spawnBias)
-      : this._spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias);
+    for (const anchor of anchors) {
+      if (this._townAnchorsSpawned.has(anchor.id)) continue;
+      if (this._spawnTownAtAnchor(anchor, chunk, world, player, canSpawn, spawnBias)) {
+        this._townAnchorsSpawned.add(anchor.id);
+        chunk.buildingsSpawned = true;
+        return;
+      }
+    }
+  }
 
-    if (spawned) chunk.buildingsSpawned = true;
+  /** Place every highway town once at boot (before foliage). */
+  spawnAllTowns(world) {
+    if (!this._townAnchorsSpawned) this._townAnchorsSpawned = new Set();
+
+    for (const anchor of getRoadNetwork().towns) {
+      if (this._townAnchorsSpawned.has(anchor.id)) continue;
+
+      const layout = rollTownLayoutAtAnchor(anchor, anchor.tx * 41, anchor.tz * 43);
+      const cx = Math.floor(anchor.tx / CHUNK_TILES);
+      const cz = Math.floor(anchor.tz / CHUNK_TILES);
+      const chunk = world.getChunk(cx, cz);
+
+      if (this._spawnTownAtAnchor(anchor, chunk, world, null, null, null, { boot: true })) {
+        this._townAnchorsSpawned.add(anchor.id);
+        this._markTownChunksSpawned(world, layout);
+      }
+    }
+
+    this._townsBootstrapped = true;
+    for (const anchor of getRoadNetwork().towns) {
+      const cx = Math.floor(anchor.tx / CHUNK_TILES);
+      const cz = Math.floor(anchor.tz / CHUNK_TILES);
+      for (let dz = -3; dz <= 3; dz++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          const chunk = world.chunks.get(`${cx + dx},${cz + dz}`);
+          if (chunk) chunk.buildingsSpawned = true;
+        }
+      }
+    }
+  }
+
+  _markTownChunksSpawned(world, layout) {
+    const minCX = Math.floor(layout.originTileX * TILE / CHUNK_WORLD);
+    const maxCX = Math.floor((layout.originTileX + layout.townW) * TILE / CHUNK_WORLD);
+    const minCZ = Math.floor(layout.originTileZ * TILE / CHUNK_WORLD);
+    const maxCZ = Math.floor((layout.originTileZ + layout.townDepth) * TILE / CHUNK_WORLD);
+    for (let cz = minCZ; cz <= maxCZ; cz++) {
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        const chunk = world.chunks.get(`${cx},${cz}`);
+        if (chunk) chunk.buildingsSpawned = true;
+      }
+    }
   }
 
   _finalizeBuilding(building, chunk, world) {
@@ -607,8 +663,18 @@ export class BuildingManager {
         reserved,
       ),
     ];
+    this._stripDecorOffRoads(world, building);
     this._registerDecorObstacles(building);
     return building;
+  }
+
+  _stripDecorOffRoads(world, building) {
+    building.decor = (building.decor ?? []).filter((piece) => {
+      const tx = Math.floor(piece.x / TILE);
+      const tz = Math.floor(piece.z / TILE);
+      const tile = world.getTile(tx, tz);
+      return tile?.floorKind !== 'road' && tile?.floorKind !== 'path';
+    });
   }
 
   _registerDecorObstacles(building) {
@@ -635,76 +701,54 @@ export class BuildingManager {
     return true;
   }
 
+  _spawnTownAtAnchor(anchor, chunk, world, player, canSpawn, spawnBias, opts = {}) {
+    const layout = rollTownLayoutAtAnchor(anchor, anchor.tx * 41, anchor.tz * 43);
+    const ox = layout.originTileX * TILE;
+    const oz = layout.originTileZ * TILE;
+
+    if (!this._fitsTownAt(world, ox, oz, layout, player, false, spawnBias, opts)) return false;
+
+    const placedBuildings = [];
+    for (let i = 0; i < layout.lots.length; i++) {
+      if (!opts.boot && canSpawn && !canSpawn()) break;
+      const lot = layout.lots[i];
+      const cellData = generateBuildingCells(lot.w, lot.h, 'rect');
+      const bx = ox + lot.ox * TILE;
+      const bz = oz + lot.oz * TILE;
+      const style = rollBuildingStyle(Math.floor(bx * 0.41 + i * 7), Math.floor(bz * 0.53 + i * 11));
+      const building = buildBuildingPieces(bx, bz, cellData, style);
+      building.townId = `town@${anchor.id}`;
+      building.persistentTown = true;
+      building.townAnchorId = anchor.id;
+      building.townAnchorTx = anchor.tx;
+      building.townAnchorTz = anchor.tz;
+      building.buildingRole = lot.role;
+      this._finalizeBuilding(building, chunk, world);
+      placedBuildings.push(building);
+    }
+    if (placedBuildings.length >= 2) {
+      paintTownStreets(world, layout, placedBuildings);
+      return true;
+    }
+    for (const b of placedBuildings) this.remove(b);
+    return false;
+  }
+
   _spawnTownInChunk(chunk, world, player, canSpawn, spawnBias) {
-    const lots = rollTownLots(chunk.cx * 41, chunk.cz * 43, BUILDING_MIN_GAP_TILES);
-    let townWTiles = 0;
-    let townHTiles = 0;
-    for (const lot of lots) {
-      townWTiles = Math.max(townWTiles, lot.ox + lot.w);
-      townHTiles = Math.max(townHTiles, lot.oz + lot.h);
+    const anchors = getTownsInChunk(chunk.cx, chunk.cz);
+    for (const anchor of anchors) {
+      if (this._spawnTownAtAnchor(anchor, chunk, world, player, canSpawn, spawnBias)) return true;
     }
-    const townW = townWTiles * TILE;
-    const townH = townHTiles * TILE;
-
-    const chunkOriginX = chunk.cx * CHUNK_WORLD;
-    const chunkOriginZ = chunk.cz * CHUNK_WORLD;
-    const minX = chunkOriginX - CHUNK_WORLD + TILE;
-    const minZ = chunkOriginZ - CHUNK_WORLD + TILE;
-    const spanX = CHUNK_WORLD * 2 - townW - TILE * 2;
-    const spanZ = CHUNK_WORLD * 2 - townH - TILE * 2;
-    if (spanX < TILE || spanZ < TILE) return this._spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias);
-
-    const fx = spawnBias?.fx ?? 0;
-    const fz = spawnBias?.fz ?? 1;
-    const tries = [];
-    for (let i = 0; i < 20; i++) {
-      tries.push({
-        x: minX + Math.random() * spanX,
-        z: minZ + Math.random() * spanZ,
-      });
-    }
-    if (spawnBias) {
-      tries.sort((a, b) => {
-        const aheadA = (a.x - player.x) * fx + (a.z - player.z) * fz;
-        const aheadB = (b.x - player.x) * fx + (b.z - player.z) * fz;
-        return aheadB - aheadA;
-      });
-    }
-
-    for (const passAhead of [true, false]) {
-      for (const t of tries) {
-        const snapped = snapWorldPoint(t.x, t.z);
-        const ox = Math.floor(snapped.x / TILE) * TILE;
-        const oz = Math.floor(snapped.z / TILE) * TILE;
-        if (!this._fitsTownAt(world, ox, oz, lots, player, passAhead, spawnBias)) continue;
-
-        let placed = 0;
-        for (let i = 0; i < lots.length; i++) {
-          if (canSpawn && !canSpawn()) break;
-          const lot = lots[i];
-          const cellData = generateBuildingCells(lot.w, lot.h, 'rect');
-          const bx = ox + lot.ox * TILE;
-          const bz = oz + lot.oz * TILE;
-          const style = rollBuildingStyle(Math.floor(bx * 0.41 + i * 7), Math.floor(bz * 0.53 + i * 11));
-          const building = buildBuildingPieces(
-            bx,
-            bz,
-            cellData,
-            style,
-          );
-          building.townId = `${chunk.cx},${chunk.cz}`;
-          this._finalizeBuilding(building, chunk, world);
-          placed++;
-        }
-        return placed > 0;
-      }
-    }
-    return this._spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias);
+    return false;
   }
 
   _clearFoliageForBuilding(world, building) {
-    for (const rect of buildingFoliageClearRects(building)) {
-      world.clearFoliageInRect(rect.minX, rect.maxX, rect.minZ, rect.maxZ);
+    const baseTx = Math.round(building.originX / TILE);
+    const baseTz = Math.round(building.originZ / TILE);
+    for (let dz = 0; dz < building.h; dz++) {
+      for (let dx = 0; dx < building.w; dx++) {
+        world.clearFoliageOnTile(baseTx + dx, baseTz + dz, true);
+      }
     }
   }
 
@@ -732,6 +776,11 @@ export class BuildingManager {
     building.doorOpen = !!saved.doorOpen;
     building.homeCx = saved.homeCx;
     building.homeCz = saved.homeCz;
+    building.townId = saved.townId ?? null;
+    building.townAnchorId = saved.townAnchorId ?? null;
+    building.townAnchorTx = saved.townAnchorTx ?? null;
+    building.townAnchorTz = saved.townAnchorTz ?? null;
+    building.buildingRole = saved.buildingRole ?? null;
     building.obstacleDefs = building.obstacles;
     building.obstacles = [];
     this._registerObstacles(building);
@@ -773,6 +822,7 @@ export class BuildingManager {
         reserved,
       ),
     ];
+    this._stripDecorOffRoads(world, building);
     this._registerDecorObstacles(building);
     this.buildings.push(building);
 
@@ -787,9 +837,14 @@ export class BuildingManager {
   }
 
   restoreAllFromSave(saves, world) {
+    if (!this._townAnchorsSpawned) this._townAnchorsSpawned = new Set();
     for (const saved of saves ?? []) {
       this.restoreFromSave(saved, world);
+      if (saved.townAnchorTx != null) this._townAnchorsSpawned.add(saved.townAnchorTx);
+      if (saved.townAnchorId != null) this._townAnchorsSpawned.add(saved.townAnchorId);
     }
+    repaintAllTownStreets(world, this.buildings);
+    this._townsBootstrapped = true;
   }
 
   _registerObstacles(building) {
@@ -819,10 +874,10 @@ export class BuildingManager {
     building.obstacles = [];
   }
 
-  _fitsAt(world, originX, originZ, w, h, cells = null) {
+  _fitsAt(world, originX, originZ, w, h, cells = null, { allowInBase = false } = {}) {
     const footprintW = w * TILE;
     const footprintH = h * TILE;
-    if (isInBase(originX + footprintW * 0.5, originZ + footprintH * 0.5)) return false;
+    if (!allowInBase && isInBase(originX + footprintW * 0.5, originZ + footprintH * 0.5)) return false;
 
     const candidateFootprint = getBuildingFootprintRect(originX, originZ, w, h);
 
@@ -842,6 +897,11 @@ export class BuildingManager {
           const cell = cells[tz * w + tx];
           if (cell !== CELL_FLOOR && cell !== CELL_DOOR) continue;
         }
+        const worldTx = Math.floor(originX / TILE) + tx;
+        const worldTz = Math.floor(originZ / TILE) + tz;
+        if (isHighwayTile(worldTx, worldTz)) return false;
+        const floorTile = world.getTile(worldTx, worldTz);
+        if (floorTile?.floorKind === 'road' || floorTile?.floorKind === 'path') return false;
         const cx = originX + (tx + 0.5) * TILE;
         const cz = originZ + (tz + 0.5) * TILE;
         if (world.checkCollision(cx, cz, 0.45)) return false;
@@ -850,18 +910,19 @@ export class BuildingManager {
     return true;
   }
 
-  _fitsTownAt(world, ox, oz, lots, player, requireAhead, spawnBias) {
-    const townW = Math.max(...lots.map((l) => l.ox + l.w)) * TILE;
-    const townH = Math.max(...lots.map((l) => l.oz + l.h)) * TILE;
+  _fitsTownAt(world, ox, oz, layout, player, requireAhead, spawnBias, opts = {}) {
+    const lots = layout.lots;
+    const townW = layout.townW * TILE;
+    const townH = layout.townDepth * TILE;
     const cx = ox + townW * 0.5;
     const cz = oz + townH * 0.5;
     const fx = spawnBias?.fx ?? 0;
     const fz = spawnBias?.fz ?? 1;
-    if (requireAhead && spawnBias) {
-      if ((cx - player.x) * fx + (cz - player.z) * fz < 4) return false;
+    if (!opts.boot && requireAhead && spawnBias) {
+      if ((cx - player.x) * fx + (cz - player.z) * fz < 2) return false;
     }
-    if (spawnBias?.isOffScreen && !spawnBias.isOffScreen(cx, cz)) return false;
-    if (player) {
+    if (!opts.boot && spawnBias?.isOffScreen && requireAhead && !spawnBias.isOffScreen(cx, cz)) return false;
+    if (player && !opts.boot) {
       const pdx = cx - player.x;
       const pdz = cz - player.z;
       if (pdx * pdx + pdz * pdz < 6) return false;
@@ -877,7 +938,7 @@ export class BuildingManager {
         if (buildingFootprintsTooClose(footprint, prev)) return false;
       }
       lotFootprints.push(footprint);
-      if (!this._fitsAt(world, bx, bz, lot.w, lot.h, cellData.cells)) return false;
+      if (!this._fitsAt(world, bx, bz, lot.w, lot.h, cellData.cells, { allowInBase: true })) return false;
     }
     return true;
   }

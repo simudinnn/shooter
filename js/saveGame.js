@@ -45,10 +45,8 @@ function cloneSlots(slots) {
 }
 
 /** Snapshot live game state for localStorage. */
-export function captureGameState(game) {
-  const { player, world, dayNight, buildings, chests, robots } = game;
-
-  const buildingSaves = (buildings?.buildings ?? []).map((b) => ({
+export function captureBuildingsForNet(buildings) {
+  return (buildings?.buildings ?? []).map((b) => ({
     originX: b.originX,
     originZ: b.originZ,
     w: b.w,
@@ -61,6 +59,33 @@ export function captureGameState(game) {
     style: { ...b.style },
     homeCx: b.homeCx,
     homeCz: b.homeCz,
+    townId: b.townId ?? null,
+    townAnchorId: b.townAnchorId ?? null,
+    townAnchorTx: b.townAnchorTx ?? null,
+    townAnchorTz: b.townAnchorTz ?? null,
+    buildingRole: b.buildingRole ?? null,
+  }));
+}
+
+export function captureBuildings(buildings) {
+  return (buildings?.buildings ?? []).map((b) => ({
+    originX: b.originX,
+    originZ: b.originZ,
+    w: b.w,
+    h: b.h,
+    cells: [...b.cells],
+    doorTx: b.doorTx,
+    doorTz: b.doorTz ?? b.h - 1,
+    doorOpen: !!b.doorOpen,
+    shape: b.shape ?? 'rect',
+    style: { ...b.style },
+    homeCx: b.homeCx,
+    homeCz: b.homeCz,
+    townId: b.townId ?? null,
+    townAnchorId: b.townAnchorId ?? null,
+    townAnchorTx: b.townAnchorTx ?? null,
+    townAnchorTz: b.townAnchorTz ?? null,
+    buildingRole: b.buildingRole ?? null,
     chestTiles: (b.chestTiles ?? (b.chestTile ? [b.chestTile] : [])).map((t) => ({ ...t })),
     chests: (b.chests ?? (b.chest ? [b.chest] : [])).map((c) => ({
       x: c.x,
@@ -79,6 +104,12 @@ export function captureGameState(game) {
         }
       : null,
   }));
+}
+
+export function captureGameState(game) {
+  const { player, world, dayNight, buildings, chests, robots } = game;
+
+  const buildingSaves = captureBuildings(buildings);
 
   const robotSaves = (robots ?? [])
     .filter((r) => r.alive || r.emerging)

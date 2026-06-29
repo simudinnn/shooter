@@ -1,21 +1,41 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, isSupabaseConfigured } from './supabaseConfig.js';
+import {
+  resolveSupabaseUrl,
+  SUPABASE_ANON_KEY,
+  isSupabaseConfigured,
+} from './supabaseConfig.js';
+import { resolveGameServerUrl } from './gameConfig.js';
 import { rollWorldSeed } from './worldGen.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-let client = null;
-
-export function defaultServerUrl() {
-  const { protocol, hostname, port } = window.location;
-  const wsProto = protocol === 'https:' ? 'wss:' : 'ws:';
-  const hostPort = port ? `${hostname}:${port}` : hostname;
-  return `${wsProto}//${hostPort}`;
+function apiHeaders(extra = {}) {
+  return {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    ...extra,
+  };
 }
 
-function db() {
-  if (!client) client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return client;
+async function rest(path, options = {}) {
+  const base = resolveSupabaseUrl();
+  const res = await fetch(`${base}/rest/v1/${path}`, {
+    ...options,
+    headers: apiHeaders(options.headers),
+  });
+
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const body = await res.json();
+      msg = body.message || body.error || body.hint || msg;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+
+  if (res.status === 204) return null;
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
 }
 
 function randomCode(len = 6) {
@@ -28,32 +48,36 @@ function randomCode(len = 6) {
 
 export { isSupabaseConfigured };
 
-export async function createRoom(hostName = 'Host', serverUrl = null) {
+export async function createRoom(hostName = 'Host') {
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase not configured — edit js/supabaseConfig.js');
   }
 
   const name = hostName.slice(0, 16) || 'Host';
   const seed = rollWorldSeed();
-  const wsUrl = serverUrl || defaultServerUrl();
+  const serverUrl = resolveGameServerUrl();
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomCode();
-    const { data, error } = await db()
-      .from('game_rooms')
-      .insert({
-        code,
-        host_name: name,
-        seed,
-        player_count: 1,
-        status: 'open',
-        server_url: wsUrl,
-      })
-      .select()
-      .single();
-
-    if (!error) return data;
-    if (error.code !== '23505') throw new Error(error.message);
+    try {
+      const rows = await rest('game_rooms', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          code,
+          host_name: name,
+          seed,
+          player_count: 1,
+          status: 'open',
+          server_url: serverUrl,
+        }),
+      });
+      const room = Array.isArray(rows) ? rows[0] : rows;
+      if (room) return normalizeRoom(room);
+    } catch (err) {
+      if (String(err.message).includes('duplicate') || String(err.message).includes('unique')) continue;
+      throw err;
+    }
   }
 
   throw new Error('Could not create room — try again');
@@ -67,39 +91,52 @@ export async function findRoomByCode(code) {
   const normalized = String(code || '').trim().toUpperCase();
   if (normalized.length < 4) throw new Error('Enter a valid room code');
 
-  const { data, error } = await db()
-    .from('game_rooms')
-    .select('*')
-    .eq('code', normalized)
-    .eq('status', 'open')
-    .maybeSingle();
+  const rows = await rest(
+    `game_rooms?code=eq.${encodeURIComponent(normalized)}&status=eq.open&select=*&limit=1`,
+  );
+  const room = Array.isArray(rows) ? rows[0] : rows;
+  if (!room) throw new Error('Room not found — check the code');
 
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error('Room not found — check the code');
-  if (data.player_count >= data.max_players) throw new Error('Room is full');
-
-  return data;
+  const parsed = normalizeRoom(room);
+  if (parsed.player_count >= parsed.max_players) throw new Error('Room is full');
+  return parsed;
 }
 
 export async function registerJoin(roomId) {
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured() || !roomId) return;
 
-  const { data: room, error: readErr } = await db()
-    .from('game_rooms')
-    .select('player_count, max_players')
-    .eq('id', roomId)
-    .maybeSingle();
+  const rows = await rest(
+    `game_rooms?id=eq.${encodeURIComponent(roomId)}&select=player_count,max_players&limit=1`,
+  );
+  const room = Array.isArray(rows) ? rows[0] : rows;
+  if (!room || room.player_count >= room.max_players) return;
 
-  if (readErr || !room) return;
-  if (room.player_count >= room.max_players) return;
-
-  await db()
-    .from('game_rooms')
-    .update({ player_count: room.player_count + 1 })
-    .eq('id', roomId);
+  await rest(`game_rooms?id=eq.${encodeURIComponent(roomId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ player_count: room.player_count + 1 }),
+  });
 }
 
 export async function closeRoom(roomId) {
   if (!isSupabaseConfigured() || !roomId) return;
-  await db().from('game_rooms').update({ status: 'closed' }).eq('id', roomId);
+  await rest(`game_rooms?id=eq.${encodeURIComponent(roomId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ status: 'closed' }),
+  });
+}
+
+function normalizeRoom(room) {
+  return {
+    ...room,
+    seed: Number(room.seed) >>> 0,
+    player_count: Number(room.player_count) || 0,
+    max_players: Number(room.max_players) || 8,
+    server_url: room.server_url || resolveGameServerUrl(),
+  };
+}
+
+export function roomWebSocketUrl(room) {
+  return room?.server_url || resolveGameServerUrl();
 }

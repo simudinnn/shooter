@@ -12,6 +12,8 @@ FLOORS = [
     'floor_grass',
     'floor_dirt',
     'floor_rock',
+    'floor_road',
+    'floor_path',
 ]
 
 FOLIAGE = [

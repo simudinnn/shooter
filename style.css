@@ -67,6 +67,71 @@ body.game-active #game-canvas {
   cursor: none;
 }
 
+body.menu-custom-cursor,
+body.menu-custom-cursor *,
+body.menu-custom-cursor #game-canvas {
+  cursor: none !important;
+}
+
+.menu-cursor-follow {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+  z-index: 500;
+  visibility: hidden;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+body.mobile-ui .menu-cursor-follow {
+  display: none;
+}
+
+#loading-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 12, 10, 0.92);
+  z-index: 120;
+}
+
+#loading-screen.hidden {
+  display: none;
+}
+
+.loading-frame {
+  min-width: min(92vw, 360px);
+}
+
+.loading-bar {
+  width: 100%;
+  height: 14px;
+  margin: 18px 0 10px;
+  border: 2px solid #3a4a3a;
+  background: #1a221a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+#loading-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #6a8a4a, #9ab86a);
+  transition: width 0.15s ease-out;
+}
+
+.loading-status {
+  margin: 0;
+  text-align: center;
+  color: #b8c8a8;
+  font-size: 14px;
+}
+
 body.game-active.mobile-ui {
   cursor: default;
 }
@@ -237,6 +302,15 @@ canvas {
   font-size: 0.95rem;
   color: #b8e986;
   letter-spacing: 0.08em;
+}
+
+.pause-room-code {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+  color: #b8e986;
+  letter-spacing: 0.2em;
+  text-align: center;
+  font-weight: bold;
 }
 
 .menu-lan-advanced {

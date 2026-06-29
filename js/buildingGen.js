@@ -961,23 +961,9 @@ export function foliageOverlapsBuildingInterior(building, foliage) {
   );
 }
 
+/** Clear all foliage on the building footprint (walls + interior); exterior tiles keep grass. */
 export function buildingFoliageClearRects(building) {
-  const pad = TILE;
-  const { originX, originZ, w, h, cells } = building;
-  const rects = [];
-  for (let tz = 0; tz < h; tz++) {
-    for (let tx = 0; tx < w; tx++) {
-      const cell = cells[tz * w + tx];
-      if (cell !== CELL_FLOOR && cell !== CELL_DOOR) continue;
-      rects.push({
-        minX: originX + tx * TILE - pad,
-        maxX: originX + (tx + 1) * TILE + pad,
-        minZ: originZ + tz * TILE - pad,
-        maxZ: originZ + (tz + 1) * TILE + pad,
-      });
-    }
-  }
-  return rects;
+  return [getBuildingFootprintRect(building.originX, building.originZ, building.w, building.h)];
 }
 
 /** @deprecated — use buildingFoliageClearRects */

@@ -106,6 +106,5 @@ const httpServer = createServer((req, res) => {
 attachGameServer(httpServer);
 
 const port = await listenWithFallback(httpServer, START_PORT);
-console.log(`\nRobot Ruins running at http://localhost:${port}`);
-console.log(`Open that http:// address in your browser — do NOT open ws:// in the address bar.`);
-console.log(`Multiplayer WebSocket: ws://localhost:${port} (used automatically by the game)\n`);
+console.log(`\nRobot Ruins → http://localhost:${port}`);
+console.log('Share that link with friends. Multiplayer uses the same URL automatically.\n');

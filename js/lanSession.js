@@ -1,10 +1,9 @@
 import { INPUT_HZ, MSG, emptyInput } from './netProtocol.js';
 import { applySnapshot, interpolateNetState, clearNetEntities } from './netState.js';
 import { WEAPONS } from './player.js';
+import { createExplosion } from './enemies.js';
 import {
-  createRobotHitSparks,
   createBloodSplatter,
-  createExplosion,
   createRobotDeathFx,
   createRobotSmoke,
 } from './particles.js';
@@ -33,6 +32,7 @@ export class LanSession {
 
   connect() {
     return new Promise((resolve, reject) => {
+      let settled = false;
       let ws;
       try {
         ws = new WebSocket(this.url);
@@ -43,9 +43,18 @@ export class LanSession {
       this.ws = ws;
 
       const failTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
         reject(new Error('Connection timed out'));
         ws.close();
       }, 8000);
+
+      const fail = (message) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(failTimer);
+        reject(new Error(message));
+      };
 
       ws.onopen = () => {
         this.connected = true;
@@ -58,13 +67,13 @@ export class LanSession {
       };
 
       ws.onerror = () => {
-        clearTimeout(failTimer);
-        reject(new Error('Could not connect'));
+        fail('Could not reach game server — use the hosted game link');
       };
 
       ws.onclose = () => {
         this.connected = false;
         this.isOnline = false;
+        fail('Connection closed');
       };
 
       ws.onmessage = (ev) => {
@@ -74,7 +83,12 @@ export class LanSession {
         } catch {
           return;
         }
-        this._handleMessage(msg, resolve, failTimer);
+        this._handleMessage(msg, () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(failTimer);
+          resolve(this);
+        }, failTimer);
       };
     });
   }
@@ -93,10 +107,7 @@ export class LanSession {
           if (p.id === this.playerId) continue;
           this.peers.set(p.id, this._defaultPeer(p.id, p.name));
         }
-        if (resolveConnect) {
-          resolveConnect(this);
-          resolveConnect = null;
-        }
+        resolveConnect?.();
         break;
       case MSG.JOINED:
         if (msg.player?.id && msg.player.id !== this.playerId) {
@@ -272,9 +283,8 @@ export class LanSession {
   }
 }
 
+import { resolveGameServerUrl } from './gameConfig.js';
+
 export function defaultLanUrl() {
-  const { protocol, hostname, port } = window.location;
-  const wsProto = protocol === 'https:' ? 'wss:' : 'ws:';
-  const hostPort = port ? `${hostname}:${port}` : hostname;
-  return `${wsProto}//${hostPort}`;
+  return resolveGameServerUrl();
 }

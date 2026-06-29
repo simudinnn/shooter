@@ -148,15 +148,24 @@ function nudgeOriginOutOfAabb(ox, oz, a) {
   return { x: a.maxX + inset, z: oz };
 }
 
+function pushBuildingVisionSegments(out, building, vMinX, vMaxX, vMinZ, vMaxZ) {
+  const defs = building.obstacleDefs ?? building.obstacles ?? [];
+  for (const obs of defs) {
+    if (obs.blocksVision === false || obs.isDecor) continue;
+    if (!obs.floorEdge && !obs.doorSeal) continue;
+    pushObstacleFaceSegment(out, obs, vMinX, vMaxX, vMinZ, vMaxZ);
+  }
+}
+
 /** Raycast blockers from collision AABBs (red debug boxes) — not wall-tile silhouettes. */
 export function collectVisionSegments(
   world,
-  _buildings,
+  buildings,
   minX,
   maxX,
   minZ,
   maxZ,
-  _insideBuilding = null,
+  insideBuilding = null,
 ) {
   const out = [];
   const pad = TILE * 2;
@@ -170,12 +179,27 @@ export function collectVisionSegments(
     pushObstacleFaceSegment(out, obs, vMinX, vMaxX, vMinZ, vMaxZ);
   }
 
+  if (insideBuilding) {
+    pushBuildingVisionSegments(out, insideBuilding, vMinX, vMaxX, vMinZ, vMaxZ);
+  }
+  for (const building of buildings ?? []) {
+    if (building === insideBuilding) continue;
+    pushBuildingVisionSegments(out, building, vMinX, vMaxX, vMinZ, vMaxZ);
+  }
+
   return out;
 }
 
 /** Foot-level origin — nudge off collision wall lips (inside or outside). */
-export function resolveVisionOrigin(world, px, pz, _insideBuilding = null) {
+export function resolveVisionOrigin(world, px, pz, insideBuilding = null) {
   const feetZ = playerSouthEdgeZ(px, pz);
+  if (insideBuilding) {
+    return {
+      x: px,
+      z: Math.max(pz - TILE * 0.06, Math.min(feetZ - TILE * 0.1, feetZ + TILE * 0.02)),
+    };
+  }
+
   let ox = px;
   let oz = feetZ - TILE * 0.1;
 

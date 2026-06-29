@@ -1,6 +1,6 @@
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
-import { unpackTintGradient, getBiome, isTreeFoliage, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
+import { unpackTintGradient, isTreeFoliage, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
 import { Robot, Scout, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
 import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
@@ -44,7 +44,7 @@ import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, up
 import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
-import { InventoryUI } from './inventory.js';
+import { InventoryUI, INV_CURSOR_SRC } from './inventory.js';
 import { getWeaponAmmoType, AMMO_TYPES } from './ammo.js';
 import { DayNightCycle, applyNightOverlay } from './dayNight.js';
 import { snapCamLean, worldToScreen, camPixelsFromPlayer, leanPixelsFromOffset, drawPixelEllipseShadow, PPU, INTERNAL_W, INTERNAL_H, RENDER_SCALE } from './renderConfig.js';
@@ -55,7 +55,7 @@ import {
   pointInVisibilityPolygon,
   resolveVisionOrigin,
 } from './visibility.js';
-import { LanSession, defaultLanUrl } from './lanSession.js';
+import { LanSession } from './lanSession.js';
 import { clearNetEntities } from './netState.js';
 import {
   isSupabaseConfigured,
@@ -63,6 +63,7 @@ import {
   findRoomByCode,
   registerJoin,
   closeRoom,
+  roomWebSocketUrl,
 } from './rooms.js';
 
 const VISION_DARKNESS = 0.15;
@@ -161,6 +162,7 @@ class Game {
       mainMenu: document.getElementById('main-menu'),
       menuSubtitle: document.getElementById('menu-subtitle'),
       pauseMenu: document.getElementById('pause-menu'),
+      pauseRoomCode: document.getElementById('pause-room-code'),
       confirmDialog: document.getElementById('confirm-dialog'),
       confirmMessage: document.getElementById('confirm-message'),
       hud: document.getElementById('hud'),
@@ -180,13 +182,11 @@ class Game {
       damageFlash: document.getElementById('damage-flash'),
       newGameBtn: document.getElementById('new-game-btn'),
       loadGameBtn: document.getElementById('load-game-btn'),
-      playOnlineBtn: document.getElementById('play-online-btn'),
       createRoomBtn: document.getElementById('create-room-btn'),
       joinRoomBtn: document.getElementById('join-room-btn'),
       playerNameInput: document.getElementById('player-name-input'),
       roomCodeInput: document.getElementById('room-code-input'),
       roomCodeDisplay: document.getElementById('room-code-display'),
-      lanHostInput: document.getElementById('lan-host-input'),
       lanStatus: document.getElementById('lan-status'),
       resumeBtn: document.getElementById('resume-btn'),
       saveGameBtn: document.getElementById('save-game-btn'),
@@ -196,8 +196,13 @@ class Game {
       mobileControls: document.getElementById('mobile-controls'),
       waveBanner: document.getElementById('wave-banner'),
       inventory: document.getElementById('inventory'),
+      loadingScreen: document.getElementById('loading-screen'),
+      loadingBarFill: document.getElementById('loading-bar-fill'),
+      loadingStatus: document.getElementById('loading-status'),
     };
     this.inventoryUI = new InventoryUI(this);
+    this._menuCursorEl = null;
+    this._onMenuPointerMove = (e) => this._moveMenuCursor(e);
     this._waveBannerTimer = null;
     this._confirmYes = null;
     this._confirmNo = null;
@@ -216,6 +221,7 @@ class Game {
     this.el.hud?.classList.add('hidden');
     document.body.classList.remove('game-active');
     this.el.mobileControls?.classList.add('hidden');
+    this._enableMenuCursor();
     if (deathStats) {
       this.el.menuSubtitle.textContent = deathStats;
       this.el.menuSubtitle.classList.remove('hidden');
@@ -233,6 +239,16 @@ class Game {
   _showPauseMenu() {
     this.paused = true;
     this.el.pauseMenu?.classList.remove('hidden');
+    this._enableMenuCursor();
+    if (this.el.pauseRoomCode) {
+      if (this._roomCode && this.lan?.isOnline) {
+        this.el.pauseRoomCode.textContent = `Room code: ${this._roomCode}`;
+        this.el.pauseRoomCode.classList.remove('hidden');
+      } else {
+        this.el.pauseRoomCode.textContent = '';
+        this.el.pauseRoomCode.classList.add('hidden');
+      }
+    }
     this._clearKeyboardInput();
     this.prevMouseDown = false;
     this.mouseDown = false;
@@ -242,7 +258,56 @@ class Game {
   _hidePauseMenu() {
     this.paused = false;
     this.el.pauseMenu?.classList.add('hidden');
+    this._disableMenuCursor();
     this.canvas.focus();
+  }
+
+  _ensureMenuCursor() {
+    if (this._menuCursorEl) return;
+    this._menuCursorEl = document.createElement('img');
+    this._menuCursorEl.className = 'menu-cursor-follow';
+    this._menuCursorEl.src = INV_CURSOR_SRC;
+    this._menuCursorEl.alt = '';
+    this._menuCursorEl.draggable = false;
+    document.body.appendChild(this._menuCursorEl);
+  }
+
+  _enableMenuCursor() {
+    if (this.mobile) return;
+    this._ensureMenuCursor();
+    document.body.classList.add('menu-custom-cursor');
+    document.addEventListener('pointermove', this._onMenuPointerMove);
+    if (this._menuCursorEl) this._menuCursorEl.style.visibility = 'visible';
+  }
+
+  _disableMenuCursor() {
+    document.removeEventListener('pointermove', this._onMenuPointerMove);
+    document.body.classList.remove('menu-custom-cursor');
+    if (this._menuCursorEl) this._menuCursorEl.style.visibility = 'hidden';
+  }
+
+  _moveMenuCursor(e) {
+    if (!this._menuCursorEl || this.mobile) return;
+    this._menuCursorEl.style.visibility = 'visible';
+    this._menuCursorEl.style.left = `${e.clientX}px`;
+    this._menuCursorEl.style.top = `${e.clientY}px`;
+  }
+
+  _showLoadingScreen() {
+    this._disableMenuCursor();
+    this.el.loadingScreen?.classList.remove('hidden');
+    this.el.mainMenu?.classList.add('hidden');
+    this._setLoadingProgress(0, 'Preparing…');
+  }
+
+  _hideLoadingScreen() {
+    this.el.loadingScreen?.classList.add('hidden');
+  }
+
+  _setLoadingProgress(fraction, message) {
+    const pct = Math.max(0, Math.min(1, fraction)) * 100;
+    if (this.el.loadingBarFill) this.el.loadingBarFill.style.width = `${pct}%`;
+    if (message && this.el.loadingStatus) this.el.loadingStatus.textContent = message;
   }
 
   _showConfirm(message, onYes, onNo) {
@@ -295,6 +360,7 @@ class Game {
     this.paused = false;
     this.lan?.disconnect();
     this.lan = null;
+    this._roomCode = null;
     if (this._activeRoom?.id) {
       closeRoom(this._activeRoom.id);
       this._activeRoom = null;
@@ -322,19 +388,9 @@ class Game {
     return this.el.playerNameInput?.value?.trim().slice(0, 16) || 'Player';
   }
 
-  _lanUrlFromInput() {
-    let raw = this.el.lanHostInput?.value?.trim();
-    if (!raw) return defaultLanUrl();
-    raw = raw.replace(/^wss?:\/\//i, '').replace(/\/$/, '');
-    const pagePort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-    if (!raw.includes(':')) raw = `${raw}:${pagePort}`;
-    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${wsProto}://${raw}`;
-  }
-
   async _connectToRoom(room, { isHost = false } = {}) {
     this._setLanStatus('Connecting…');
-    const url = (isHost ? null : room.server_url) || this._lanUrlFromInput() || defaultLanUrl();
+    const url = roomWebSocketUrl(room);
     try {
       const lan = new LanSession(this, {
         playerId: null,
@@ -345,6 +401,7 @@ class Game {
       });
       await lan.connect();
       this.lan = lan;
+      this._roomCode = room.code || null;
       this._activeRoom = isHost ? room : null;
       if (!isHost) await registerJoin(room.id);
       this._setLanStatus('');
@@ -354,15 +411,19 @@ class Game {
       console.error(err);
       this.lan?.disconnect();
       this.lan = null;
+      this._roomCode = null;
       this._activeRoom = null;
-      this._setLanStatus(`Online failed: ${err.message}`);
+      const hint = window.location.protocol === 'file:'
+        ? 'Open the game via http://localhost (npm start), not as a file.'
+        : 'Make sure the game server is running at this same URL.';
+      this._setLanStatus(`${err.message}. ${hint}`);
       this._showMainMenu();
     }
   }
 
   async _createRoom() {
     if (!isSupabaseConfigured()) {
-      this._setLanStatus('Set up Supabase first — edit js/supabaseConfig.js and run supabase/setup.sql');
+      this._setLanStatus('Supabase not configured — edit js/supabaseConfig.js');
       return;
     }
     this._setLanStatus('Creating room…');
@@ -381,7 +442,7 @@ class Game {
 
   async _joinRoom() {
     if (!isSupabaseConfigured()) {
-      this._setLanStatus('Set up Supabase first — edit js/supabaseConfig.js and run supabase/setup.sql');
+      this._setLanStatus('Supabase not configured — edit js/supabaseConfig.js');
       return;
     }
     const code = this.el.roomCodeInput?.value?.trim();
@@ -397,10 +458,6 @@ class Game {
       console.error(err);
       this._setLanStatus(err.message);
     }
-  }
-
-  async _startOnline() {
-    await this._connectToRoom({ id: 'public', seed: null }, { isHost: false });
   }
 
   _requestNewGame() {
@@ -538,7 +595,6 @@ class Game {
 
   _bindEvents() {
     this.el.newGameBtn?.addEventListener('click', () => this._requestNewGame());
-    this.el.playOnlineBtn?.addEventListener('click', () => this._startOnline());
     this.el.createRoomBtn?.addEventListener('click', () => this._createRoom());
     this.el.joinRoomBtn?.addEventListener('click', () => this._joinRoom());
     this.el.loadGameBtn?.addEventListener('click', () => this._startLoadGame());
@@ -562,7 +618,7 @@ class Game {
     this.canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
         this.canvas.focus();
-        this.audio.resume();
+      this.audio.resume();
         if (!this.paused) this.mouseDown = true;
       } else if (e.button === 2 && this.running && !this.paused && !this.inventoryUI?.isOpen()) {
         if (this.lan?.isOnline) {
@@ -734,7 +790,7 @@ class Game {
       this._aimVisPoly = null;
       return;
     }
-    const cam = this._camera();
+      const cam = this._camera();
     const viewHalfW = INTERNAL_W / PPU / 2 + TILE;
     const viewHalfH = INTERNAL_H / PPU / 2 + TILE;
     const viewMinX = cam.x - viewHalfW;
@@ -1022,7 +1078,6 @@ class Game {
 
     this.world = new World();
     await this.world.build();
-    this.world.prewarmGround(this.sprites, PPU);
     this.player = new Player();
     if (saveData?.player) {
       this.player.applySaveData(saveData.player);
@@ -1045,6 +1100,21 @@ class Game {
 
     if (saveData) {
       this._applySaveState(saveData);
+      this.world.finalizeWorldGeneration();
+      this.world.prewarmGround(this.sprites, PPU);
+    } else {
+      this._showLoadingScreen();
+      await this.world.bootstrapWorld((p, msg) => {
+        this._setLoadingProgress(p * 0.45, msg);
+      });
+      this._setLoadingProgress(0.5, 'Placing towns…');
+      this.buildings.spawnAllTowns(this.world);
+      this._setLoadingProgress(0.75, 'Growing foliage…');
+      this.world.finalizeWorldGeneration();
+      this._setLoadingProgress(0.85, 'Baking terrain…');
+      this.world.prewarmGround(this.sprites, PPU, 8);
+      this._setLoadingProgress(1, 'Ready');
+      this._hideLoadingScreen();
     }
 
     this._weaponBreathY = 0;
@@ -1134,7 +1204,7 @@ class Game {
       const playerPrevZ = this.player.z;
 
       if (wantsMove) {
-        const len = Math.hypot(moveX, moveZ);
+      const len = Math.hypot(moveX, moveZ);
         if (len > 0.01) {
           this.player.moveDirX = moveX / len;
           this.player.moveDirZ = moveZ / len;
@@ -1164,8 +1234,8 @@ class Game {
           targets,
           this.player,
         );
-        this.player.x = r.x;
-        this.player.z = r.z;
+      this.player.x = r.x;
+      this.player.z = r.z;
         applyApproachPush(
           this.player,
           playerPrevX,
@@ -1728,11 +1798,11 @@ class Game {
   }
 
   _fireGun(time) {
-    const w = this.player.shoot(time);
-    const dmgMult = this.player.getDamageMult(time);
-    const pellets = w.pellets || 1;
-    for (let i = 0; i < pellets; i++) {
-      const shot = { ...w, damage: w.damage * dmgMult };
+      const w = this.player.shoot(time);
+      const dmgMult = this.player.getDamageMult(time);
+      const pellets = w.pellets || 1;
+      for (let i = 0; i < pellets; i++) {
+        const shot = { ...w, damage: w.damage * dmgMult };
       this.bullets.spawn(this.player.x, this.player.z, this.player.angle, shot, true, this.world);
     }
     const recoil = this.player.applyShootRecoil();
@@ -1815,20 +1885,20 @@ class Game {
           const fromZ = bullet.z - bullet.vz * 0.02;
           this._damageRobot(robot, bullet.damage, fromX, fromZ, bullet);
           return;
+            }
+          }
+          return;
         }
-      }
-      return;
-    }
 
     if (!this.player?.alive) return;
-    const dx = bullet.x - this.player.x;
-    const dz = bullet.z - this.player.z;
+      const dx = bullet.x - this.player.x;
+      const dz = bullet.z - this.player.z;
     const hitR = this.player.radius + 0.45;
     if (dx * dx + dz * dz >= hitR * hitR) return;
     if (this.player.takeDamage(bullet.damage, time, { perBullet: true })) {
-      this.audio.playerHurt();
-      this.el.damageFlash.classList.add('active');
-      setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
+          this.audio.playerHurt();
+          this.el.damageFlash.classList.add('active');
+          setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
       this.particles.push(...createBloodSplatter(
         this.player.x,
         this.player.z,
@@ -1931,6 +2001,31 @@ class Game {
     if (this.player.isMeleeActive() || this.player.isUnarmed() || drawTime >= this.player.shotFlashUntil) return false;
     const cfg = WEAPONS[this.player.weaponKey];
     return !!(cfg?.shotSprite && weaponDraw.sheet === cfg.shotSprite);
+  }
+
+  _getPeerGunScreenPose(peer, px, pz, bounce, drawTime) {
+    if ((peer.weaponSlot ?? 'gun') !== 'gun' || !peer.weaponKey) return null;
+    const cfg = WEAPONS[peer.weaponKey];
+    if (!cfg?.sprite) return null;
+    const angle = peer._renderAngle ?? peer.angle;
+    const flip = resolveFlipX(angle, peer._flipX ?? false);
+    const playerGs = this._worldToScreen(px, pz);
+    const gunAim = gunAimTransform(angle, flip);
+    const holdDist = GUN_HOLD_OFFSET + gunPivotHoldOffset(gunAim.angle);
+    const holdOffX = Math.round(Math.sin(angle) * holdDist * PPU);
+    const holdOffY = Math.round(Math.cos(angle) * holdDist * PPU);
+    return {
+      isMelee: false,
+      isShotFlash: false,
+      sx: playerGs.x + holdOffX,
+      sy: playerGs.y + holdOffY + bounce,
+      aimAngle: gunAim.angle,
+      aimFlip: gunAim.flipX,
+      pivot: 'shoulder',
+      tilt: 0,
+      weaponDraw: { sheet: cfg.sprite, frame: 0 },
+      weaponAnim: null,
+    };
   }
 
   _getGunScreenPose(drawTime) {
@@ -2050,9 +2145,25 @@ class Game {
     if (clipBounds) ctx.restore();
   }
 
-  _visibilityMul(x, z, useVisFog, visPoly) {
-    if (!useVisFog || !visPoly) return 1;
-    return pointInVisibilityPolygon(x, z, visPoly) ? 1 : 0;
+
+  _drawVisibilityFog(ctx, useVisFog, visPoly, worldToScreen) {
+    if (!useVisFog || !visPoly) return;
+    drawVisibilityOverlay(ctx, visPoly, worldToScreen, INTERNAL_W, INTERNAL_H, VISION_DARKNESS);
+  }
+
+  /** Enemies fade out when outside the vision polygon (still drawn under fog when fading). */
+  _enemyVisAlpha(robot, useVisFog, visPoly, visFadeStep) {
+    if (!useVisFog || !visPoly) {
+      if (robot._visAlpha != null && robot._visAlpha < 0.999) {
+        robot._visAlpha += (1 - robot._visAlpha) * visFadeStep;
+        return robot._visAlpha;
+      }
+      return 1;
+    }
+    const target = pointInVisibilityPolygon(robot.x, entityFeetZ(robot), visPoly) ? 1 : 0;
+    if (robot._visAlpha == null) robot._visAlpha = target;
+    robot._visAlpha += (target - robot._visAlpha) * visFadeStep;
+    return robot._visAlpha;
   }
 
   _drawParticle(ctx, p, visMul = 1) {
@@ -2168,10 +2279,6 @@ class Game {
       drawBuildingFloors(ctx, building, worldToScreen, tilePx, this.sprites);
     }
 
-    if (useVisFog && visPoly) {
-      drawVisibilityOverlay(ctx, visPoly, worldToScreen, INTERNAL_W, INTERNAL_H, VISION_DARKNESS);
-    }
-
     const visFadeStep = 1 - Math.exp(-10 * (this._frameDt ?? 0.016));
 
     const playerSortZ = this._playerSortZ();
@@ -2215,7 +2322,7 @@ class Game {
       return true;
     });
     for (const f of ysortFoliage) {
-      const sortZ = f.sortZ ?? f.z;
+      const sortZ = f.sortZ ?? (f.z + (f.sortZBias ?? 0));
       if (isTreeFoliage(f.kind)) {
         drawList.push({
           z: sortZ,
@@ -2318,13 +2425,7 @@ class Game {
         const shadowRx = (isScout ? 15 : 10) * emerge;
         const shadowRy = (isScout ? 5.5 : 4) * emerge;
         if (shadowRx < 2 || shadowRy < 2) return;
-        let visMul = 1;
-        if (useVisFog && visPoly) {
-          const inVis = pointInVisibilityPolygon(robot.x, entityFeetZ(robot), visPoly);
-          const target = inVis ? 1 : 0;
-          if (robot._visAlpha == null) robot._visAlpha = target;
-          visMul = robot._visAlpha;
-        }
+        const visMul = this._enemyVisAlpha(robot, useVisFog, visPoly, visFadeStep);
         if (visMul <= 0.06) return;
         const shake = robot.getEmergeShake();
         const s = this._worldToScreen(robot.x, robot.z);
@@ -2387,21 +2488,12 @@ class Game {
         if (robot.emerging) {
           const hole = 1 - emerge;
           ctx.fillStyle = `rgba(18, 14, 10, ${0.55 * hole})`;
-          ctx.beginPath();
+        ctx.beginPath();
           ctx.ellipse(s.x, s.y + 9, 8 + hole * 6, 3 + hole * 3, 0, 0, Math.PI * 2);
-          ctx.fill();
+        ctx.fill();
         }
-        let visMul = 1;
-        if (useVisFog && visPoly) {
-          const inVis = pointInVisibilityPolygon(robot.x, entityFeetZ(robot), visPoly);
-          const target = inVis ? 1 : 0;
-          if (robot._visAlpha == null) robot._visAlpha = target;
-          robot._visAlpha += (target - robot._visAlpha) * visFadeStep;
-          visMul = robot._visAlpha;
-        } else if (robot._visAlpha != null && robot._visAlpha < 0.999) {
-          robot._visAlpha += (1 - robot._visAlpha) * visFadeStep;
-          visMul = robot._visAlpha;
-        }
+        const visMul = this._enemyVisAlpha(robot, useVisFog, visPoly, visFadeStep);
+        if (visMul <= 0.06) return;
         const bodySheet = getEnemyBodySheet(robot.type, robotMoving, shootPhase);
         const bodyAnim = getEnemyBodyAnim(
           robot.type,
@@ -2461,6 +2553,17 @@ class Game {
         const peerSortZ = this._feetSortZ(px, pz, CHAR_NATIVE_PX, SPRITE_PLAYER);
         const peerBounce = Math.round(getWalkBounceY(peer.walkPhase ?? 0, true));
         const peerFlip = resolveFlipX(peer._renderAngle ?? peer.angle, peer._flipX ?? false);
+        const peerAngle = peer._renderAngle ?? peer.angle;
+        const fakePlayer = {
+          isMoving: peer.isMoving,
+          isSprinting: peer.isSprinting,
+          moveDirX: peer.moveDirX,
+          moveDirZ: peer.moveDirZ,
+          angle: peerAngle,
+          weaponSlot: peer.weaponSlot ?? 'gun',
+          weaponKey: peer.weaponKey ?? 'glock',
+          walkPhase: peer.walkPhase ?? 0,
+        };
         drawList.push({
           z: peerSortZ,
           sortBias: SORT_SHADOW,
@@ -2475,15 +2578,6 @@ class Game {
           sortBias: SORT_ENTITY,
           draw: () => {
             const s = this._worldToScreen(px, pz);
-            const fakePlayer = {
-              isMoving: peer.isMoving,
-              isSprinting: peer.isSprinting,
-              moveDirX: peer.moveDirX,
-              moveDirZ: peer.moveDirZ,
-              angle: peer._renderAngle ?? peer.angle,
-              weaponSlot: 'gun',
-              weaponKey: 'glock',
-            };
             const sheet = getPlayerSheet(fakePlayer, drawTime);
             const anim = getPlayerAnim(fakePlayer, drawTime);
             ctx.save();
@@ -2496,6 +2590,14 @@ class Game {
             ctx.restore();
           },
         });
+        const peerGunPose = this._getPeerGunScreenPose(peer, px, pz, peerBounce, drawTime);
+        if (peerGunPose) {
+          drawList.push({
+            z: peerSortZ + 0.02,
+            sortBias: SORT_GUN,
+            draw: () => this._drawWeaponSprite(ctx, peerGunPose),
+          });
+        }
       }
     }
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, draw: () => {
@@ -2542,8 +2644,7 @@ class Game {
         z: sortZ,
         sortBias: SORT_ENTITY,
         draw: () => {
-          const visMul = this._visibilityMul(p.x, p.z, useVisFog, visPoly);
-          this._drawParticle(ctx, p, visMul);
+          this._drawParticle(ctx, p, 1);
         },
       });
     }
@@ -2554,10 +2655,9 @@ class Game {
         z: bulletZ,
         sortBias: SORT_ENTITY,
         draw: () => {
-          if (this._visibilityMul(b.x, b.z, useVisFog, visPoly) <= 0) return;
           this._drawBulletTrail(ctx, b);
-          const s = this._worldToScreen(b.x, b.z);
-          const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
+      const s = this._worldToScreen(b.x, b.z);
+      const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
           const bAngle = velToSpriteAngle(b.vx, b.vz);
           this.sprites.draw(ctx, 'bullet', s.x, s.y, bScale, bAngle);
         },
@@ -2565,6 +2665,8 @@ class Game {
     }
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     for (const d of drawList) d.draw();
+
+    this._drawVisibilityFog(ctx, useVisFog, visPoly, worldToScreen);
 
     for (const building of visibleBuildings) {
       const alpha = this.buildings?.roofAlphaFor(building) ?? 1;
@@ -2577,8 +2679,7 @@ class Game {
 
     brightParticles.sort((a, b) => a.z - b.z);
     for (const { p } of brightParticles) {
-      const visMul = this._visibilityMul(p.x, p.z, useVisFog, visPoly);
-      this._drawParticle(ctx, p, visMul);
+      this._drawParticle(ctx, p, 1);
     }
 
     if (this.debugCollision) {
@@ -2697,10 +2798,8 @@ class Game {
       }
     }
 
-    const biome = getBiome(this.player.x, this.player.z);
-    const zoneNames = { base: 'Base', scrub: 'Scrub' };
     if (this.el.zoneLabel) {
-      this.el.zoneLabel.textContent = zoneNames[biome] || biome;
+      this.el.zoneLabel.textContent = '';
     }
 
     if (this.el.gameDay && this.dayNight) {
@@ -2788,6 +2887,7 @@ class Game {
     this.paused = false;
     this.lan?.disconnect();
     this.lan = null;
+    this._roomCode = null;
     if (this._activeRoom?.id) {
       closeRoom(this._activeRoom.id);
       this._activeRoom = null;
@@ -2813,7 +2913,7 @@ class Game {
 
     this._frameDt = dt;
     if (!this.paused) {
-      this._update(dt, time);
+    this._update(dt, time);
       this._checkGameOver();
     }
     this._draw();

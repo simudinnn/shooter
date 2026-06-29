@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v315';
+const CACHE = 'robot-ruins-v338';
 
 function shackSprites() {
   return [
@@ -84,7 +84,7 @@ const PLAYER_SPRITES = playerSprites();
 const WEAPON_SPRITES = weaponSprites();
 
 function worldSprites() {
-  const floors = ['floor_grass', 'floor_dirt', 'floor_rock'];
+  const floors = ['floor_grass', 'floor_dirt', 'floor_rock', 'floor_road', 'floor_path'];
   const foliage = [
     'foliage_grass', 'foliage_grass2', 'foliage_grass3', 'foliage_grass4',
     'foliage_grass_tall', 'foliage_grass_tall2', 'foliage_pebble', 'foliage_pebble2', 'foliage_rock',
@@ -110,6 +110,7 @@ const SHELL = [
   './js/netProtocol.js',
   './js/netState.js',
   './js/supabaseConfig.js',
+  './js/gameConfig.js',
   './js/rooms.js',
   './js/main.js',
   './js/player.js',

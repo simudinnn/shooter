@@ -50,7 +50,7 @@ const ITEM_WEAPON_ASSET_PATHS = Object.fromEntries(
   ITEM_WEAPON_SPRITES.map((base) => [`item_${base}`, `assets/items/weapons/${base}.png`]),
 );
 
-const WORLD_FLOOR_SPRITES = ['floor_grass', 'floor_dirt', 'floor_rock'];
+const WORLD_FLOOR_SPRITES = ['floor_grass', 'floor_dirt', 'floor_rock', 'floor_road', 'floor_path'];
 
 const WORLD_FOLIAGE_SPRITES = [
   'foliage_grass', 'foliage_grass2', 'foliage_grass3', 'foliage_grass4',
