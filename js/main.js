@@ -156,8 +156,8 @@ class Game {
     this.canvas.style.outline = 'none';
     this.ctx = this.canvas.getContext('2d');
     this.renderScale = this.mobile ? 1 : RENDER_SCALE;
-    this.canvas.width = INTERNAL_W * RENDER_SCALE;
-    this.canvas.height = INTERNAL_H * RENDER_SCALE;
+    this.canvas.width = INTERNAL_W * this.renderScale;
+    this.canvas.height = INTERNAL_H * this.renderScale;
     this.ctx.imageSmoothingEnabled = false;
     this._resizeCanvas();
   }
@@ -165,10 +165,9 @@ class Game {
   _resizeCanvas() {
     const bufW = INTERNAL_W * this.renderScale;
     const bufH = INTERNAL_H * this.renderScale;
-    const scale = Math.max(
-      window.innerWidth / bufW,
-      window.innerHeight / bufH,
-    );
+    const vw = window.visualViewport?.width ?? window.innerWidth;
+    const vh = window.visualViewport?.height ?? window.innerHeight;
+    const scale = Math.max(vw / bufW, vh / bufH);
     this.displayScale = scale;
     this.canvas.style.width = `${bufW * scale}px`;
     this.canvas.style.height = `${bufH * scale}px`;
@@ -653,6 +652,8 @@ class Game {
     this.el.confirmYesBtn?.addEventListener('click', () => this._confirmYes?.());
     this.el.confirmNoBtn?.addEventListener('click', () => this._confirmNo?.());
     window.addEventListener('resize', () => this._resizeCanvas());
+    window.visualViewport?.addEventListener('resize', () => this._resizeCanvas());
+    window.visualViewport?.addEventListener('scroll', () => this._resizeCanvas());
 
     window.addEventListener('keydown', (e) => this._onGameKeyDown(e), true);
     window.addEventListener('keyup', (e) => this._onGameKeyUp(e), true);
