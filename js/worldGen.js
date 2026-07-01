@@ -43,9 +43,9 @@ const FOLIAGE = {
   pebble: { sprite: 'foliage_pebble', blocks: false, tinted: false, ysort: false },
   pebble2: { sprite: 'foliage_pebble2', blocks: false, tinted: false, ysort: false },
   rock: { sprite: 'foliage_rock', blocks: true, radius: 0.45, tinted: false, ysort: false },
-  tree: { sprite: 'foliage_tree', blocks: true, radius: 1.35, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 - 0.05 },
-  tree2: { sprite: 'foliage_tree2', blocks: true, radius: 1.35, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 - 0.05 },
-  tree3: { sprite: 'foliage_tree3', blocks: true, radius: 1.35, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 - 0.05 },
+  tree: { sprite: 'foliage_tree', blocks: true, radius: 1, collisionZOff: -TILE * 0.3, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 - 0.05 },
+  tree2: { sprite: 'foliage_tree2', blocks: true, radius: 1, collisionZOff: -TILE * 0.3, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 - 0.05 },
+  tree3: { sprite: 'foliage_tree3', blocks: true, radius: 1, collisionZOff: -TILE * 0.3, tinted: false, ysort: true, drawSize: 4, sortZBias: TILE * 0.01 - 0.05 },
 };
 
 export function snapWorldAxis(v) {
@@ -113,7 +113,7 @@ export function unpackTintGradient(key) {
 export function getTerrainMapColorFromTile(tile) {
   if (tile?.floorKind === 'grass') return '#5a8a50';
   if (tile?.floorKind === 'road') return '#4a4844';
-  if (tile?.floorKind === 'path') return '#6a5c48';
+  if (tile?.floorKind === 'path') return '#a89870';
   return '#6a5840';
 }
 
@@ -144,6 +144,43 @@ export function foliageSpriteBounds(f) {
     minZ: f.z - span,
     maxZ: f.z,
   };
+}
+
+/** Upper canopy region used for player occlusion tests. */
+export function foliageCanopyOcclusionBounds(f) {
+  const b = foliageSpriteBounds(f);
+  const spanX = b.maxX - b.minX;
+  const spanZ = b.maxZ - b.minZ;
+  return {
+    minX: b.minX + spanX * 0.12,
+    maxX: b.maxX - spanX * 0.12,
+    minZ: b.minZ + spanZ * 0.04,
+    maxZ: b.maxZ - spanZ * 0.18,
+  };
+}
+
+function circleIntersectsRect(cx, cz, radius, rect) {
+  const closestX = Math.max(rect.minX, Math.min(cx, rect.maxX));
+  const closestZ = Math.max(rect.minZ, Math.min(cz, rect.maxZ));
+  const dx = cx - closestX;
+  const dz = cz - closestZ;
+  return dx * dx + dz * dz < radius * radius;
+}
+
+/** True when a tree canopy should visually cover the player (depth + overlap). */
+export function treeOccludesPlayer(f, playerX, playerZ, playerRadius, playerSortZ, opts = {}) {
+  if (!isTreeFoliage(f.kind)) return false;
+  const treeSortZ = f.z + (f.sortZBias ?? 0);
+  if (playerSortZ >= treeSortZ - 0.015) return false;
+
+  const playerTopZ = opts.playerTopZ ?? (playerZ - playerRadius * 2.4);
+  const headRadius = opts.headRadius ?? Math.max(0.35, playerRadius * 0.38);
+  return circleIntersectsRect(
+    playerX,
+    playerTopZ,
+    headRadius,
+    foliageCanopyOcclusionBounds(f),
+  );
 }
 
 export function foliageIntersectsRect(f, minX, maxX, minZ, maxZ) {
@@ -180,10 +217,17 @@ function pushFoliage(foliage, obstacles, tx, tz, wx, wz, fKey, jitterSalt = 0) {
   const maxJ = TILE * 0.45;
   const jx = (hash01(tx * 17 + jitterSalt, tz * 23) - 0.5) * maxJ;
   const jz = (hash01(tx * 31 + jitterSalt, tz * 37) - 0.5) * maxJ;
-  const x = wx + jx;
-  const z = wz + jz;
+  let x;
+  let z;
+  if (isTreeFoliage(fKey)) {
+    ({ x, z } = snapPoint(wx, wz));
+  } else {
+    x = wx + jx;
+    z = wz + jz;
+  }
+  const flipX = isTreeFoliage(fKey) ? hash01(tx * 61 + jitterSalt, tz * 67) < 0.5 : false;
 
-  foliage.push({
+  const entry = {
     kind: fKey,
     sprite: def.sprite,
     x,
@@ -191,14 +235,22 @@ function pushFoliage(foliage, obstacles, tx, tz, wx, wz, fKey, jitterSalt = 0) {
     drawSize: def.drawSize ?? 1,
     sortZBias: def.sortZBias ?? 0,
     tintKey: def.tinted ? FOLIAGE_TINT_KEY : 0,
-  });
+    flipX,
+  };
+  foliage.push(entry);
 
   if (def.blocks) {
-    obstacles.push({
-      x,
-      z,
+    const obsX = x + (def.collisionXOff ?? 0);
+    const obsZ = z + (def.collisionZOff ?? 0);
+    const obs = {
+      kind: 'circle',
+      x: obsX,
+      z: obsZ,
       radius: def.radius ?? 0,
-    });
+      _foliage: entry,
+    };
+    entry._obstacle = obs;
+    obstacles.push(obs);
   }
 }
 
@@ -246,14 +298,14 @@ function tileRoll(tx, tz, salt) {
   return hash01(tx * 19 + salt * 3, tz * 29 + salt * 5);
 }
 
-function pickFoliageForTile(tx, tz, foliage, obstacles, reserved, wx, wz) {
+function pickFoliageForTile(tx, tz, foliage, obstacles, reserved, wx, wz, nearRoad = null) {
   if (isFoliageReserved(reserved, tx, tz)) return;
 
   const scatter = hash01(tx * 113 + 5, tz * 97 + 11);
   const detail = hash01(tx * 53 + 7, tz * 71 + 11);
   const outsideBase = !isInBase(wx, wz);
 
-  if (outsideBase && scatter > 0.992) {
+  if (outsideBase && scatter > 0.978 && !nearRoad?.(tx, tz)) {
     if (tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickTreeVariant(tx, tz, 71), 71)) return;
   }
 
@@ -293,7 +345,7 @@ export function generateChunk(cx, cz) {
 }
 
 /** Fill chunk foliage after roads/buildings are placed. skipTile(tx,tz) => true to leave bare. */
-export function populateChunkFoliage(chunk, skipTile = null) {
+export function populateChunkFoliage(chunk, skipTile = null, nearRoad = null) {
   if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
   const reserved = new Set();
   for (const f of chunk.foliage) {
@@ -307,7 +359,7 @@ export function populateChunkFoliage(chunk, skipTile = null) {
       if (skipTile?.(tx, tz)) continue;
       const wx = tx * TILE + TILE * 0.5;
       const wz = tz * TILE + TILE * 0.5;
-      pickFoliageForTile(tx, tz, chunk.foliage, chunk.obstacles, reserved, wx, wz);
+      pickFoliageForTile(tx, tz, chunk.foliage, chunk.obstacles, reserved, wx, wz, nearRoad);
     }
   }
   chunk.foliagePopulated = true;

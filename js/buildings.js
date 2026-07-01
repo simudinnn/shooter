@@ -21,6 +21,9 @@ import {
   rollTownLayoutAtAnchor,
   paintTownStreets,
   repaintAllTownStreets,
+  TOWN_BUILDING_GAP,
+  BUILDING_ROLE,
+  getTownFootprintTiles,
 } from './townGen.js';
 import { getTownsInChunk, getRoadNetwork, isHighwayTile } from './highwayGen.js';
 import {
@@ -34,10 +37,13 @@ import {
   playerSouthEdgeZ,
   buildBuildingDecor,
   buildBuildingInteriorProps,
+  doorApproachExcludeTiles,
   barrelScreenSize,
   getBuildingFootprintRect,
   buildingFootprintsTooClose,
   BUILDING_MIN_GAP_TILES,
+  buildingFoliageClearRects,
+  foliageOverlapsBuildingInterior,
   roofRaiseWorld,
   wallDrawsInFront,
   wallFrontDrawZ,
@@ -54,11 +60,48 @@ import {
   wallSpriteId,
 } from './buildingGen.js';
 
-export { SHACK_SPRITE_MANIFEST, BUILDING_ART_PX } from './buildingGen.js';
+export { BUILDING_ART_PX } from './buildingGen.js';
 
 /** Native pixel size for the open-door sheet (w×h). Right edge aligns to door tile. */
 export const OPEN_DOOR_ART_W = 22;
 export const OPEN_DOOR_ART_H = 16;
+
+function applyLotDoor(cellData, lot) {
+  if (lot.role === BUILDING_ROLE.HOUSE) return cellData;
+  const { w, h, cells } = cellData;
+  const doorTx = lot.doorTx;
+  const doorTz = lot.doorTz;
+  if (doorTx == null || doorTz == null) return cellData;
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i] === CELL_DOOR) cells[i] = CELL_FLOOR;
+  }
+  if (doorTx >= 0 && doorTx < w && doorTz >= 0 && doorTz < h) {
+    cells[doorTz * w + doorTx] = CELL_DOOR;
+    cellData.doorTx = doorTx;
+    cellData.doorTz = doorTz;
+  }
+  return cellData;
+}
+
+function generateTownLotCells(lot, seedA, seedB) {
+  let cellData;
+  if (lot.role !== BUILDING_ROLE.HOUSE) {
+    cellData = generateBuildingCells(lot.w, lot.h, 'rect');
+  } else {
+    const shape = rollBuildingShape(seedA, seedB);
+    if (shape === 'l') {
+      cellData = generateBuildingCells(lot.w, lot.h, 'l', {
+        lLeg: rollLVariant(seedA + 11, seedB + 13),
+      });
+    } else if (shape === 't') {
+      cellData = generateBuildingCells(lot.w, lot.h, 't');
+    } else {
+      cellData = generateBuildingCells(lot.w, lot.h, 'rect');
+    }
+    cellData = applyLotDoor(cellData, lot);
+  }
+  return cellData;
+}
 
 /** Screen-space center + half extents for door interact hover (internal resolution). */
 export function getDoorScreenHitBox(building, worldToScreen) {
@@ -98,7 +141,7 @@ function hasSprite(sprites, name) {
   return !!(img && (img.naturalWidth > 0 || img.width > 0));
 }
 
-function drawShackTile(sprites, ctx, name, x, y, tilePx) {
+function drawBuildingTile(sprites, ctx, name, x, y, tilePx) {
   const img = sprites?.images?.[name];
   if (!img) return false;
   const px = Math.round(tilePx);
@@ -148,7 +191,7 @@ function drawBuildingArt(sprites, ctx, name, feetX, feetY, tilePx, artW = BUILDI
   return true;
 }
 
-function shackTileTopLeft(originX, originZ, tx, tz, worldToScreen) {
+function buildingTileTopLeft(originX, originZ, tx, tz, worldToScreen) {
   const corner = worldToScreen(originX + tx * TILE, originZ + tz * TILE);
   const next = worldToScreen(originX + (tx + 1) * TILE, originZ + (tz + 1) * TILE);
   return {
@@ -208,7 +251,7 @@ function buildingStyle(building) {
     doorMat: 'bld_door_mat_wood',
     doorClosed: 'bld_door_closed_wood',
     doorOpen: 'bld_door_open_wood',
-    doorLintel: 'shack_wall_door_top',
+    doorLintel: 'bld_wall_wood',
     roofFill: 'bld_roof_brown',
     roofEdge: 'bld_roof_brown_edge',
   };
@@ -236,7 +279,7 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
         const next = worldToScreen(originX + (tx + 1) * TILE, originZ + (tz + 1) * TILE);
         const x = Math.round(Math.min(corner.x, next.x));
         const y = Math.round(Math.min(corner.y, next.y));
-        drawShackTile(sprites, ctx, tileName, x, y, tilePx);
+        drawBuildingTile(sprites, ctx, tileName, x, y, tilePx);
         drewArt = true;
       }
     }
@@ -255,9 +298,9 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
 
   const doorTx = building.doorTx ?? Math.floor(building.w / 2);
   const doorTz = building.doorTz ?? building.h - 1;
-  const { x: doorX, y: doorY } = shackTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
+  const { x: doorX, y: doorY } = buildingTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
   const matName = buildingStyle(building).doorMat;
-  if (!sprites || !drawShackTile(sprites, ctx, matName, doorX, doorY, tilePx)) {
+  if (!sprites || !drawBuildingTile(sprites, ctx, matName, doorX, doorY, tilePx)) {
     ctx.fillStyle = '#4a3828';
     ctx.fillRect(doorX, doorY, tilePx, tilePx);
   }
@@ -286,11 +329,11 @@ export function drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, sp
         const drawX = baseX + tx * tilePx;
         const drawY = baseY + tz * tilePx;
         if (tz < edgeRows && hasEdge) {
-          drawShackTile(sprites, ctx, style.roofEdge, drawX, drawY, tilePx);
+          drawBuildingTile(sprites, ctx, style.roofEdge, drawX, drawY, tilePx);
         } else if (hasFill) {
-          drawShackTile(sprites, ctx, style.roofFill, drawX, drawY, tilePx);
+          drawBuildingTile(sprites, ctx, style.roofFill, drawX, drawY, tilePx);
         } else if (hasEdge) {
-          drawShackTile(sprites, ctx, style.roofEdge, drawX, drawY, tilePx);
+          drawBuildingTile(sprites, ctx, style.roofEdge, drawX, drawY, tilePx);
         }
       }
     }
@@ -312,7 +355,7 @@ export function drawBuildingDoorLintel(ctx, building, worldToScreen, tilePx, spr
   const { originX, originZ, doorTx } = building;
   const doorTz = building.doorTz ?? building.h - 1;
   const lintelName = buildingStyle(building).doorLintel;
-  const { x: tileX, y: tileY } = shackTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
+  const { x: tileX, y: tileY } = buildingTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
   const lintelH = Math.round(tilePx * 0.5);
   if (sprites && drawSnappedWallSprite(sprites, ctx, lintelName, tileX, tileY, tilePx, lintelH)) return;
   ctx.fillStyle = '#5a4a3a';
@@ -326,13 +369,13 @@ export function drawBuildingDoorPanel(ctx, building, worldToScreen, tilePx, spri
   const { originX, originZ, doorTx } = building;
   const doorTz = building.doorTz ?? building.h - 1;
   const style = buildingStyle(building);
-  const { x: tileX, y: tileY } = shackTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
+  const { x: tileX, y: tileY } = buildingTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
   if (building.doorOpen) {
     if (sprites && drawOpenDoorSprite(sprites, ctx, style.doorOpen, tileX, tileY, tilePx)) return true;
-  } else if (sprites && drawShackTile(sprites, ctx, style.doorClosed, tileX, tileY, tilePx)) {
+  } else if (sprites && drawBuildingTile(sprites, ctx, style.doorClosed, tileX, tileY, tilePx)) {
     return true;
   }
-  if (!building.doorOpen && sprites && drawShackTile(sprites, ctx, style.wallNs, tileX, tileY, tilePx)) return false;
+  if (!building.doorOpen && sprites && drawBuildingTile(sprites, ctx, style.wallNs, tileX, tileY, tilePx)) return false;
   drawPlaceholderWall(
     ctx,
     { orient: 'ns', face: 'south', extendNorth: false },
@@ -382,7 +425,7 @@ export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, spr
   const { originX, originZ } = building;
   const { tx, tz, orient } = wall;
   const style = buildingStyle(building);
-  const { x: tileX, y: tileY } = shackTileTopLeft(originX, originZ, tx, tz, worldToScreen);
+  const { x: tileX, y: tileY } = buildingTileTopLeft(originX, originZ, tx, tz, worldToScreen);
   const segH = Math.round(tilePx);
   const ewDrawW = Math.max(2, Math.round(tilePx / 4));
 
@@ -405,7 +448,7 @@ export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, spr
           drawSnappedWallSprite(sprites, ctx, sprite, drawX, segY, ewDrawW, segH);
         }
       } else {
-        drawShackTile(sprites, ctx, sprite, tileX, tileY, tilePx);
+        drawBuildingTile(sprites, ctx, sprite, tileX, tileY, tilePx);
       }
       return;
     }
@@ -445,7 +488,7 @@ export class BuildingManager {
     this.buildings = [];
     this.roofAlpha = ROOF_ALPHA_OUTSIDE;
     this.insideBuilding = null;
-    /** Keeps fading the last shack roof after exit until alpha reaches outside. */
+    /** Keeps fading the last building roof after exit until alpha reaches outside. */
     this.roofFadeBuilding = null;
   }
 
@@ -636,6 +679,12 @@ export class BuildingManager {
     this.buildings.push(building);
     this.chests?.spawnInBuilding(building, chunk);
     const reserved = [...(building.chestTiles ?? (building.chestTile ? [building.chestTile] : []))];
+    const doorFacing = building.doorFacing ?? 'south';
+    reserved.push(...doorApproachExcludeTiles(
+      building.doorTx,
+      building.doorTz ?? building.h - 1,
+      doorFacing,
+    ));
     const interiorProps = buildBuildingInteriorProps(
       building.originX,
       building.originZ,
@@ -661,6 +710,7 @@ export class BuildingManager {
         building.originX * 0.17,
         building.originZ * 0.23,
         reserved,
+        doorFacing,
       ),
     ];
     this._stripDecorOffRoads(world, building);
@@ -672,9 +722,33 @@ export class BuildingManager {
     building.decor = (building.decor ?? []).filter((piece) => {
       const tx = Math.floor(piece.x / TILE);
       const tz = Math.floor(piece.z / TILE);
-      const tile = world.getTile(tx, tz);
-      return tile?.floorKind !== 'road' && tile?.floorKind !== 'path';
+      return !world.isNearRoadSurface(tx, tz);
     });
+  }
+
+  _unregisterExteriorDecorObstacles(building) {
+    if (!building.decorObstacles?.length) return;
+    const keep = [];
+    for (const obs of building.decorObstacles) {
+      if (obs.decorPiece?.exterior) {
+        this.world.removeDynamicObstacle(obs);
+        continue;
+      }
+      keep.push(obs);
+    }
+    building.decorObstacles = keep;
+  }
+
+  /** Re-filter exterior props after town streets are painted (roads did not exist at finalize time). */
+  _refreshExteriorDecorOnRoads(world, building) {
+    this._unregisterExteriorDecorObstacles(building);
+    this._stripDecorOffRoads(world, building);
+    for (const piece of building.decor ?? []) {
+      if (!piece.exterior || !piece.obstacle) continue;
+      const entry = { ...piece.obstacle, building, decorPiece: piece };
+      building.decorObstacles.push(entry);
+      this.world.addDynamicObstacle(entry);
+    }
   }
 
   _registerDecorObstacles(building) {
@@ -703,20 +777,36 @@ export class BuildingManager {
 
   _spawnTownAtAnchor(anchor, chunk, world, player, canSpawn, spawnBias, opts = {}) {
     const layout = rollTownLayoutAtAnchor(anchor, anchor.tx * 41, anchor.tz * 43);
+    if (layout.lots.length === 0) return false;
+
     const ox = layout.originTileX * TILE;
     const oz = layout.originTileZ * TILE;
-
-    if (!this._fitsTownAt(world, ox, oz, layout, player, false, spawnBias, opts)) return false;
 
     const placedBuildings = [];
     for (let i = 0; i < layout.lots.length; i++) {
       if (!opts.boot && canSpawn && !canSpawn()) break;
       const lot = layout.lots[i];
-      const cellData = generateBuildingCells(lot.w, lot.h, 'rect');
       const bx = ox + lot.ox * TILE;
       const bz = oz + lot.oz * TILE;
+      const cellData = generateTownLotCells(
+        lot,
+        Math.floor(bx * 0.31 + i * 13),
+        Math.floor(bz * 0.37 + i * 17),
+      );
+
+      if (!this._fitsAt(world, bx, bz, lot.w, lot.h, cellData.cells, {
+        allowInBase: true,
+        ignoreTownPavement: true,
+        footprintGapTiles: TOWN_BUILDING_GAP,
+      })) {
+        continue;
+      }
+
       const style = rollBuildingStyle(Math.floor(bx * 0.41 + i * 7), Math.floor(bz * 0.53 + i * 11));
       const building = buildBuildingPieces(bx, bz, cellData, style);
+      building.doorTx = cellData.doorTx;
+      building.doorTz = cellData.doorTz;
+      building.doorFacing = 'south';
       building.townId = `town@${anchor.id}`;
       building.persistentTown = true;
       building.townAnchorId = anchor.id;
@@ -726,8 +816,11 @@ export class BuildingManager {
       this._finalizeBuilding(building, chunk, world);
       placedBuildings.push(building);
     }
-    if (placedBuildings.length >= 2) {
-      paintTownStreets(world, layout, placedBuildings);
+
+    paintTownStreets(world, layout, placedBuildings);
+    for (const b of placedBuildings) this._refreshExteriorDecorOnRoads(world, b);
+    world.markFoliageBlockedTiles(getTownFootprintTiles(layout));
+    if (placedBuildings.length >= 1) {
       return true;
     }
     for (const b of placedBuildings) this.remove(b);
@@ -743,13 +836,10 @@ export class BuildingManager {
   }
 
   _clearFoliageForBuilding(world, building) {
-    const baseTx = Math.round(building.originX / TILE);
-    const baseTz = Math.round(building.originZ / TILE);
-    for (let dz = 0; dz < building.h; dz++) {
-      for (let dx = 0; dx < building.w; dx++) {
-        world.clearFoliageOnTile(baseTx + dx, baseTz + dz, true);
-      }
+    for (const rect of buildingFoliageClearRects(building)) {
+      world.clearFoliageInRect(rect.minX, rect.maxX, rect.minZ, rect.maxZ, { markBlocked: true });
     }
+    world.removeFoliageWhere((f) => foliageOverlapsBuildingInterior(building, f));
   }
 
   remove(building) {
@@ -795,6 +885,12 @@ export class BuildingManager {
       building.chestTile = building.chestTiles[0];
     }
     const reserved = [...(building.chestTiles ?? [])];
+    const doorFacing = building.doorFacing ?? 'south';
+    reserved.push(...doorApproachExcludeTiles(
+      building.doorTx,
+      building.doorTz ?? building.h - 1,
+      doorFacing,
+    ));
     const interiorProps = buildBuildingInteriorProps(
       building.originX,
       building.originZ,
@@ -820,6 +916,7 @@ export class BuildingManager {
         building.originX * 0.17,
         building.originZ * 0.23,
         reserved,
+        doorFacing,
       ),
     ];
     this._stripDecorOffRoads(world, building);
@@ -844,6 +941,7 @@ export class BuildingManager {
       if (saved.townAnchorId != null) this._townAnchorsSpawned.add(saved.townAnchorId);
     }
     repaintAllTownStreets(world, this.buildings);
+    for (const b of this.buildings) this._refreshExteriorDecorOnRoads(world, b);
     this._townsBootstrapped = true;
   }
 
@@ -874,7 +972,11 @@ export class BuildingManager {
     building.obstacles = [];
   }
 
-  _fitsAt(world, originX, originZ, w, h, cells = null, { allowInBase = false } = {}) {
+  _fitsAt(world, originX, originZ, w, h, cells = null, {
+    allowInBase = false,
+    ignoreTownPavement = false,
+    footprintGapTiles = BUILDING_MIN_GAP_TILES,
+  } = {}) {
     const footprintW = w * TILE;
     const footprintH = h * TILE;
     if (!allowInBase && isInBase(originX + footprintW * 0.5, originZ + footprintH * 0.5)) return false;
@@ -888,7 +990,7 @@ export class BuildingManager {
         other.w,
         other.h,
       );
-      if (buildingFootprintsTooClose(candidateFootprint, otherFootprint)) return false;
+      if (buildingFootprintsTooClose(candidateFootprint, otherFootprint, footprintGapTiles)) return false;
     }
 
     for (let tz = 0; tz < h; tz++) {
@@ -900,8 +1002,10 @@ export class BuildingManager {
         const worldTx = Math.floor(originX / TILE) + tx;
         const worldTz = Math.floor(originZ / TILE) + tz;
         if (isHighwayTile(worldTx, worldTz)) return false;
-        const floorTile = world.getTile(worldTx, worldTz);
-        if (floorTile?.floorKind === 'road' || floorTile?.floorKind === 'path') return false;
+        if (!ignoreTownPavement) {
+          const floorTile = world.getTile(worldTx, worldTz);
+          if (floorTile?.floorKind === 'road' || floorTile?.floorKind === 'path') return false;
+        }
         const cx = originX + (tx + 0.5) * TILE;
         const cz = originZ + (tz + 0.5) * TILE;
         if (world.checkCollision(cx, cz, 0.45)) return false;

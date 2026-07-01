@@ -4,6 +4,9 @@ import { CHAR_NATIVE_PX, spriteFeetOffset, getEnemyNativePx, getEnemyDrawScale }
 import {
   rollBuildingStyle,
   rollDecor as rollDecorSprite,
+  BUILDING_SIZE_VARIANTS,
+  rollBuildingSize,
+  generateBuildingCells,
 } from './buildingTypes.js';
 
 const PLAYER_SPRITE_SCALE = 1.5;
@@ -166,39 +169,19 @@ export function buildDoorTileEdgeObstacles(originX, originZ, w, h, cells, doorTx
   return obstacles;
 }
 
-/** Shack footprint variants [width × depth] in tiles (includes wall ring). */
-export const SHACK_SIZE_VARIANTS = [
-  { w: 5, h: 4 },
-  { w: 6, h: 4 },
-  { w: 6, h: 5 },
-  { w: 7, h: 4 },
-  { w: 7, h: 5 },
-];
-
-export const SHACK_MAX_W = Math.max(...SHACK_SIZE_VARIANTS.map((v) => v.w));
-export const SHACK_MAX_H = Math.max(...SHACK_SIZE_VARIANTS.map((v) => v.h));
+/** @deprecated use BUILDING_SIZE_VARIANTS from buildingTypes.js */
+export const SHACK_SIZE_VARIANTS = BUILDING_SIZE_VARIANTS;
 
 export { BUILDING_MAX_W, BUILDING_MAX_H } from './buildingTypes.js';
 
+/** @deprecated use rollBuildingSize */
 export function rollShackSize(seedA, seedB) {
-  const idx = Math.floor(hash01(seedA, seedB) * SHACK_SIZE_VARIANTS.length);
-  return SHACK_SIZE_VARIANTS[idx];
+  return rollBuildingSize(seedA, seedB);
 }
 
-/**
- * Rectangular shack — full footprint floor (walls drawn on top), door on south center.
- */
+/** @deprecated use generateBuildingCells */
 export function generateShackCells(w, h) {
-  const cells = new Uint8Array(w * h);
-  const doorTx = Math.floor(w / 2);
-  const doorTz = h - 1;
-
-  for (let tz = 0; tz < h; tz++) {
-    for (let tx = 0; tx < w; tx++) {
-      cells[tz * w + tx] = (tz === doorTz && tx === doorTx) ? CELL_DOOR : CELL_FLOOR;
-    }
-  }
-  return { w, h, cells, doorTx, doorTz, shape: 'rect' };
+  return generateBuildingCells(w, h, 'rect');
 }
 
 function isPerimeterWallCell(tx, tz, cells, w, h, doorTx, doorTz) {
@@ -450,19 +433,6 @@ function isNorthFace(face) {
 
 function isSouthFace(face) {
   return face === 'south' || face === 'corner-sw' || face === 'corner-se';
-}
-
-export function shackWallSpriteId(orient) {
-  if (orient === 'corner') return 'shack_wall_corner';
-  if (orient === 'ew') return 'shack_wall_ew';
-  return 'shack_wall_ns';
-}
-
-export function shackWallArtSize(orient, extendNorth = false) {
-  if (orient === 'ew') {
-    return { w: 4, h: extendNorth ? 32 : 16 };
-  }
-  return { w: 16, h: 16 };
 }
 
 /** South edge of the player sprite in world Z (feet). */
@@ -1188,6 +1158,34 @@ function isReserved(tx, tz, reserved) {
   return reserved.some((t) => t.tx === tx && t.tz === tz);
 }
 
+/** Exterior tiles in front of the door — keep barrels/crates off the approach path. */
+export function doorApproachExcludeTiles(doorTx, doorTz, doorFacing = 'south', depth = 4) {
+  const tiles = [];
+  if (doorFacing === 'east' || doorFacing === 'e') {
+    for (let d = 1; d <= depth; d++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        tiles.push({ tx: doorTx + d, tz: doorTz + dz });
+      }
+    }
+    return tiles;
+  }
+  for (let d = 1; d <= depth; d++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      tiles.push({ tx: doorTx + dx, tz: doorTz + d });
+    }
+  }
+  return tiles;
+}
+
+function isDoorApproachExterior(otx, otz, doorTx, doorTz, doorFacing = 'south') {
+  if (doorFacing === 'east' || doorFacing === 'e') {
+    if (otx < doorTx + 1 || otx > doorTx + 5) return false;
+    return Math.abs(otz - doorTz) <= 2;
+  }
+  if (otz < doorTz + 1 || otz > doorTz + 5) return false;
+  return Math.abs(otx - doorTx) <= 2;
+}
+
 /** Keep tables/fridges off the door approach (south entry corridor). */
 function isDoorApproachTile(tx, tz, doorTx, doorTz) {
   const northOfDoor = doorTz - tz;
@@ -1295,14 +1293,26 @@ export function buildBuildingInteriorProps(
   return props;
 }
 
-export function buildBuildingDecor(originX, originZ, w, h, cells, doorTx, doorTz, seedA, seedB, excludeTiles = []) {
+export function buildBuildingDecor(
+  originX,
+  originZ,
+  w,
+  h,
+  cells,
+  doorTx,
+  doorTz,
+  seedA,
+  seedB,
+  excludeTiles = [],
+  doorFacing = 'south',
+) {
   const decor = [];
   const excluded = (tx, tz) => excludeTiles.some((t) => t.tx === tx && t.tz === tz);
   const candidates = [];
   const seen = new Set();
 
   const addExterior = (tx, tz, dir) => {
-    if (tx === doorTx && tz === doorTz && dir === 's') return;
+    if (tx === doorTx && tz === doorTz) return;
     let otx = tx;
     let otz = tz;
     if (dir === 'n') otz -= 1;
@@ -1310,6 +1320,7 @@ export function buildBuildingDecor(originX, originZ, w, h, cells, doorTx, doorTz
     else if (dir === 'w') otx -= 1;
     else otx += 1;
     if (!isBareExterior(cells, w, h, otx, otz)) return;
+    if (isDoorApproachExterior(otx, otz, doorTx, doorTz, doorFacing)) return;
     const key = `${otx},${otz}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -1343,9 +1354,12 @@ export function buildBuildingDecor(originX, originZ, w, h, cells, doorTx, doorTz
   );
   const southPool = candidates.filter((c) => c.dir === 's');
   const sidePool = candidates.filter((c) => c.dir === 'w' || c.dir === 'e');
-  const pool = southPool.length >= count
-    ? southPool
-    : [...southPool, ...sidePool, ...candidates.filter((c) => c.dir === 'n')];
+  const safeSouthPool = southPool.filter(
+    (c) => !isDoorApproachExterior(c.otx, c.otz, doorTx, doorTz, doorFacing),
+  );
+  const pool = safeSouthPool.length >= count
+    ? safeSouthPool
+    : [...safeSouthPool, ...sidePool, ...candidates.filter((c) => c.dir === 'n')];
 
   for (let i = 0; i < count; i++) {
     const idx = hash32(seedA + i * 3.1, seedB + i * 5.7) % pool.length;
@@ -1456,37 +1470,10 @@ export function buildBuildingPieces(originX, originZ, cellData, style = rollBuil
   };
 }
 
+/** @deprecated use buildBuildingPieces */
 export function buildShackPieces(originX, originZ, w, h, cells, doorTx, doorTz) {
   const cellData = doorTz != null
     ? { w, h, cells, doorTx, doorTz, shape: 'rect' }
     : { w, h, cells, doorTx: doorTx ?? Math.floor(w / 2), doorTz: h - 1, shape: 'rect' };
   return buildBuildingPieces(originX, originZ, cellData, rollBuildingStyle(0, 0));
 }
-
-/** @deprecated use isInsideBuilding */
-export function isInteriorCell(cells, w, h, px, pz, originX, originZ) {
-  const tx = Math.floor((px - originX) / TILE);
-  const tz = Math.floor((pz - originZ) / TILE);
-  if (tx < 0 || tz < 0 || tx >= w || tz >= h) return false;
-  const cell = cells[tz * w + tx];
-  return cell === CELL_FLOOR || cell === CELL_DOOR;
-}
-
-/**
- * Sprites to author (16×16 px native art; rendered at 2× = 32 screen px per tile).
- * Place under assets/buildings/shack/
- */
-export const SHACK_SPRITE_MANIFEST = [
-  { id: 'floor_wood', file: 'floor_wood.png', size: '16×16', notes: 'Interior floor tile' },
-  { id: 'floor_wood_alt', file: 'floor_wood_alt.png', size: '16×16', notes: 'Floor variation (optional)' },
-  { id: 'door_mat', file: 'door_mat.png', size: '16×16', notes: 'Door threshold / mat on south entry' },
-  { id: 'door_closed', file: 'door_closed.png', size: '16×16', notes: 'Closed door panel on south entry' },
-  { id: 'door_open', file: 'door_open.png', size: '22×16', notes: 'Open door swung west — 6px wider left of the door tile' },
-  { id: 'wall_ns', file: 'wall_ns.png', size: '16×16', notes: 'North/south wall segment (full tile width)' },
-  { id: 'wall_ew', file: 'wall_ew.png', size: '4×16', notes: 'East/west wall — quarter-tile wide; top segment stacks 2× at north' },
-  { id: 'wall_corner', file: 'wall_corner.png', size: '16×16', notes: 'Corner pillar (full tile)' },
-  { id: 'wall_door_top', file: 'wall_door_top.png', size: '16×8', notes: 'Lintels above 1-tile door (south)' },
-  { id: 'roof_fill', file: 'roof_fill.png', size: '16×16', notes: 'Flat roof interior fill tile' },
-  { id: 'roof_edge', file: 'roof_edge.png', size: '16×16', notes: 'Roof edge/cap (overhang on south/north)' },
-  { id: 'roof_corner', file: 'roof_corner.png', size: '16×16', notes: 'Roof corner piece (optional)' },
-];

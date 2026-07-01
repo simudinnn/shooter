@@ -1,5 +1,6 @@
 import { Robot, Scout, createGroundErupt, SCOUT_SPAWN_SHARE } from './enemies.js';
-import { CHUNK_WORLD, hash01, isInBase } from './worldGen.js';
+import { CHUNK_WORLD, TILE, hash01, isInBase } from './worldGen.js';
+import { getRoadNetwork } from './highwayGen.js';
 import { BUILDING_CHUNK_SPAWN_RATE, MAX_NEARBY_BUILDINGS } from './buildings.js';
 
 /** Chunks around the player that stay populated with spiders/chests. */
@@ -10,8 +11,13 @@ export const ENTITY_DESPAWN_DIST = ENTITY_CHUNK_RADIUS * CHUNK_WORLD + 40;
 /** Soft caps within despawn range — keeps the world from flooding. */
 export const MAX_NEARBY_SPIDERS = 18;
 export const MAX_NEARBY_CHESTS = 10;
-/** Per-chunk spawn chance when a chunk is first populated. */
-export const SPIDER_CHUNK_CHANCE = 0.28;
+/** Wilderness per-chunk spawn chance (away from towns). */
+export const SPIDER_CHUNK_CHANCE = 0.1;
+/** Per-chunk spawn chance in the town outskirts ring. */
+export const SPIDER_TOWN_RING_CHANCE = 0.62;
+/** World units — prefer robot spawns in this annulus around a town anchor. */
+export const TOWN_ROBOT_RING_MIN = TILE * 14;
+export const TOWN_ROBOT_RING_MAX = TILE * 44;
 export const BUILDING_CHUNK_CHANCE = BUILDING_CHUNK_SPAWN_RATE;
 
 export class ChunkEntityManager {
@@ -106,6 +112,50 @@ export class ChunkEntityManager {
     return !this.game.isWorldPointOnScreen(x, z, 10);
   }
 
+  _nearestTown(wx, wz) {
+    let best = null;
+    let bestD = Infinity;
+    for (const town of getRoadNetwork().towns) {
+      const tx = town.tx * TILE + TILE * 0.5;
+      const tz = town.tz * TILE + TILE * 0.5;
+      const d = Math.hypot(wx - tx, wz - tz);
+      if (d < bestD) {
+        bestD = d;
+        best = { town, x: tx, z: tz, dist: d };
+      }
+    }
+    return best;
+  }
+
+  _robotSpawnChanceForChunk(centerX, centerZ) {
+    const near = this._nearestTown(centerX, centerZ);
+    if (!near) return SPIDER_CHUNK_CHANCE;
+    if (near.dist < TOWN_ROBOT_RING_MIN * 0.55) return 0.12;
+    if (near.dist <= TOWN_ROBOT_RING_MAX) return SPIDER_TOWN_RING_CHANCE;
+    if (near.dist <= TOWN_ROBOT_RING_MAX * 1.8) return 0.22;
+    return SPIDER_CHUNK_CHANCE;
+  }
+
+  _townRingSpawnPoints(chunk, salt) {
+    const near = this._nearestTown(
+      this._chunkCenter(chunk.cx, chunk.cz).x,
+      this._chunkCenter(chunk.cx, chunk.cz).z,
+    );
+    if (!near || near.dist > TOWN_ROBOT_RING_MAX * 1.35) return [];
+
+    const out = [];
+    for (let i = 0; i < 10; i++) {
+      const angle = hash01(chunk.cx * 19 + salt + i * 3, chunk.cz * 23 + i * 5) * Math.PI * 2;
+      const t = hash01(chunk.cx * 37 + i * 7, chunk.cz * 41 + salt + i * 11);
+      const dist = TOWN_ROBOT_RING_MIN + t * (TOWN_ROBOT_RING_MAX - TOWN_ROBOT_RING_MIN);
+      out.push([
+        near.x + Math.sin(angle) * dist,
+        near.z + Math.cos(angle) * dist,
+      ]);
+    }
+    return out;
+  }
+
   _despawnFar(player, { includeBuildings = true } = {}) {
     const d2 = this._despawnDist2();
     const clearedSpiderChunks = new Set();
@@ -124,6 +174,11 @@ export class ChunkEntityManager {
     // Avoid mutating this.game.chests.chests inside Array.filter (can desync visual vs collision).
     const nextChests = [];
     for (const chest of this.game.chests.chests) {
+      const home = chest.homeBuilding;
+      if (home?.persistentTown || home?.townId || home?.townAnchorId) {
+        nextChests.push(chest);
+        continue;
+      }
       if (this._nearbyDist2(player, chest.x, chest.z) <= d2) {
         nextChests.push(chest);
         continue;
@@ -204,13 +259,18 @@ export class ChunkEntityManager {
     this._populateEnemiesOnly(player);
   }
 
+  _chunkAt(cx, cz) {
+    return this.world.chunks.get(`${cx},${cz}`);
+  }
+
   _populateEnemiesOnly(player) {
     const { fx, fz } = this._getPlayerForward(player);
     const { cx: pcx, cz: pcz } = this._playerChunk(player);
     const chunks = [];
     for (let cz = pcz - ENTITY_CHUNK_RADIUS; cz <= pcz + ENTITY_CHUNK_RADIUS; cz++) {
       for (let cx = pcx - ENTITY_CHUNK_RADIUS; cx <= pcx + ENTITY_CHUNK_RADIUS; cx++) {
-        const chunk = this.world.getChunk(cx, cz);
+        const chunk = this._chunkAt(cx, cz);
+        if (!chunk || chunk.outOfBounds) continue;
         if (!this._shouldPopulateChunk(chunk, player, fx, fz)) continue;
         const center = this._chunkCenter(cx, cz);
         const ahead = (center.x - player.x) * fx + (center.z - player.z) * fz;
@@ -270,7 +330,8 @@ export class ChunkEntityManager {
     const chunks = [];
     for (let cz = pcz - ENTITY_CHUNK_RADIUS; cz <= pcz + ENTITY_CHUNK_RADIUS; cz++) {
       for (let cx = pcx - ENTITY_CHUNK_RADIUS; cx <= pcx + ENTITY_CHUNK_RADIUS; cx++) {
-        const chunk = this.world.getChunk(cx, cz);
+        const chunk = this._chunkAt(cx, cz);
+        if (!chunk || chunk.outOfBounds) continue;
         if (!this._shouldPopulateChunk(chunk, player, fx, fz)) continue;
         const center = this._chunkCenter(cx, cz);
         const ahead = (center.x - player.x) * fx + (center.z - player.z) * fz;
@@ -306,7 +367,8 @@ export class ChunkEntityManager {
     }
 
     const roll = hash01(chunk.cx * 7 + 13, chunk.cz * 11 + 29);
-    if (roll >= SPIDER_CHUNK_CHANCE) {
+    const spawnChance = this._robotSpawnChanceForChunk(center.x, center.z);
+    if (roll >= spawnChance) {
       chunk.spidersSpawned = true;
       return;
     }
@@ -317,7 +379,7 @@ export class ChunkEntityManager {
     const useScout = typeRoll < SCOUT_SPAWN_SHARE;
     const spawnR = useScout ? 1.0 : 0.85;
 
-    const pos = this._findChunkPoint(chunk, 3, player, this._livingRobots(), fx, fz, spawnR);
+    const pos = this._findChunkPoint(chunk, 3, player, this._livingRobots(), fx, fz, spawnR, center);
     if (!pos) return;
 
     const robot = useScout
@@ -347,12 +409,15 @@ export class ChunkEntityManager {
     ];
   }
 
-  _findChunkPoint(chunk, salt, player, existing, fx, fz, spawnR = 0.85) {
+  _findChunkPoint(chunk, salt, player, existing, fx, fz, spawnR = 0.85, _chunkCenter = null) {
     const minX = chunk.cx * CHUNK_WORLD + 1.2;
     const minZ = chunk.cz * CHUNK_WORLD + 1.2;
     const span = CHUNK_WORLD - 2.4;
     const edges = this._chunkEdgePoints(chunk);
     const tries = edges.map(([x, z]) => [x, z]);
+    for (const [x, z] of this._townRingSpawnPoints(chunk, salt)) {
+      tries.unshift([x, z]);
+    }
     for (let i = 0; i < 32; i++) {
       const h1 = hash01(chunk.cx * 13 + salt + i * 5, chunk.cz * 17 + i * 3);
       const h2 = hash01(chunk.cx * 23 + i * 7, chunk.cz * 31 + salt + i * 11);

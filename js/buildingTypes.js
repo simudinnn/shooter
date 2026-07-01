@@ -35,7 +35,7 @@ const BUILDING_DOOR_SPRITES = {
   doorMat: 'bld_door_mat_wood',
   doorClosed: 'bld_door_closed_wood',
   doorOpen: 'bld_door_open_wood',
-  doorLintel: 'shack_wall_door_top',
+  doorLintel: 'bld_wall_wood',
 };
 
 function pickVariantIndex(length, seedA, seedB, salt = 0) {

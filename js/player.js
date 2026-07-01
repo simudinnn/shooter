@@ -253,7 +253,7 @@ export class Player {
     this.z = 0;
     this.angle = 0;
     this.speed = 10.5;
-    this.sprintMult = 5;
+    this.sprintMult = 1.5;
     this.maxHealth = 100;
     this.health = 100;
     this.alive = true;

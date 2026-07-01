@@ -96,25 +96,6 @@ const BUILDING_ASSET_PATHS = Object.fromEntries([
   ['bld_fridge', 'assets/buildings/misc/fridge.png'],
 ]);
 
-const SHACK_ASSET_PATHS = {
-  shack_floor_wood: 'assets/buildings/shack/floor_wood.png',
-  shack_floor_wood_alt: 'assets/buildings/shack/floor_wood_alt.png',
-  shack_floor_wood2: 'assets/buildings/shack/floor_wood2.png',
-  shack_floor_wood_alt2: 'assets/buildings/shack/floor_wood_alt2.png',
-  shack_door_mat: 'assets/buildings/shack/door_mat.png',
-  shack_door_closed: 'assets/buildings/shack/door_closed.png',
-  shack_door_open: 'assets/buildings/shack/door_open.png',
-  shack_wall_ns: 'assets/buildings/shack/wall_ns.png',
-  shack_wall_ns2: 'assets/buildings/shack/wall_ns2.png',
-  shack_wall_ew: 'assets/buildings/shack/wall_ew.png',
-  shack_wall_corner: 'assets/buildings/shack/wall_corner.png',
-  shack_wall_door_top: 'assets/buildings/shack/wall_door_top.png',
-  shack_roof_fill: 'assets/buildings/shack/roof_fill.png',
-  shack_roof_fill2: 'assets/buildings/shack/roof_fill2.png',
-  shack_roof_edge: 'assets/buildings/shack/roof_edge.png',
-  shack_roof_edge2: 'assets/buildings/shack/roof_edge2.png',
-};
-
 const CORE_ASSETS = {
   spider: 'assets/enemies/spider.png',
   spider_walk: 'assets/enemies/spider_walk.png',
@@ -125,7 +106,6 @@ const CORE_ASSETS = {
   ...DEAD_ENEMY_ASSET_PATHS,
   ...WORLD_ASSET_PATHS,
   ...BUILDING_ASSET_PATHS,
-  ...SHACK_ASSET_PATHS,
   ammo: 'assets/items/weapons/pistol_ammo.png',
   pistol_ammo: 'assets/items/weapons/pistol_ammo.png',
   rifle_ammo: 'assets/items/weapons/rifle_ammo.png',
@@ -746,7 +726,7 @@ function buildFallback(name) {
   if (name.startsWith('item_')) {
     return buildWeaponItemFallback(name.slice(5));
   }
-  if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('shack_')) return null;
+  if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('bld_')) return null;
   if (name.startsWith('player_') || name.startsWith('spider') || name.startsWith('scout')) {
     return buildCharFallback(name);
   }
@@ -1295,7 +1275,7 @@ export class SpriteBank {
         else finish();
       };
       img.onerror = () => {
-        if (!name.startsWith('floor_') && !name.startsWith('foliage_') && !name.startsWith('shack_')) {
+        if (!name.startsWith('floor_') && !name.startsWith('foliage_') && !name.startsWith('bld_')) {
           const fallback = buildFallback(name);
           if (fallback) {
             this.images[name] = fallback;
@@ -1405,7 +1385,7 @@ export class SpriteBank {
 
   _getImage(name) {
     if (this.images[name]) return this.images[name];
-    if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('shack_')) return null;
+    if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('bld_')) return null;
     const fallback = buildFallback(name);
     if (!fallback) return null;
     this.images[name] = fallback;
@@ -1518,13 +1498,22 @@ export class SpriteBank {
     ctx.globalAlpha = prev;
   }
 
-  drawTile(ctx, name, sx, sy, tilePx, tint = null) {
+  drawTile(ctx, name, sx, sy, tilePx, tint = null, flipX = false) {
     const px = Math.round(tilePx);
     const bmp = this.getTileBitmap(name, px, tint);
     if (!bmp) return;
     ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(bmp, Math.round(sx), Math.round(sy), px, px);
+    const drawX = Math.round(sx);
+    const drawY = Math.round(sy);
+    if (flipX) {
+      ctx.save();
+      ctx.translate(drawX + px, drawY);
+      ctx.scale(-1, 1);
+      ctx.drawImage(bmp, 0, 0, px, px);
+      ctx.restore();
+      return;
+    }
+    ctx.drawImage(bmp, drawX, drawY, px, px);
   }
 }

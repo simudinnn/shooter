@@ -1,24 +1,4 @@
-const CACHE = 'robot-ruins-v338';
-
-function shackSprites() {
-  return [
-    './assets/buildings/shack/floor_wood.png',
-    './assets/buildings/shack/floor_wood_alt.png',
-    './assets/buildings/shack/floor_wood2.png',
-    './assets/buildings/shack/floor_wood_alt2.png',
-    './assets/buildings/shack/door_mat.png',
-    './assets/buildings/shack/door_closed.png',
-    './assets/buildings/shack/door_open.png',
-    './assets/buildings/shack/wall_ns.png',
-    './assets/buildings/shack/wall_ns2.png',
-    './assets/buildings/shack/wall_ew.png',
-    './assets/buildings/shack/wall_door_top.png',
-    './assets/buildings/shack/roof_fill.png',
-    './assets/buildings/shack/roof_fill2.png',
-    './assets/buildings/shack/roof_edge.png',
-    './assets/buildings/shack/roof_edge2.png',
-  ];
-}
+const CACHE = 'robot-ruins-v362';
 
 function buildingKitSprites() {
   return [
@@ -55,7 +35,6 @@ function buildingKitSprites() {
   ];
 }
 
-const SHACK_SPRITES = shackSprites();
 const BUILDING_KIT_SPRITES = buildingKitSprites();
 
 function playerSprites() {
@@ -138,6 +117,7 @@ const SHELL = [
   './js/worldGen.js',
   './js/saveGame.js',
   './js/visibility.js',
+  './js/viewCull.js',
   './js/collisionDebug.js',
   './assets/fonts/game-pixel.woff2',
   './assets/fonts/game-pixel.ttf',
@@ -152,7 +132,6 @@ const ASSETS = [
   ...PLAYER_SPRITES,
   ...WEAPON_SPRITES,
   ...WORLD_SPRITES,
-  ...SHACK_SPRITES,
   ...BUILDING_KIT_SPRITES,
   './assets/enemies/spider.png',
   './assets/enemies/spider_walk.png',

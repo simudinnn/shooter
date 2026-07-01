@@ -4,7 +4,7 @@ import { collectObstaclesInView, obsAabb } from './collisionDebug.js';
 import { PPU } from './renderConfig.js';
 
 const ANGLE_EPS = 0.00015;
-const VIEW_RAY_COUNT = 32;
+const VIEW_RAY_COUNT = 24;
 const TAU = Math.PI * 2;
 /** Ignore hits this close when no wall was hit — stops zero-radius polygon at view bounds. */
 const VISION_MIN_HIT = TILE * 0.14;
@@ -287,6 +287,21 @@ export function pointInVisibilityPolygon(x, z, polygon) {
     }
   }
   return inside;
+}
+
+/** True when any sample point on the world AABB lies inside the vision polygon. */
+export function aabbTouchesVisibilityPolygon(minX, maxX, minZ, maxZ, polygon) {
+  if (!polygon?.length || polygon.length < 3) return true;
+  const mx = (minX + maxX) * 0.5;
+  const mz = (minZ + maxZ) * 0.5;
+  const samples = [
+    [minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ],
+    [mx, minZ], [mx, maxZ], [minX, mz], [maxX, mz], [mx, mz],
+  ];
+  for (const [x, z] of samples) {
+    if (pointInVisibilityPolygon(x, z, polygon)) return true;
+  }
+  return false;
 }
 
 /**

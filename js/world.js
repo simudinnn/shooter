@@ -3,6 +3,7 @@ import {
   CHUNK_TILES,
   CHUNK_WORLD,
   BASE_RADIUS,
+  FLOOR_KIND,
   generateChunk,
   populateChunkFoliage,
   worldToChunk,
@@ -34,19 +35,20 @@ import {
   getWorldBoundsTiles,
   isHighwayTile,
   isInWorldBoundsTile,
+  ROAD_CLEARANCE_TILES,
 } from './highwayGen.js';
 
 export { TILE, CHUNK_TILES, BASE_RADIUS } from './worldGen.js';
 export const PLAYER_RADIUS = 0.6;
 export const BULLET_RADIUS = 0.15;
 
-const BAKE_VERSION = 47;
+const BAKE_VERSION = 101;
 const MAX_CACHED_CHUNKS = 256;
 
 export class World {
   constructor() {
     this.chunks = new Map();
-    this.chunkOrder = [];
+    this._oobChunks = new Map();
     this.obstacles = [];
     this.decor = [];
     this.dynamicObstacles = [];
@@ -54,6 +56,13 @@ export class World {
     this._obstacleScratch = [];
     this._foliageBlocked = new Set();
     this._foliageReady = false;
+    /** @type {Map<string, string>} */
+    this._townFloorTiles = new Map();
+    this._dirtPattern = null;
+    this._dirtPatternPx = 0;
+    this._foliageQueue = [];
+    this._holdAllChunks = false;
+    this._fullyPrewarmed = false;
   }
 
   addDynamicObstacle(obs) {
@@ -93,83 +102,198 @@ export class World {
 
   async build() {
     this.chunks.clear();
-    this.chunkOrder = [];
+    this._oobChunks.clear();
     this.obstacles = [];
     this.decor = [];
     this.dynamicObstacles = [];
     this._dynamicGrid.clear();
     this._foliageBlocked.clear();
     this._foliageReady = false;
+    this._townFloorTiles.clear();
+    this._foliageQueue = [];
+    this._holdAllChunks = false;
+    this._fullyPrewarmed = false;
     this._touchChunk(0, 0);
   }
 
   _foliageSkipTile(tx, tz) {
     if (!isInWorldBoundsTile(tx, tz)) return true;
     if (this._foliageBlocked.has(`${tx},${tz}`)) return true;
+    if (this._townFloorTiles.has(`${tx},${tz}`)) return true;
     if (isHighwayTile(tx, tz)) return true;
     return false;
   }
 
-  populateFoliageForChunk(chunk) {
-    if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
-    populateChunkFoliage(chunk, (tx, tz) => this._foliageSkipTile(tx, tz));
-    chunk.bakedLayer = null;
+  /** True when a tile is on or within ROAD_CLEARANCE_TILES of any road/path surface. */
+  isNearRoadSurface(tx, tz, clearance = ROAD_CLEARANCE_TILES) {
+    for (let dz = -clearance; dz <= clearance; dz++) {
+      for (let dx = -clearance; dx <= clearance; dx++) {
+        const ntx = tx + dx;
+        const ntz = tz + dz;
+        if (isHighwayTile(ntx, ntz)) return true;
+        if (this._townFloorTiles.has(`${ntx},${ntz}`)) return true;
+        const cx = Math.floor(ntx / CHUNK_TILES);
+        const cz = Math.floor(ntz / CHUNK_TILES);
+        const chunk = this.chunks.get(this._chunkKey(cx, cz));
+        if (!chunk || chunk.outOfBounds) continue;
+        const lx = ((ntx % CHUNK_TILES) + CHUNK_TILES) % CHUNK_TILES;
+        const lz = ((ntz % CHUNK_TILES) + CHUNK_TILES) % CHUNK_TILES;
+        const tile = chunk.tiles[lz * CHUNK_TILES + lx];
+        if (tile?.floorKind === 'road' || tile?.floorKind === 'path') return true;
+      }
+    }
+    return false;
   }
 
-  /** Call after all towns/buildings are placed. */
-  finalizeWorldGeneration() {
-    this._foliageReady = true;
-    for (const chunk of this.chunks.values()) {
-      this.populateFoliageForChunk(chunk);
+  _clearTreesNearRoad(tx, tz, clearance = ROAD_CLEARANCE_TILES) {
+    const minX = (tx - clearance) * TILE;
+    const maxX = (tx + clearance + 1) * TILE;
+    const minZ = (tz - clearance) * TILE;
+    const maxZ = (tz + clearance + 1) * TILE;
+    this.clearFoliageInRect(minX, maxX, minZ, maxZ, {
+      markBlocked: false,
+      predicate: (f) => f.kind === 'tree' || f.kind === 'tree2' || f.kind === 'tree3',
+    });
+  }
+
+  /** Persist town roads/paths so they survive chunk eviction. */
+  registerTownFloorTiles(tiles) {
+    for (const { tx, tz, kind } of tiles) {
+      this._townFloorTiles.set(`${tx},${tz}`, kind);
+      this._foliageBlocked.add(`${tx},${tz}`);
     }
   }
 
-  prewarmGround(sprites, ppu, radiusChunks = 4) {
-    const tilePx = TILE * ppu;
+  /** Reserve tiles before foliage generation (building footprints, paths, etc.). */
+  markFoliageBlockedTiles(tiles) {
+    for (const { tx, tz } of tiles) {
+      this._foliageBlocked.add(`${tx},${tz}`);
+    }
+  }
+
+  _applyTownFloorToChunk(chunk) {
+    if (!chunk || chunk.outOfBounds || this._townFloorTiles.size === 0) return;
+    let dirty = false;
+    for (const tile of chunk.tiles) {
+      const kind = this._townFloorTiles.get(`${tile.tx},${tile.tz}`);
+      if (!kind) continue;
+      if (tile.floorKind !== kind) {
+        tile.floorKind = kind;
+        dirty = true;
+      }
+      if (kind !== FLOOR_KIND) chunk.hasOverlayFloors = true;
+    }
+    if (dirty) chunk.bakedLayer = null;
+  }
+
+  populateFoliageForChunk(chunk) {
+    if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
+    populateChunkFoliage(
+      chunk,
+      (tx, tz) => this._foliageSkipTile(tx, tz),
+      (tx, tz) => this.isNearRoadSurface(tx, tz),
+    );
+  }
+
+  /** Spread foliage gen across frames — avoids movement hitches. */
+  queueFoliageForChunk(chunk) {
+    if (!chunk || chunk.foliagePopulated || chunk.outOfBounds || chunk._foliageQueued) return;
+    chunk._foliageQueued = true;
+    this._foliageQueue.push(chunk);
+  }
+
+  drainFoliageQueue(maxPerFrame = 2) {
+    if (this._fullyPrewarmed) return;
+    let n = 0;
+    while (n < maxPerFrame && this._foliageQueue.length > 0) {
+      const chunk = this._foliageQueue.shift();
+      if (!chunk || chunk.foliagePopulated) continue;
+      chunk._foliageQueued = false;
+      this.populateFoliageForChunk(chunk);
+      n++;
+    }
+  }
+
+  /** Load every in-bounds chunk — call during the loading screen before gameplay. */
+  async preloadAllChunks(onProgress = null) {
     const b = getWorldBoundsTiles();
     const minCX = Math.floor(b.minTx / CHUNK_TILES);
     const maxCX = Math.floor(b.maxTx / CHUNK_TILES);
     const minCZ = Math.floor(b.minTz / CHUNK_TILES);
     const maxCZ = Math.floor(b.maxTz / CHUNK_TILES);
-    const { cx: pcx, cz: pcz } = worldToChunk(0, 0);
-    const c0 = Math.max(minCX, pcx - radiusChunks);
-    const c1 = Math.min(maxCX, pcx + radiusChunks);
-    const z0 = Math.max(minCZ, pcz - radiusChunks);
-    const z1 = Math.min(maxCZ, pcz + radiusChunks);
-    for (let cz = z0; cz <= z1; cz++) {
-      for (let cx = c0; cx <= c1; cx++) {
-        this._bakeChunkGround(this.getChunk(cx, cz), sprites, tilePx);
+    const total = (maxCX - minCX + 1) * (maxCZ - minCZ + 1);
+    let done = 0;
+    this._holdAllChunks = true;
+
+    for (let cz = minCZ; cz <= maxCZ; cz++) {
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        if (chunkOverlapsWorldBounds(cx, cz)) this.getChunk(cx, cz);
+        done++;
+        if (onProgress && (done % 3 === 0 || done === total)) {
+          onProgress(done / total);
+          await new Promise((r) => setTimeout(r, 0));
+        }
       }
     }
   }
 
-  /** Paint highway tiles only — skips empty out-of-bounds chunks. */
-  async bootstrapWorld(onProgress = null) {
-    const { roadTileSet } = getRoadNetwork();
-    const keys = [...roadTileSet];
-    const total = keys.length;
-    const touched = new Set();
-
-    for (let i = 0; i < keys.length; i++) {
-      const [tx, tz] = keys[i].split(',').map(Number);
-      const tile = this.getTile(tx, tz);
-      if (tile) {
-        tile.floorKind = 'road';
-        this._foliageBlocked.add(`${tx},${tz}`);
-        touched.add(this._chunkKey(
-          Math.floor(tx / CHUNK_TILES),
-          Math.floor(tz / CHUNK_TILES),
-        ));
-      }
-      if (onProgress && (i % 600 === 0 || i === total - 1)) {
-        onProgress((i + 1) / total, 'Loading roads…');
-        if (i % 2400 === 0) await new Promise((r) => setTimeout(r, 0));
+  /** Fill foliage for every loaded chunk — call after towns/roads are placed. */
+  async finalizeWorldGeneration(onProgress = null) {
+    const pending = [];
+    for (const chunk of this.chunks.values()) {
+      if (!chunk.outOfBounds && !chunk.foliagePopulated) pending.push(chunk);
+    }
+    for (let i = 0; i < pending.length; i++) {
+      this.populateFoliageForChunk(pending[i]);
+      if (onProgress && (i % 2 === 0 || i === pending.length - 1)) {
+        onProgress((i + 1) / pending.length);
+        await new Promise((r) => setTimeout(r, 0));
       }
     }
+    this.syncFoliageObstacles();
+    this._foliageReady = true;
+    this._fullyPrewarmed = true;
+  }
 
-    for (const key of touched) {
-      const chunk = this.chunks.get(key);
-      if (chunk) chunk.bakedLayer = null;
+  prewarmGround(sprites, ppu, radiusChunks = 4) {
+    const { cx: pcx, cz: pcz } = worldToChunk(0, 0);
+    for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
+      for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
+        this.getChunk(pcx + dx, pcz + dz);
+      }
+    }
+  }
+
+  /** Paint highway tiles — only touches chunks that contain road. */
+  async bootstrapWorld(onProgress = null) {
+    const { roadTileSet } = getRoadNetwork();
+    const byChunk = new Map();
+    for (const key of roadTileSet) {
+      const [tx, tz] = key.split(',').map(Number);
+      const ck = this._chunkKey(
+        Math.floor(tx / CHUNK_TILES),
+        Math.floor(tz / CHUNK_TILES),
+      );
+      let list = byChunk.get(ck);
+      if (!list) {
+        list = [];
+        byChunk.set(ck, list);
+      }
+      list.push({ tx, tz, kind: 'road' });
+    }
+
+    const entries = [...byChunk.entries()];
+    const total = entries.length;
+    for (let i = 0; i < entries.length; i++) {
+      const [ck, tiles] = entries[i];
+      const [cx, cz] = ck.split(',').map(Number);
+      if (!chunkOverlapsWorldBounds(cx, cz)) continue;
+      this.getChunk(cx, cz);
+      this.paintFloorWorldTiles(tiles);
+      if (onProgress && (i % 4 === 0 || i === total - 1)) {
+        onProgress((i + 1) / total, 'Loading roads…');
+        if (i % 16 === 0) await new Promise((r) => setTimeout(r, 0));
+      }
     }
   }
 
@@ -200,30 +324,45 @@ export class World {
     return `${cx},${cz}`;
   }
 
+  _bumpChunk(key) {
+    if (!this.chunks.has(key)) return;
+    const chunk = this.chunks.get(key);
+    this.chunks.delete(key);
+    this.chunks.set(key, chunk);
+  }
+
+  _evictOldestChunk() {
+    const oldest = this.chunks.keys().next().value;
+    if (oldest != null) this.chunks.delete(oldest);
+  }
+
   _outOfBoundsChunk(cx, cz) {
     const key = this._chunkKey(cx, cz);
-    if (this.chunks.has(key)) return this.chunks.get(key);
+    if (this._oobChunks.has(key)) return this._oobChunks.get(key);
     const chunk = generateChunk(cx, cz);
     chunk.outOfBounds = true;
     chunk.foliagePopulated = true;
-    this.chunks.set(key, chunk);
+    this._oobChunks.set(key, chunk);
     return chunk;
   }
 
   _touchChunk(cx, cz) {
     const key = this._chunkKey(cx, cz);
-    if (this.chunks.has(key)) return this.chunks.get(key);
+    if (this.chunks.has(key)) {
+      this._bumpChunk(key);
+      return this.chunks.get(key);
+    }
     if (!chunkOverlapsWorldBounds(cx, cz)) return this._outOfBoundsChunk(cx, cz);
 
     const chunk = generateChunk(cx, cz);
     this.chunks.set(key, chunk);
     this.paintHighwayInChunk(cx, cz);
-    if (this._foliageReady) this.populateFoliageForChunk(chunk);
-    this.chunkOrder.push(key);
-    if (this.chunkOrder.length > MAX_CACHED_CHUNKS) {
-      const old = this.chunkOrder.shift();
-      this.chunks.delete(old);
+    this._applyTownFloorToChunk(chunk);
+    if (this._foliageReady && !chunk.foliagePopulated) {
+      if (this._fullyPrewarmed) this.populateFoliageForChunk(chunk);
+      else this.queueFoliageForChunk(chunk);
     }
+    while (!this._holdAllChunks && this.chunks.size > MAX_CACHED_CHUNKS) this._evictOldestChunk();
     return chunk;
   }
 
@@ -262,13 +401,22 @@ export class World {
       if (kind === 'path' && tile.floorKind === 'road') continue;
       tile.floorKind = kind;
       this._foliageBlocked.add(`${tx},${tz}`);
-      touched.add(this._chunkKey(
+      if (kind === 'road' || kind === 'path') {
+        this._clearTreesNearRoad(tx, tz);
+      } else {
+        const minX = tx * TILE;
+        const minZ = tz * TILE;
+        this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE, { markBlocked: false });
+      }
+      const key = this._chunkKey(
         Math.floor(tx / CHUNK_TILES),
         Math.floor(tz / CHUNK_TILES),
-      ));
-      const minX = tx * TILE;
-      const minZ = tz * TILE;
-      this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE, { markBlocked: false });
+      );
+      touched.add(key);
+      if (kind !== FLOOR_KIND) {
+        const chunk = this.chunks.get(key);
+        if (chunk) chunk.hasOverlayFloors = true;
+      }
     }
     for (const key of touched) {
       const chunk = this.chunks.get(key);
@@ -301,24 +449,64 @@ export class World {
     }
     for (const key of touched) {
       const chunk = this.chunks.get(key);
-      if (chunk) chunk.bakedLayer = null;
+      if (chunk) {
+        chunk.bakedLayer = null;
+        if (kind !== FLOOR_KIND) chunk.hasOverlayFloors = true;
+      }
+    }
+  }
+
+  /** Remove y-sort foliage matching predicate; also drops linked circle obstacles. */
+  removeFoliageWhere(predicate) {
+    for (const chunk of this.chunks.values()) {
+      const dropObs = new Set();
+      const before = chunk.foliage.length;
+      chunk.foliage = chunk.foliage.filter((f) => {
+        if (!predicate(f)) return true;
+        if (f._obstacle) dropObs.add(f._obstacle);
+        return false;
+      });
+      if (chunk.foliage.length === before && dropObs.size === 0) continue;
+      if (dropObs.size) {
+        chunk.obstacles = chunk.obstacles.filter((obs) => !dropObs.has(obs));
+      }
+      chunk.bakedLayer = null;
+    }
+  }
+
+  /** Drop circle obstacles whose foliage entry was removed. */
+  syncFoliageObstacles() {
+    for (const chunk of this.chunks.values()) {
+      const live = new Set(chunk.foliage);
+      const before = chunk.obstacles.length;
+      chunk.obstacles = chunk.obstacles.filter((obs) => {
+        if (!obs._foliage) return true;
+        return live.has(obs._foliage);
+      });
+      if (chunk.obstacles.length !== before) chunk.bakedLayer = null;
     }
   }
 
   /** Remove ground foliage + blocking props overlapping a world-space rectangle. */
-  clearFoliageInRect(minX, maxX, minZ, maxZ, { markBlocked = false } = {}) {
+  clearFoliageInRect(minX, maxX, minZ, maxZ, { markBlocked = false, predicate = null } = {}) {
     const minCX = Math.floor(minX / CHUNK_WORLD);
     const maxCX = Math.floor(maxX / CHUNK_WORLD);
     const minCZ = Math.floor(minZ / CHUNK_WORLD);
     const maxCZ = Math.floor(maxZ / CHUNK_WORLD);
     for (let cz = minCZ; cz <= maxCZ; cz++) {
       for (let cx = minCX; cx <= maxCX; cx++) {
-        const chunk = this.getChunk(cx, cz);
+        const chunk = this.chunks.get(this._chunkKey(cx, cz));
+        if (!chunk || chunk.outOfBounds) continue;
         const before = chunk.foliage.length;
-        chunk.foliage = chunk.foliage.filter(
-          (f) => !foliageIntersectsRect(f, minX, maxX, minZ, maxZ),
-        );
+        const dropObs = new Set();
+        chunk.foliage = chunk.foliage.filter((f) => {
+          if (predicate && !predicate(f)) return true;
+          const hit = foliageIntersectsRect(f, minX, maxX, minZ, maxZ);
+          if (hit && f._obstacle) dropObs.add(f._obstacle);
+          return !hit;
+        });
         chunk.obstacles = chunk.obstacles.filter((obs) => {
+          if (dropObs.has(obs)) return false;
           if (obs.kind !== 'circle') return true;
           const r = obs.radius ?? 0;
           return !(
@@ -407,39 +595,116 @@ export class World {
     return canvas;
   }
 
+  _fillDirtPlane(ctx, sprites, tilePx, ppu, minWX, minWZ, maxWX, maxWZ) {
+    const left = Math.floor(minWX * ppu);
+    const top = Math.floor(minWZ * ppu);
+    const right = Math.ceil(maxWX * ppu);
+    const bottom = Math.ceil(maxWZ * ppu);
+    const w = right - left;
+    const h = bottom - top;
+
+    const tileOriginX = Math.floor(minWX / TILE) * TILE;
+    const tileOriginZ = Math.floor(minWZ / TILE) * TILE;
+    const pxOriginX = Math.round(tileOriginX * ppu);
+    const pxOriginZ = Math.round(tileOriginZ * ppu);
+
+    const bmp = sprites.getTileBitmap('floor_dirt', tilePx, null);
+    if (bmp) {
+      if (!this._dirtPattern || this._dirtPatternPx !== tilePx) {
+        this._dirtPattern = ctx.createPattern(bmp, 'repeat');
+        this._dirtPatternPx = tilePx;
+      }
+      if (this._dirtPattern) {
+        ctx.save();
+        ctx.translate(pxOriginX, pxOriginZ);
+        ctx.fillStyle = this._dirtPattern;
+        ctx.fillRect(left - pxOriginX, top - pxOriginZ, w, h);
+        ctx.restore();
+        return;
+      }
+    }
+    ctx.fillStyle = getTerrainMapColorFromTile({ floorKind: FLOOR_KIND });
+    ctx.fillRect(left, top, w, h);
+  }
+
   drawGroundLayer(ctx, camTx, camTy, viewHalfW, viewHalfH, ppu, sprites, camX, camZ) {
     const tilePx = TILE * ppu;
-    const chunkPx = CHUNK_TILES * tilePx;
-    const minTX = Math.floor((camX - viewHalfW) / TILE);
-    const maxTX = Math.ceil((camX + viewHalfW) / TILE);
-    const minTZ = Math.floor((camZ - viewHalfH) / TILE);
-    const maxTZ = Math.ceil((camZ + viewHalfH) / TILE);
-    const minCX = Math.floor(minTX / CHUNK_TILES);
-    const maxCX = Math.floor(maxTX / CHUNK_TILES);
-    const minCZ = Math.floor(minTZ / CHUNK_TILES);
-    const maxCZ = Math.floor(maxTZ / CHUNK_TILES);
+    const minWX = camX - viewHalfW;
+    const maxWX = camX + viewHalfW;
+    const minWZ = camZ - viewHalfH;
+    const maxWZ = camZ + viewHalfH;
+    const minTX = Math.floor(minWX / TILE);
+    const maxTX = Math.ceil(maxWX / TILE);
+    const minTZ = Math.floor(minWZ / TILE);
+    const maxTZ = Math.ceil(maxWZ / TILE);
 
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.translate(camTx, camTy);
-    for (let cz = minCZ; cz <= maxCZ; cz++) {
-      for (let cx = minCX; cx <= maxCX; cx++) {
-        const chunk = this.getChunk(cx, cz);
-        const layer = this._bakeChunkGround(chunk, sprites, tilePx);
-        ctx.drawImage(layer, Math.round(cx * CHUNK_WORLD * ppu), Math.round(cz * CHUNK_WORLD * ppu), chunkPx, chunkPx);
-      }
+
+    const left = Math.floor(minWX * ppu);
+    const top = Math.floor(minWZ * ppu);
+    const right = Math.ceil(maxWX * ppu);
+    const bottom = Math.ceil(maxWZ * ppu);
+
+    if (this._fullyPrewarmed) {
+      ctx.fillStyle = getTerrainMapColorFromTile({ floorKind: FLOOR_KIND });
+      ctx.fillRect(left, top, right - left, bottom - top);
+    } else {
+      this._fillDirtPlane(ctx, sprites, tilePx, ppu, minWX, minWZ, maxWX, maxWZ);
     }
+
+    const drawOpts = { loadMissing: this._fullyPrewarmed, touchLru: false };
+    this.forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, (chunk) => {
+      if (
+        chunk.bakedLayer
+        && chunk.bakedTilePx === tilePx
+        && chunk.bakeVersion === BAKE_VERSION
+      ) {
+        const originPxX = Math.round(chunk.cx * CHUNK_WORLD * ppu);
+        const originPxZ = Math.round(chunk.cz * CHUNK_WORLD * ppu);
+        ctx.drawImage(chunk.bakedLayer, originPxX, originPxZ);
+        return;
+      }
+
+      const half = tilePx * 0.5;
+      for (const tile of chunk.tiles) {
+        if (tile.floorKind === FLOOR_KIND) continue;
+        const px = Math.round(tile.tx * TILE * ppu);
+        const pz = Math.round(tile.tz * TILE * ppu);
+        sprites.stampTile(ctx, getFloorSpriteName(tile.floorKind), px, pz, tilePx);
+      }
+      if (!chunk.foliage?.length) return;
+      for (const f of chunk.foliage) {
+        if (isYsortFoliage(f.kind)) continue;
+        if (f.x < minWX - TILE || f.x > maxWX + TILE || f.z < minWZ - TILE || f.z > maxWZ + TILE) continue;
+        const fTint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
+        const fx = Math.round(f.x * ppu - half);
+        const fz = Math.round(f.z * ppu - half);
+        sprites.stampTile(ctx, f.sprite, fx, fz, tilePx, fTint);
+      }
+    }, drawOpts);
+
     ctx.restore();
   }
 
-  forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, fn) {
+  forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, fn, { loadMissing = true, touchLru = true } = {}) {
     const minCX = Math.floor(minTX / CHUNK_TILES);
     const maxCX = Math.floor(maxTX / CHUNK_TILES);
     const minCZ = Math.floor(minTZ / CHUNK_TILES);
     const maxCZ = Math.floor(maxTZ / CHUNK_TILES);
     for (let cz = minCZ; cz <= maxCZ; cz++) {
       for (let cx = minCX; cx <= maxCX; cx++) {
-        fn(this.getChunk(cx, cz));
+        const key = this._chunkKey(cx, cz);
+        let chunk = this.chunks.get(key);
+        if (!chunk) {
+          if (!loadMissing) continue;
+          chunk = this.getChunk(cx, cz);
+        } else if (touchLru) {
+          this._bumpChunk(key);
+        }
+        if (chunk.outOfBounds) continue;
+        fn(chunk);
       }
     }
   }
@@ -456,7 +721,7 @@ export class World {
         if (!isYsortFoliage(f.kind)) continue;
         if (foliageIntersectsRect(f, minX, maxX, minZ, maxZ)) out.push(f);
       }
-    });
+    }, { loadMissing: false });
     return out;
   }
 
