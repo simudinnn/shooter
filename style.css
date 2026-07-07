@@ -83,6 +83,10 @@ body.mobile-ui .game-cursor-follow {
   display: none;
 }
 
+body.game-active.mobile-ui .game-cursor-follow {
+  display: block;
+}
+
 body.menu-custom-cursor,
 body.menu-custom-cursor *,
 body.menu-custom-cursor #game-canvas {
@@ -1864,4 +1868,65 @@ body.game-active.mobile-ui .inv-drag-ghost .inv-slot-icon {
 
 body.game-active.mobile-ui .inv-item-slot:not(.inv-locked) {
   touch-action: none;
+}
+
+body.game-active.mobile-ui .inv-combine-panel {
+  gap: 8px;
+  margin-top: 4px;
+}
+
+body.game-active.mobile-ui .inv-combine-row {
+  gap: 8px;
+  align-items: stretch;
+}
+
+body.game-active.mobile-ui .inv-combine-grid {
+  flex: 1 1 0;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+body.game-active.mobile-ui .inv-combine-slot {
+  min-height: clamp(44px, 12vw, 56px);
+  aspect-ratio: 1;
+}
+
+body.game-active.mobile-ui .inv-combine-slot .inv-slot-icon {
+  width: 82%;
+  height: 82%;
+}
+
+body.game-active.mobile-ui .inv-combine-arrow {
+  font-size: 14px;
+  padding: 0 1px;
+  align-self: center;
+}
+
+body.game-active.mobile-ui .inv-combine-output {
+  flex: 0 0 clamp(44px, 12vw, 52px);
+  width: clamp(44px, 12vw, 52px);
+  min-height: clamp(44px, 12vw, 52px);
+  padding: 3px;
+  gap: 1px;
+}
+
+body.game-active.mobile-ui .inv-combine-output-icon {
+  width: clamp(22px, 6vw, 28px);
+  height: clamp(22px, 6vw, 28px);
+}
+
+body.game-active.mobile-ui .inv-combine-output-placeholder {
+  font-size: 16px;
+}
+
+body.game-active.mobile-ui .inv-combine-output-label {
+  font-size: 7px;
+  max-width: 100%;
+}
+
+body.game-active.mobile-ui .inv-combine-btn {
+  font-size: 12px;
+  padding: 10px 12px;
+  touch-action: manipulation;
 }

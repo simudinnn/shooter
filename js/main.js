@@ -331,8 +331,16 @@ class Game {
     return !!this.inventoryUI?.isOpen();
   }
 
+  _internalScreenToClient(sx, sy) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: rect.left + (sx / INTERNAL_W) * rect.width,
+      y: rect.top + (sy / INTERNAL_H) * rect.height,
+    };
+  }
+
   _syncGameCursor() {
-    if (this.mobile || !this.running || this.paused || this._panelOpen() || this._isSpawnRevealActive()) {
+    if (!this.running || this.paused || this._panelOpen() || this._isSpawnRevealActive()) {
       this._hideGameCursor();
       return;
     }
@@ -347,9 +355,17 @@ class Game {
     const size = sprite === 'inv_cursor' ? 56 : 48;
     this._gameCursorEl.style.width = `${size}px`;
     this._gameCursorEl.style.height = `${size}px`;
+    if (this.mobile) {
+      const pt = this._internalScreenToClient(this.mouse.sx, this.mouse.sy);
+      this._gameCursorEl.style.left = `${pt.x}px`;
+      this._gameCursorEl.style.top = `${pt.y}px`;
+      this._gameCursorEl.style.transform = 'translate(-50%, -50%)';
+    } else {
+      this._gameCursorEl.style.left = `${this.mouse.clientX}px`;
+      this._gameCursorEl.style.top = `${this.mouse.clientY}px`;
+      this._gameCursorEl.style.transform = '';
+    }
     this._gameCursorEl.style.visibility = 'visible';
-    this._gameCursorEl.style.left = `${this.mouse.clientX}px`;
-    this._gameCursorEl.style.top = `${this.mouse.clientY}px`;
   }
 
   _moveMenuCursor(e) {
@@ -1325,7 +1341,10 @@ class Game {
   }
 
   async _bootGame(saveData = null, bootOpts = null) {
-    this._beginSpawnReveal();
+    const isSaveLoad = !!saveData;
+    if (!isSaveLoad) {
+      this._beginSpawnReveal();
+    }
     if (bootOpts?.lan) {
       this.lan = bootOpts.lan;
     } else {
@@ -1362,6 +1381,7 @@ class Game {
       this.player = new Player();
       this.player.applySaveData(saveData.player);
       this._applySaveState(saveData);
+      this._finalizeLoadedSave(saveData);
     } else {
       this.player = new Player();
       const spawn = this.world.getPlayerSpawn();
@@ -1441,6 +1461,31 @@ class Game {
       }
       this.robots.push(robot);
     }
+  }
+
+  _finalizeLoadedSave(data) {
+    this.world._cachedPlayerSpawn = { x: this.player.x, z: this.player.z };
+    for (const b of this.buildings.buildings) {
+      if (b.homeCx == null || b.homeCz == null) continue;
+      const chunk = this.world.getChunk(b.homeCx, b.homeCz);
+      chunk.buildingsSpawned = true;
+      if (b.chests?.length || b.chest) chunk.chestsSpawned = true;
+    }
+    for (const f of data.chunkFlags ?? []) {
+      const chunk = this.world.getChunk(f.cx, f.cz);
+      if (f.spidersSpawned) chunk.spidersSpawned = true;
+      if (f.buildingsSpawned) chunk.buildingsSpawned = true;
+      if (f.chestsSpawned) chunk.chestsSpawned = true;
+    }
+    this.world.touchChunksAround(this.player.x, this.player.z, 6);
+    for (let i = 0; i < 24; i++) this.world.drainFoliageQueue(16);
+    const view = this.getViewBoundsWorld();
+    this._cachedYsortFoliage = this.world.collectYsortFoliage(
+      view.minX,
+      view.maxX,
+      view.minZ,
+      view.maxZ,
+    );
   }
 
   _update(dt, time) {

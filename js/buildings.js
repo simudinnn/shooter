@@ -18,6 +18,7 @@ import {
   TOWN_BUILDING_GAP,
   BUILDING_ROLE,
   getTownFootprintTiles,
+  inferTownLayout,
 } from './townGen.js';
 import { getTownsInChunk, getTownAnchorAtRegion, isHighwayTile } from './highwayGen.js';
 import {
@@ -1005,8 +1006,20 @@ export class BuildingManager {
     if (!this._townAnchorsSpawned) this._townAnchorsSpawned = new Set();
     for (const saved of saves ?? []) {
       this.restoreFromSave(saved, world);
-      if (saved.townAnchorTx != null) this._townAnchorsSpawned.add(saved.townAnchorTx);
       if (saved.townAnchorId != null) this._townAnchorsSpawned.add(saved.townAnchorId);
+    }
+    const byTown = new Map();
+    for (const b of this.buildings) {
+      const id = b.townId
+        ?? (b.townAnchorId != null ? `town@${b.townAnchorId}` : null)
+        ?? (b.townAnchorTx != null ? `town@${b.townAnchorTx},${b.townAnchorTz ?? 0}` : null);
+      if (!id) continue;
+      if (!byTown.has(id)) byTown.set(id, []);
+      byTown.get(id).push(b);
+    }
+    for (const group of byTown.values()) {
+      const layout = inferTownLayout(group);
+      if (layout) this._markTownChunksSpawned(world, layout);
     }
     repaintAllTownStreets(world, this.buildings);
     for (const b of this.buildings) this._refreshExteriorDecorOnRoads(world, b);
