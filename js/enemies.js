@@ -86,28 +86,24 @@ export class Robot {
     return this.maxHealth > 0 ? this.health / this.maxHealth : 0;
   }
 
-  /** World wall collision — feet-centered AABB uses soft wall slices (fits door). */
+  /** World wall collision — circular feet collider. */
   getWorldCollider() {
-    const nativePx = getEnemyNativePx(this.type);
-    const scale = getEnemyDrawScale(this.type);
-    const feetOff = spriteFeetOffset(nativePx, scale) / PPU;
-    return {
-      kind: 'aabb',
-      zOff: feetOff * 0.48,
-      halfW: (nativePx * scale * 0.30) / PPU,
-      halfH: (nativePx * scale * 0.26) / PPU,
-    };
+    return { kind: 'circle', radius: this.radius };
   }
 
-  /** Slightly larger than body — keeps distance from barrels/tables while moving. */
-  getMoveCollider() {
-    const col = this.getWorldCollider();
-    const pad = 0.16;
+  /** Feet-level movement AABB — larger than legacy circle for smoother wall slides. */
+  getMoveCollider(ppu = PPU) {
+    const nativePx = getEnemyNativePx(this.type);
+    const scale = getEnemyDrawScale(this.type);
+    const feetSouth = spriteFeetOffset(nativePx, scale) / ppu;
+    const sizeMul = (nativePx / 16) * (scale / getEnemyDrawScale('spider'));
+    const halfW = 1.55 * sizeMul;
+    const halfH = 1.05 * sizeMul;
     return {
       kind: 'aabb',
-      zOff: col.zOff,
-      halfW: col.halfW + pad,
-      halfH: col.halfH + pad,
+      halfW,
+      halfH,
+      zOff: feetSouth - halfH,
     };
   }
 
@@ -318,8 +314,9 @@ export class Robot {
     const dx = this.x - prevX;
     const dz = this.z - prevZ;
     this.moveSpeed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
-    this.moving = (dx * dx + dz * dz) > MOTION_IDLE_EPS * MOTION_IDLE_EPS;
-    if (this.moving && walkRate > 0) {
+    const displaced = (dx * dx + dz * dz) > MOTION_IDLE_EPS * MOTION_IDLE_EPS;
+    this.moving = displaced || walkRate > 0;
+    if (walkRate > 0) {
       this.walkPhase += dt * walkRate;
     }
     this._flipX = resolveFlipX(this.angle, this._flipX ?? false);

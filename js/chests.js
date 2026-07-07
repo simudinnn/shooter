@@ -1,6 +1,6 @@
 import { TILE, hash01 } from './worldGen.js';
 import { rollChestLoot, rollChestVariant } from './loot.js';
-import { CELL_FLOOR, isNorthInteriorColumn } from './buildingGen.js';
+import { CELL_FLOOR, interiorPropCollisionHalf, isNorthInteriorColumn } from './buildingGen.js';
 
 export const CHEST_INTERACT_DIST = 3;
 export const CHEST_DRAW_SCALE = 2.1;
@@ -10,12 +10,12 @@ const CHEST_GAME_PPU = 8;
 /** Sprite and collision share the tile center. */
 export const CHEST_VIS_PIVOT = { nx: 8, ny: 8 };
 export const CHEST_DRAW_PIVOT = CHEST_VIS_PIVOT;
-const CHEST_COLLISION_FRAC = 0.72;
-export const CHEST_OPAQUE_HALF_W = 6.5 * CHEST_COLLISION_FRAC;
-export const CHEST_OPAQUE_HALF_H = 4.5 * CHEST_COLLISION_FRAC;
-/** Collision half-extents at draw scale (world units). */
-export const CHEST_COLLISION_HALF_W = (CHEST_OPAQUE_HALF_W * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
-export const CHEST_COLLISION_HALF_H = (CHEST_OPAQUE_HALF_H * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
+/** Match fridge / interior prop collision (same anchor and footprint). */
+export const CHEST_COLLISION_HALF_W = interiorPropCollisionHalf();
+export const CHEST_COLLISION_HALF_H = interiorPropCollisionHalf();
+/** Screen-space hit test half extents for mouse hover. */
+export const CHEST_OPAQUE_HALF_W = CHEST_COLLISION_HALF_W * CHEST_GAME_PPU;
+export const CHEST_OPAQUE_HALF_H = CHEST_COLLISION_HALF_H * CHEST_GAME_PPU;
 
 /** Footprint area (tiles) for “large” houses eligible for a second chest. */
 export const LARGE_BUILDING_AREA = 30;

@@ -13,6 +13,7 @@ import {
   unpackTintGradient,
   isTintedFoliage,
   isYsortFoliage,
+  isTreeFoliage,
   foliageIntersectsRect,
   isCanopyFoliage,
   getTerrainMapColorFromTile,
@@ -27,7 +28,6 @@ import {
 import { shapeOverlapsOpenDoorNavZone } from './buildingGen.js';
 import {
   collectHighwayTilesInChunk,
-  getHighwayPlayerSpawn,
   getRoadNetwork,
   chunkOverlapsWorldBounds,
   clampWorldPosition,
@@ -38,7 +38,7 @@ import {
   ROAD_CLEARANCE_TILES,
 } from './highwayGen.js';
 
-export { TILE, CHUNK_TILES, BASE_RADIUS } from './worldGen.js';
+export { TILE, CHUNK_TILES, CHUNK_WORLD, BASE_RADIUS } from './worldGen.js';
 export const PLAYER_RADIUS = 0.6;
 export const BULLET_RADIUS = 0.15;
 
@@ -108,19 +108,21 @@ export class World {
     this.dynamicObstacles = [];
     this._dynamicGrid.clear();
     this._foliageBlocked.clear();
-    this._foliageReady = false;
     this._townFloorTiles.clear();
     this._foliageQueue = [];
     this._holdAllChunks = false;
     this._fullyPrewarmed = false;
+    this._foliageReady = true;
+    this._cachedPlayerSpawn = null;
     this._touchChunk(0, 0);
   }
 
   _foliageSkipTile(tx, tz) {
-    if (!isInWorldBoundsTile(tx, tz)) return true;
     if (this._foliageBlocked.has(`${tx},${tz}`)) return true;
     if (this._townFloorTiles.has(`${tx},${tz}`)) return true;
     if (isHighwayTile(tx, tz)) return true;
+    const tile = this.getTile(tx, tz);
+    if (tile?.floorKind === 'road' || tile?.floorKind === 'path') return true;
     return false;
   }
 
@@ -145,15 +147,12 @@ export class World {
     return false;
   }
 
-  _clearTreesNearRoad(tx, tz, clearance = ROAD_CLEARANCE_TILES) {
+  _clearFoliageNearRoad(tx, tz, clearance = ROAD_CLEARANCE_TILES) {
     const minX = (tx - clearance) * TILE;
     const maxX = (tx + clearance + 1) * TILE;
     const minZ = (tz - clearance) * TILE;
     const maxZ = (tz + clearance + 1) * TILE;
-    this.clearFoliageInRect(minX, maxX, minZ, maxZ, {
-      markBlocked: false,
-      predicate: (f) => f.kind === 'tree' || f.kind === 'tree2' || f.kind === 'tree3',
-    });
+    this.clearFoliageInRect(minX, maxX, minZ, maxZ);
   }
 
   /** Persist town roads/paths so they survive chunk eviction. */
@@ -193,6 +192,29 @@ export class World {
       (tx, tz) => this._foliageSkipTile(tx, tz),
       (tx, tz) => this.isNearRoadSurface(tx, tz),
     );
+    this._pruneFoliageWithoutSprites(chunk);
+  }
+
+  setSpriteBank(sprites) {
+    this._spriteBank = sprites;
+  }
+
+  _pruneFoliageWithoutSprites(chunk) {
+    const sprites = this._spriteBank;
+    if (!sprites?.ensureSprite) return;
+    for (const f of chunk.foliage) {
+      sprites.ensureSprite(f.sprite);
+    }
+  }
+
+  /** Drop tree props whose art failed to load (collision-only stumps). */
+  pruneAllTreesWithoutSprites() {
+    if (!this._spriteBank?.hasSprite) return;
+    for (const chunk of this.chunks.values()) {
+      if (chunk.outOfBounds) continue;
+      this._pruneFoliageWithoutSprites(chunk);
+    }
+    this.syncFoliageObstacles();
   }
 
   /** Spread foliage gen across frames — avoids movement hitches. */
@@ -212,6 +234,81 @@ export class World {
       this.populateFoliageForChunk(chunk);
       n++;
     }
+  }
+
+  /** Eagerly fill foliage for chunks around a world point (spawn reveal). */
+  populateFoliageAround(wx, wz, radiusChunks = 4) {
+    const { cx: pcx, cz: pcz } = worldToChunk(wx, wz);
+    for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
+      for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
+        const chunk = this.getChunk(pcx + dx, pcz + dz);
+        if (chunk.outOfBounds) continue;
+        if (!chunk.foliagePopulated) {
+          chunk._foliageQueued = false;
+          this.populateFoliageForChunk(chunk);
+        }
+      }
+    }
+    this._foliageQueue = this._foliageQueue.filter((c) => c?.foliagePopulated);
+  }
+
+  /** Remove foliage that landed on roads, paths, or other blocked floor tiles. */
+  stripFoliageFromSurfaceTilesAround(wx, wz, radiusChunks = 4) {
+    const { cx: pcx, cz: pcz } = worldToChunk(wx, wz);
+    for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
+      for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
+        const chunk = this.getChunk(pcx + dx, pcz + dz);
+        if (chunk.outOfBounds) continue;
+        for (let lz = 0; lz < CHUNK_TILES; lz++) {
+          for (let lx = 0; lx < CHUNK_TILES; lx++) {
+            const tx = chunk.cx * CHUNK_TILES + lx;
+            const tz = chunk.cz * CHUNK_TILES + lz;
+            if (!this._foliageSkipTile(tx, tz)) continue;
+            const minX = tx * TILE;
+            const minZ = tz * TILE;
+            this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE);
+          }
+        }
+      }
+    }
+    this.syncFoliageObstacles();
+  }
+
+  /** True when every in-bounds chunk near wx/wz has finished foliage generation. */
+  isFoliageReadyAround(wx, wz, radiusChunks = 4) {
+    const { cx: pcx, cz: pcz } = worldToChunk(wx, wz);
+    for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
+      for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
+        const cx = pcx + dx;
+        const cz = pcz + dz;
+        const chunk = this.chunks.get(this._chunkKey(cx, cz));
+        if (!chunk || chunk.outOfBounds) continue;
+        if (!chunk.foliagePopulated) return false;
+      }
+    }
+    for (const chunk of this._foliageQueue) {
+      if (!chunk) continue;
+      const dx = chunk.cx - pcx;
+      const dz = chunk.cz - pcz;
+      if (Math.abs(dx) <= radiusChunks && Math.abs(dz) <= radiusChunks) return false;
+    }
+    return true;
+  }
+
+  /** True when foliage and nearby building chunks have finished generating. */
+  isSpawnAreaReadyAround(wx, wz, radiusChunks = 4) {
+    if (!this.isFoliageReadyAround(wx, wz, radiusChunks)) return false;
+    const { cx: pcx, cz: pcz } = worldToChunk(wx, wz);
+    for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
+      for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
+        const cx = pcx + dx;
+        const cz = pcz + dz;
+        const chunk = this.chunks.get(this._chunkKey(cx, cz));
+        if (!chunk || chunk.outOfBounds) continue;
+        if (!chunk.buildingsSpawned) return false;
+      }
+    }
+    return true;
   }
 
   /** Load every in-bounds chunk — call during the loading screen before gameplay. */
@@ -255,8 +352,18 @@ export class World {
     this._fullyPrewarmed = true;
   }
 
-  prewarmGround(sprites, ppu, radiusChunks = 4) {
-    const { cx: pcx, cz: pcz } = worldToChunk(0, 0);
+  prewarmGround(wx, wz, radiusChunks = 4) {
+    const { cx: pcx, cz: pcz } = worldToChunk(wx, wz);
+    for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
+      for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
+        this.getChunk(pcx + dx, pcz + dz);
+      }
+    }
+  }
+
+  /** Keep terrain/foliage/spawn state warm around a moving focus point. */
+  touchChunksAround(wx, wz, radiusChunks = 5) {
+    const { cx: pcx, cz: pcz } = worldToChunk(wx, wz);
     for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
       for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
         this.getChunk(pcx + dx, pcz + dz);
@@ -352,7 +459,6 @@ export class World {
       this._bumpChunk(key);
       return this.chunks.get(key);
     }
-    if (!chunkOverlapsWorldBounds(cx, cz)) return this._outOfBoundsChunk(cx, cz);
 
     const chunk = generateChunk(cx, cz);
     this.chunks.set(key, chunk);
@@ -367,7 +473,6 @@ export class World {
   }
 
   getChunk(cx, cz) {
-    if (!chunkOverlapsWorldBounds(cx, cz)) return this._outOfBoundsChunk(cx, cz);
     return this._touchChunk(cx, cz);
   }
 
@@ -402,7 +507,7 @@ export class World {
       tile.floorKind = kind;
       this._foliageBlocked.add(`${tx},${tz}`);
       if (kind === 'road' || kind === 'path') {
-        this._clearTreesNearRoad(tx, tz);
+        this._clearFoliageNearRoad(tx, tz);
       } else {
         const minX = tx * TILE;
         const minZ = tz * TILE;
@@ -435,6 +540,10 @@ export class World {
           const tile = this.getTile(worldTx, worldTz);
           if (!tile) continue;
           tile.floorKind = kind;
+          this._foliageBlocked.add(`${worldTx},${worldTz}`);
+          if (kind === 'road' || kind === 'path') {
+            this._clearFoliageNearRoad(worldTx, worldTz, 0);
+          }
           touched.add(this._chunkKey(
             Math.floor(worldTx / CHUNK_TILES),
             Math.floor(worldTz / CHUNK_TILES),
@@ -719,6 +828,9 @@ export class World {
     this.forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, (chunk) => {
       for (const f of chunk.foliage) {
         if (!isYsortFoliage(f.kind)) continue;
+        if (isTreeFoliage(f.kind) && this._spriteBank) {
+          this._spriteBank.ensureSprite(f.sprite);
+        }
         if (foliageIntersectsRect(f, minX, maxX, minZ, maxZ)) out.push(f);
       }
     }, { loadMissing: false });
@@ -780,7 +892,9 @@ export class World {
   }
 
   getPlayerSpawn() {
-    return getHighwayPlayerSpawn();
+    if (this._cachedPlayerSpawn) return this._cachedPlayerSpawn;
+    this._cachedPlayerSpawn = this.randomMapPoint(BASE_RADIUS + 48);
+    return this._cachedPlayerSpawn;
   }
 
   _circleHit(px, pz, pr, ox, oz, or) {
@@ -954,8 +1068,14 @@ export class World {
   }
 
   _shapeReach(shape) {
-    if (!shape || shape.kind === 'circle') return (shape?.radius ?? 0) + 2;
+    if (!shape || shape.kind === 'circle') {
+      return (shape?.radius ?? 0) + Math.abs(shape?.zOff ?? 0) + 2;
+    }
     return Math.hypot(shape.halfW, shape.halfH) + Math.abs(shape.zOff ?? 0) + 2;
+  }
+
+  _shapeCenter(px, pz, shape) {
+    return { x: px, z: pz + (shape?.zOff ?? 0) };
   }
 
   _aabbCircleHit(acx, acz, halfW, halfH, ox, oz, or) {
@@ -981,8 +1101,9 @@ export class World {
 
   _checkShapeCollision(px, pz, shape, obstacles, soft = false, forNav = false, buildings = null) {
     if (!shape || shape.kind === 'circle') {
+      const center = this._shapeCenter(px, pz, shape);
       return this._checkObstacleCollision(
-        px, pz, shape?.radius ?? 0, obstacles, false, soft, null, null, forNav, buildings, shape,
+        center.x, center.z, shape?.radius ?? 0, obstacles, false, soft, null, null, forNav, buildings, shape,
       );
     }
     const acx = px;
@@ -1067,7 +1188,34 @@ export class World {
 
   resolveMovementShape(oldX, oldZ, newX, newZ, shape, opts = {}) {
     if (!shape || shape.kind === 'circle') {
-      return this.resolveMovement(oldX, oldZ, newX, newZ, shape?.radius ?? 0);
+      const buildings = opts.buildings ?? null;
+      const radius = shape?.radius ?? 0;
+      const zOff = shape?.zOff ?? 0;
+      let x = newX;
+      let z = newZ;
+      const obstacles = this.collectObstaclesNear(x, z, this._shapeReach(shape));
+
+      for (let i = 0; i < 4; i++) {
+        const center = this._shapeCenter(x, z, shape);
+        for (const obs of obstacles) {
+          if (this._ignoreObstacleInDoorway(obs, x, z, shape, buildings)) continue;
+          if (obs.kind === 'circle' && this._circleHit(center.x, center.z, radius, obs.x, obs.z, obs.radius)) {
+            const p = this._pushOutCircle(center.x, center.z, radius, obs);
+            x = p.x;
+            z = p.z - zOff;
+          } else if (obs.kind === 'aabb' && this._aabbHardEnabled(obs)
+            && this._circleAabbHit(center.x, center.z, radius, obs)) {
+            const p = this._pushCircleFromAabb(center.x, center.z, radius, obs);
+            x = p.x;
+            z = p.z - zOff;
+          }
+        }
+      }
+
+      if (!this._checkShapeCollision(x, z, shape, obstacles, false, false, buildings)) return this._clampPos(x, z);
+      if (!this._checkShapeCollision(newX, oldZ, shape, obstacles, false, false, buildings)) return this._clampPos(newX, oldZ);
+      if (!this._checkShapeCollision(oldX, newZ, shape, obstacles, false, false, buildings)) return this._clampPos(oldX, newZ);
+      return this._clampPos(oldX, oldZ);
     }
 
     const buildings = opts.buildings ?? null;
@@ -1139,21 +1287,23 @@ export class World {
       let px = x;
       let pz = z;
       const pr = shape?.radius ?? 0;
+      const zOff = shape?.zOff ?? 0;
       for (let n = 0; n < maxIter; n++) {
         if (!this.checkCollisionShape(px, pz, shape, false)) return { x: px, z: pz };
-        const obstacles = this.collectObstaclesNear(px, pz, pr + 3);
+        const obstacles = this.collectObstaclesNear(px, pz, this._shapeReach(shape));
         let pushed = false;
+        const center = this._shapeCenter(px, pz, shape);
         for (const obs of obstacles) {
-          if (obs.kind === 'circle' && this._circleHit(px, pz, pr, obs.x, obs.z, obs.radius)) {
-            const p = this._pushOutCircle(px, pz, pr, obs);
+          if (obs.kind === 'circle' && this._circleHit(center.x, center.z, pr, obs.x, obs.z, obs.radius)) {
+            const p = this._pushOutCircle(center.x, center.z, pr, obs);
             px = p.x;
-            pz = p.z;
+            pz = p.z - zOff;
             pushed = true;
           } else if (obs.kind === 'aabb' && this._aabbHardEnabled(obs)
-            && this._circleAabbHit(px, pz, pr, obs)) {
-            const p = this._pushCircleFromAabb(px, pz, pr, obs);
+            && this._circleAabbHit(center.x, center.z, pr, obs)) {
+            const p = this._pushCircleFromAabb(center.x, center.z, pr, obs);
             px = p.x;
-            pz = p.z;
+            pz = p.z - zOff;
             pushed = true;
           }
         }

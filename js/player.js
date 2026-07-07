@@ -1,6 +1,6 @@
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
 import { bulletOwnerFeetZ } from './bulletCollision.js';
-import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME } from './sprites.js';
+import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX } from './sprites.js';
 import { AMMO_STACK_MAX, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
 import { MATERIAL_STACK_MAX, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
 
@@ -357,14 +357,16 @@ export class Player {
     return performance.now() / 1000;
   }
 
-  /** Legs AABB for movement — doorway overlap uses getPlayerFeetStripBounds separately. */
+  /** Feet-level movement circle — same footprint as the old 16×10 px AABB. */
   getMoveCollider(ppu = 8) {
-    const zOffPx = 6 * PLAYER_SPRITE_SCALE;
+    const halfW = (PLAYER_MOVE_W_PX / ppu) * 0.5;
+    const halfH = (PLAYER_MOVE_H_PX / ppu) * 0.5;
+    const feetSouth = spriteFeetOffset(CHAR_NATIVE_PX, PLAYER_SPRITE_SCALE) / ppu;
+    const radius = Math.sqrt(halfW * halfH);
     return {
-      kind: 'aabb',
-      zOff: zOffPx / ppu,
-      halfW: (PLAYER_MOVE_W_PX * 0.5) / ppu,
-      halfH: (PLAYER_MOVE_H_PX * 0.5) / ppu,
+      kind: 'circle',
+      radius,
+      zOff: feetSouth - radius,
     };
   }
 
@@ -635,6 +637,46 @@ export class Player {
       left -= add;
     }
     return amount - left;
+  }
+
+  countMaterial(key) {
+    let total = 0;
+    for (let i = 0; i < this.itemSlots.length; i++) {
+      if (!this.isItemSlotUnlocked(i)) continue;
+      const slot = this.itemSlots[i];
+      if (slot?.kind === 'material' && slot.key === key) total += slot.amount ?? 1;
+    }
+    return total;
+  }
+
+  hasMaterials(costs) {
+    if (!costs) return true;
+    for (const [key, amount] of Object.entries(costs)) {
+      if (this.countMaterial(key) < amount) return false;
+    }
+    return true;
+  }
+
+  consumeMaterial(key, amount) {
+    let left = Math.max(1, Math.floor(amount));
+    for (let i = 0; i < this.itemSlots.length && left > 0; i++) {
+      if (!this.isItemSlotUnlocked(i)) continue;
+      const slot = this.itemSlots[i];
+      if (slot?.kind !== 'material' || slot.key !== key) continue;
+      const take = Math.min(left, slot.amount ?? 1);
+      slot.amount = (slot.amount ?? 1) - take;
+      left -= take;
+      if (slot.amount <= 0) this.itemSlots[i] = null;
+    }
+    return left <= 0;
+  }
+
+  consumeMaterials(costs) {
+    if (!this.hasMaterials(costs)) return false;
+    for (const [key, amount] of Object.entries(costs)) {
+      if (!this.consumeMaterial(key, amount)) return false;
+    }
+    return true;
   }
 
   addMaterialToInventory(key, amount = 1) {

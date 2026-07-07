@@ -15,6 +15,10 @@
 <body>
   <canvas id="game-canvas"></canvas>
 
+  <div id="spawn-curtain" class="hidden" aria-hidden="true">
+    <p id="spawn-curtain-status" class="spawn-curtain-status">Entering the ruins…</p>
+  </div>
+
   <div id="overlay">
     <div id="loading-screen" class="hidden">
       <div class="menu-frame loading-frame">
@@ -110,8 +114,15 @@
           <aside class="inv-left">
             <h2 class="inv-heading">Weapons</h2>
             <div id="inv-weapons-grid" class="inv-weapons-grid"></div>
-            <h2 class="inv-heading">Equipment</h2>
-            <div id="inv-equipment-grid" class="inv-equipment-grid"></div>
+            <h2 class="inv-heading">Combine</h2>
+            <div id="inv-combine-panel" class="inv-combine-panel">
+              <div class="inv-combine-row">
+                <div id="inv-combine-grid" class="inv-combine-grid"></div>
+                <div class="inv-combine-arrow" aria-hidden="true">→</div>
+                <div id="inv-combine-output" class="inv-combine-output"></div>
+              </div>
+              <button type="button" id="inv-combine-btn" class="inv-combine-btn">Combine</button>
+            </div>
           </aside>
           <aside class="inv-right">
             <h2 class="inv-heading">Items</h2>

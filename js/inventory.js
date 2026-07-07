@@ -1,4 +1,4 @@
-import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS, EQUIPMENT_SLOT_COUNT } from './player.js';
+import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS } from './player.js';
 import { weaponItemSpritePath } from './sprites.js';
 import { CHEST_SLOT_COUNT, getItemDisplayName, getItemDescription, getItemIconSrc } from './loot.js';
 import { mergeMaterialStacks, MATERIAL_STACK_MAX, materialItemsMatch } from './materials.js';
@@ -10,14 +10,24 @@ import {
   mergeAmmoStacks,
   mergeBandageStacks,
 } from './ammo.js';
+import {
+  applyRecycleYields,
+  canRecycleItem,
+  canStoreItem,
+  canStoreRecycleYields,
+  craftFromCombineSlots,
+  findRecipeForCombineSlots,
+  getRecipeLabel,
+  getRecycleYields,
+} from './crafting.js';
 import { INTERNAL_W, INTERNAL_H } from './renderConfig.js';
-
-const EQUIPMENT_LABELS = ['Head', 'Body', 'Legs', 'Gear'];
-const ANIM_MS = 240;
 
 export const INV_SLOT_SRC = 'assets/ui/inv_slot.png';
 export const INV_CURSOR_SRC = 'assets/ui/inv_cursor.png';
 export const INV_LOCK_SRC = 'assets/items/misc/lock.png';
+
+const COMBINE_SLOT_COUNT = 3;
+const ANIM_MS = 240;
 
 export class InventoryUI {
   constructor(game) {
@@ -38,6 +48,7 @@ export class InventoryUI {
     this._hoverTooltipText = null;
     this._stackTapKey = null;
     this._stackTapAt = 0;
+    this.combineSlots = Array(COMBINE_SLOT_COUNT).fill(null);
     this._onDragMove = (e) => this._handleDragMove(e);
     this._onDragEnd = (e) => this._handleDragEnd(e);
     this._dragListenerOpts = { capture: true };
@@ -47,11 +58,18 @@ export class InventoryUI {
     this.dualWrap = document.getElementById('inventory-dual-wrap');
     this.bgImg = document.getElementById('inventory-bg');
     this.weaponsEl = document.getElementById('inv-weapons-grid');
-    this.equipmentEl = document.getElementById('inv-equipment-grid');
     this.itemsEl = document.getElementById('inv-items-grid');
     this.chestPanelRoot = document.getElementById('chest-panel');
     this.chestBgImg = document.getElementById('chest-panel-bg');
     this.chestEl = document.getElementById('inv-chest-grid');
+    this.combineEl = document.getElementById('inv-combine-grid');
+    this.combineOutputEl = document.getElementById('inv-combine-output');
+    this.combineBtnEl = document.getElementById('inv-combine-btn');
+    this.combineBtnEl?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._tryCombine();
+    });
 
     if (this.bgImg) {
       this.bgImg.addEventListener('error', () => {
@@ -179,8 +197,7 @@ export class InventoryUI {
     this.game.mouseDown = false;
     this.game.prevMouseDown = false;
     this.root?.classList.remove('hidden');
-    this.panel?.setAttribute('tabindex', '-1');
-    this.panel?.focus({ preventScroll: true });
+    document.activeElement?.blur?.();
     this._enableInvCursor();
     this.render();
     this._prewarmInventoryIcons().then(() => {
@@ -202,9 +219,23 @@ export class InventoryUI {
     }
   }
 
+  _returnCombineSlotsToPlayer() {
+    const player = this.game.player;
+    if (!player) return;
+    for (let i = 0; i < COMBINE_SLOT_COUNT; i++) {
+      const item = this.combineSlots[i];
+      if (!item) continue;
+      const result = player.tryStoreItem(item);
+      if (result.ok) {
+        this.combineSlots[i] = result.remainder ?? null;
+      }
+    }
+  }
+
   close() {
     if (!this.open || this.animating) return;
     this._cancelDrag();
+    this._returnCombineSlotsToPlayer();
     this._hideContextMenu();
     this._disableInvCursor();
     this.animating = true;
@@ -223,6 +254,7 @@ export class InventoryUI {
 
   forceClose() {
     this._cancelDrag();
+    this._returnCombineSlotsToPlayer();
     this._hideContextMenu();
     this._disableInvCursor();
     this.open = false;
@@ -447,6 +479,42 @@ export class InventoryUI {
     btn.addEventListener('pointerup', run);
   }
 
+  _getContextAnchorEl(container, index) {
+    if (container === 'main') return this.weaponsEl?.querySelector('.inv-primary');
+    if (container === 'melee') return this.weaponsEl?.querySelector('.inv-secondary');
+    const root = container === 'chest' ? this.chestEl : this.itemsEl;
+    const cls = container === 'chest' ? 'inv-chest-slot' : 'inv-item-slot';
+    return root?.querySelector(`.${cls}[data-slot-index="${index}"]`);
+  }
+
+  _reopenContextMenu() {
+    if (!this._contextSlot || this._contextMenuEl?.classList.contains('hidden')) return;
+    const { container, index } = this._contextSlot;
+    const anchor = this._getContextAnchorEl(container, index);
+    if (!anchor) {
+      this._hideContextMenu();
+      return;
+    }
+    let item;
+    const player = this.game.player;
+    if (container === 'main') item = player?._weaponItemFromEquipped?.();
+    else if (container === 'melee') item = player?._meleeItemFromEquipped?.();
+    else if (container === 'chest') item = this.chest?.slots[index];
+    else item = player?.itemSlots[index];
+    if (!item) {
+      this._hideContextMenu();
+      return;
+    }
+    this._contextAnchorEl = anchor;
+    const rect = anchor.getBoundingClientRect();
+    this._refreshContextMenuContent(container, index, anchor);
+    this._positionContextMenu(anchor);
+  }
+
+  _renderAfterContextAction() {
+    this.render({ keepContextMenu: true });
+  }
+
   _hideContextMenu() {
     this._contextSlot = null;
     this._contextAnchorEl = null;
@@ -493,13 +561,31 @@ export class InventoryUI {
     }
     if (!item || !anchorEl) return;
 
-    e.preventDefault();
-    e.stopPropagation();
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
     this._hoverTooltipText = null;
     this._hideTooltip();
     this._ensureContextMenu();
     this._contextSlot = { container, index };
     this._contextAnchorEl = anchorEl;
+    this._refreshContextMenuContent(container, index, anchorEl);
+    this._positionContextMenu(anchorEl);
+    if (e) this._syncInvCursorAt(e.clientX, e.clientY);
+  }
+
+  _refreshContextMenuContent(container, index, anchorEl) {
+    const player = this.game.player;
+    let item;
+    if (container === 'main') {
+      item = player?._weaponItemFromEquipped?.();
+    } else if (container === 'melee') {
+      item = player?._meleeItemFromEquipped?.();
+    } else if (container === 'chest') {
+      item = this.chest?.slots[index];
+    } else {
+      item = player?.itemSlots[index];
+    }
+    if (!item || !anchorEl) return;
 
     const desc = this._contextMenuEl.querySelector('.inv-context-desc');
     const actions = this._contextMenuEl.querySelector('.inv-context-actions');
@@ -535,8 +621,7 @@ export class InventoryUI {
             this._contextTakeAmmo(index, container);
             return;
           }
-          this._hideContextMenu();
-          this.render();
+          this._renderAfterContextAction();
         });
         actions.appendChild(ammoBtn);
       }
@@ -558,10 +643,35 @@ export class InventoryUI {
       btn.textContent = 'Use';
       this._bindContextAction(btn, () => {
         this._useConsumable(this.game.player, index);
-        this._hideContextMenu();
-        this.render();
+        this._renderAfterContextAction();
       });
       actions.appendChild(btn);
+    }
+
+    if (canRecycleItem(item) && container === 'item') {
+      const yields = getRecycleYields(item);
+      const row = document.createElement('div');
+      row.className = 'inv-context-recycle-row';
+      const icons = document.createElement('div');
+      icons.className = 'inv-context-recycle-icons';
+      for (const entry of yields ?? []) {
+        const matItem = { kind: 'material', key: entry.key, amount: entry.amount };
+        const icon = this._slotIcon(getItemIconSrc(matItem));
+        icon.classList.add('inv-context-recycle-icon');
+        icons.appendChild(icon);
+      }
+      const recycleBtn = document.createElement('button');
+      recycleBtn.type = 'button';
+      recycleBtn.className = 'inv-context-btn';
+      recycleBtn.textContent = 'Recycle';
+      this._bindContextAction(recycleBtn, () => {
+        if (this._tryRecycleItem(index, container)) {
+          this._renderAfterContextAction();
+        }
+      });
+      row.appendChild(icons);
+      row.appendChild(recycleBtn);
+      actions.appendChild(row);
     }
 
     if (this._canSplitStack(item) && (container === 'item' || container === 'chest')) {
@@ -573,14 +683,10 @@ export class InventoryUI {
         if (!this._splitStack(container, index)) {
           this.game.items.setPickupMsg('No empty slot', { error: true });
         }
-        this._hideContextMenu();
-        this.render();
+        this._renderAfterContextAction();
       });
       actions.appendChild(splitBtn);
     }
-
-    this._positionContextMenu(anchorEl);
-    this._syncInvCursorAt(e.clientX, e.clientY);
   }
 
   _syncInvCursorAt(clientX, clientY) {
@@ -778,8 +884,7 @@ export class InventoryUI {
       this.game.items.setPickupMsg(`+${result.taken} ammo`);
       this.game.audio.pickup();
     }
-    this._hideContextMenu();
-    this.render();
+    this._renderAfterContextAction();
   }
 
   _bindContextMenu(slot, container, index) {
@@ -826,6 +931,33 @@ export class InventoryUI {
       return true;
     }
     return false;
+  }
+
+  _tryRecycleItem(index, container = 'item') {
+    if (container !== 'item') return false;
+    const player = this.game.player;
+    const item = player?.itemSlots[index];
+    if (!item || !canRecycleItem(item)) {
+      this.game.items?.setPickupMsg?.('Cannot recycle that item', { error: true });
+      return false;
+    }
+    const yields = getRecycleYields(item, 1);
+    if (!canStoreRecycleYields(player, yields)) {
+      this.game.items?.setPickupMsg?.('Not enough inventory space', { error: true });
+      return false;
+    }
+    if (item.kind === 'material' || item.kind === 'bandage' || item.kind === 'ammo') {
+      const amount = item.amount ?? 1;
+      if (amount <= 1) player.itemSlots[index] = null;
+      else player.itemSlots[index] = { ...item, amount: amount - 1 };
+    } else {
+      player.itemSlots[index] = null;
+    }
+    applyRecycleYields(player, yields);
+    if (this.selectedSlot === index && !player.itemSlots[index]) this.selectedSlot = null;
+    this.game.audio?.inventoryPlace();
+    this.game.items?.setPickupMsg?.('Item recycled');
+    return true;
   }
 
   _onItemSlotClick(index, player) {
@@ -875,8 +1007,16 @@ export class InventoryUI {
     return !!(data?.kind === 'melee' && MELEE_WEAPONS[data.key]);
   }
 
+  _canDropOnCombine() {
+    const data = this._dragItemData();
+    return data?.kind === 'material';
+  }
+
   _dragItemData() {
     if (this.drag?.stashedItem) return this.drag.stashedItem;
+    if (this.drag?.fromType === 'combine') {
+      return this.combineSlots[this.drag.fromIndex ?? -1] ?? null;
+    }
     if (this.drag?.fromType === 'chest') {
       return this.chest?.slots[this.drag.fromIndex ?? -1] ?? null;
     }
@@ -898,6 +1038,11 @@ export class InventoryUI {
       if (!item) return;
       this.drag.stashedItem = item;
       this.chest.slots[fromIndex] = null;
+    } else if (fromType === 'combine') {
+      const item = this.combineSlots[fromIndex];
+      if (!item) return;
+      this.drag.stashedItem = item;
+      this.combineSlots[fromIndex] = null;
     } else if (player && fromIndex != null) {
       const item = player.itemSlots[fromIndex];
       if (!item) return;
@@ -917,6 +1062,8 @@ export class InventoryUI {
       if (!player?.meleeKey) player?.restoreMeleeWeapon(stashedItem);
     } else if (fromType === 'chest') {
       if (this.chest?.slots[fromIndex] == null) this.chest.slots[fromIndex] = stashedItem;
+    } else if (fromType === 'combine') {
+      if (this.combineSlots[fromIndex] == null) this.combineSlots[fromIndex] = stashedItem;
     } else if (player && fromIndex != null && player.itemSlots[fromIndex] == null) {
       player.itemSlots[fromIndex] = stashedItem;
     }
@@ -949,6 +1096,7 @@ export class InventoryUI {
   }
 
   _slotItemAt(container, index, player) {
+    if (container === 'combine') return this.combineSlots[index] ?? null;
     if (container === 'chest') return this.chest?.slots[index] ?? null;
     return player?.itemSlots[index] ?? null;
   }
@@ -1047,6 +1195,8 @@ export class InventoryUI {
     if (main && this._canDropOnMain()) return main;
     const melee = el.closest('.inv-weapon-slot.inv-secondary[data-drop-zone="melee"]');
     if (melee && this._canDropOnMelee()) return melee;
+    const combine = el.closest('.inv-combine-slot[data-slot-index]');
+    if (combine && this._canDropOnCombine()) return combine;
     const item = el.closest('.inv-item-slot[data-slot-index]:not(.inv-locked)');
     if (item) return item;
     const chest = el.closest('.inv-chest-slot[data-slot-index]');
@@ -1108,6 +1258,22 @@ export class InventoryUI {
   }
 
   _placeInSlot(container, index, item) {
+    if (container === 'combine') {
+      const displaced = this.combineSlots[index];
+      if (item?.kind === 'material' && displaced && materialItemsMatch(item, displaced)) {
+        const merged = mergeMaterialStacks(item, displaced);
+        if (merged && !merged.overflow) {
+          this.combineSlots[index] = merged;
+          return null;
+        }
+        if (merged?.merged) {
+          this.combineSlots[index] = merged.merged;
+          return merged.overflow;
+        }
+      }
+      this.combineSlots[index] = item;
+      return displaced;
+    }
     if (container === 'chest') {
       if (!this.chest) return null;
       const displaced = this.chest.slots[index];
@@ -1428,6 +1594,26 @@ export class InventoryUI {
           this.selectedSlot = null;
           this._skipClick = true;
         }
+      } else if (dropTarget.classList.contains('inv-combine-slot')) {
+        const toIndex = Number(dropTarget.dataset.slotIndex);
+        if (stashedItem.kind !== 'material') {
+          this._restoreDragItem();
+        } else if (fromType === 'combine' && toIndex === fromIndex) {
+          this.combineSlots[fromIndex] = stashedItem;
+          placed = true;
+        } else {
+          const displaced = this._placeInSlot('combine', toIndex, stashedItem);
+          if (fromType === 'item') {
+            player.itemSlots[fromIndex] = displaced;
+            placed = true;
+          } else if (fromType === 'chest') {
+            this.chest.slots[fromIndex] = displaced;
+            placed = true;
+          } else if (fromType === 'combine') {
+            this.combineSlots[fromIndex] = displaced;
+            placed = true;
+          }
+        }
       } else if (dropTarget.classList.contains('inv-chest-slot')) {
         const toIndex = Number(dropTarget.dataset.slotIndex);
         if (fromType === 'chest' && toIndex === fromIndex) {
@@ -1438,6 +1624,9 @@ export class InventoryUI {
           if (fromType === 'item') {
             player.itemSlots[fromIndex] = displaced;
             placed = true;
+          } else if (fromType === 'combine') {
+            this.combineSlots[fromIndex] = displaced;
+            placed = true;
           } else {
             this.chest.slots[fromIndex] = displaced;
             placed = true;
@@ -1445,7 +1634,15 @@ export class InventoryUI {
         }
       } else if (dropTarget.classList.contains('inv-item-slot')) {
         const toIndex = Number(dropTarget.dataset.slotIndex);
-        if (fromType === 'item' && toIndex === fromIndex) {
+        if (fromType === 'combine') {
+          const displaced = this._placeInSlot('item', toIndex, stashedItem);
+          if (!player.isItemSlotUnlocked(toIndex)) {
+            this.combineSlots[fromIndex] = stashedItem;
+          } else {
+            this.combineSlots[fromIndex] = displaced;
+            placed = true;
+          }
+        } else if (fromType === 'item' && toIndex === fromIndex) {
           player.itemSlots[fromIndex] = stashedItem;
           placed = true;
         } else if (fromType === 'chest') {
@@ -1593,16 +1790,75 @@ export class InventoryUI {
     }
   }
 
-  render() {
+  _tryCombine() {
     const player = this.game.player;
-    if (!player || !this.weaponsEl || !this.equipmentEl || !this.itemsEl) return;
+    if (!player) return;
+    const recipe = craftFromCombineSlots(this.combineSlots, player);
+    if (!recipe) {
+      this.game.items?.setPickupMsg?.('Need matching materials and inventory space', { error: true });
+      return;
+    }
+    this.game.audio?.inventoryPlace();
+    this.game.items?.setPickupMsg?.(`Crafted ${getRecipeLabel(recipe)}`);
+    this.render();
+  }
+
+  _renderCombinePanel(player) {
+    if (!this.combineEl) return;
+    this.combineEl.innerHTML = '';
+    for (let i = 0; i < COMBINE_SLOT_COUNT; i++) {
+      const slot = this._makeSlot('inv-combine-slot');
+      slot.dataset.slotIndex = String(i);
+      slot.dataset.slotContainer = 'combine';
+      const data = this.combineSlots[i];
+      if (data) {
+        slot.appendChild(this._itemIcon(data));
+        this._appendStackCount(slot, this._stackAmount(data));
+        this._bindTooltip(slot, getItemDisplayName(data));
+        this._bindItemSlotDrag(slot, i, player, 'combine');
+      } else {
+        slot.classList.add('inv-empty-slot');
+      }
+      this.combineEl.appendChild(slot);
+    }
+
+    const recipe = findRecipeForCombineSlots(this.combineSlots);
+    if (this.combineOutputEl) {
+      this.combineOutputEl.innerHTML = '';
+      this.combineOutputEl.classList.toggle('inv-combine-empty', !recipe);
+      if (recipe) {
+        const icon = this._slotIcon(getItemIconSrc(recipe.output));
+        icon.classList.add('inv-combine-output-icon');
+        this.combineOutputEl.appendChild(icon);
+      } else {
+        const placeholder = document.createElement('span');
+        placeholder.className = 'inv-combine-output-placeholder';
+        placeholder.textContent = '?';
+        this.combineOutputEl.appendChild(placeholder);
+      }
+      const label = document.createElement('span');
+      label.className = 'inv-combine-output-label';
+      label.textContent = recipe ? getRecipeLabel(recipe) : 'Result';
+      this.combineOutputEl.appendChild(label);
+    }
+    if (this.combineBtnEl) {
+      const hasRecipe = !!recipe;
+      const canCraft = hasRecipe && canStoreItem(player, recipe.output);
+      this.combineBtnEl.disabled = !canCraft;
+      this.combineBtnEl.classList.toggle('inv-combine-btn-ready', canCraft);
+    }
+  }
+
+  render(options = {}) {
+    const player = this.game.player;
+    if (!player || !this.weaponsEl || !this.itemsEl) return;
     if (this.drag?.moved) return;
 
-    this._hideContextMenu();
+    const keepContextMenu = !!options.keepContextMenu;
+    if (!keepContextMenu) this._hideContextMenu();
     this._hoverTooltipText = null;
     this._hideTooltip();
     this.weaponsEl.innerHTML = '';
-    this.equipmentEl.innerHTML = '';
     this.itemsEl.innerHTML = '';
     if (this.chestEl) this.chestEl.innerHTML = '';
 
@@ -1660,12 +1916,7 @@ export class InventoryUI {
     });
     this.weaponsEl.appendChild(secondary);
 
-    for (let i = 0; i < EQUIPMENT_SLOT_COUNT; i++) {
-      const slot = this._makeSlot('inv-equip-slot', 'inv-locked');
-      slot.disabled = true;
-      slot.appendChild(this._lockIcon());
-      this.equipmentEl.appendChild(slot);
-    }
+    this._renderCombinePanel(player);
 
     for (let i = 0; i < ITEM_STORAGE_SIZE; i++) {
       const unlocked = player.isItemSlotUnlocked(i);
@@ -1681,6 +1932,7 @@ export class InventoryUI {
         slot.disabled = true;
         slot.appendChild(this._lockIcon());
       } else if (data) {
+        if (this.selectedSlot === i) slot.classList.add('inv-selected');
         this._bindPlayerItemSlot(slot, i, player, data);
       } else {
         slot.classList.add('inv-empty-slot');
@@ -1694,5 +1946,6 @@ export class InventoryUI {
     }
 
     if (this.chestMode) this._renderChestSlots();
+    if (keepContextMenu) this._reopenContextMenu();
   }
 }

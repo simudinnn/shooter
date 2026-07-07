@@ -193,7 +193,6 @@ export class SoundManager {
   fal() {const pitch = 0.95 + Math.random() * 0.2;this.play('fal', 1, pitch);}
   melee() {const pitch = 0.95 + Math.random() * 0.2;this.play('melee', 1, pitch);}
 
-  enemyShot() {const pitch = 0.95 + Math.random() * 0.2;this.play('enemyShot', 1, pitch);}
 
   reload() {
     this.play('reload', 0.75);
@@ -285,11 +284,21 @@ export class SoundManager {
   scoutChargeStart(distance = 0) {
     if (!this.enabled || !this.ctx) return;
 
-    const vol = this._distanceAtten(distance, 10, 36);
+    const vol = this._distanceAtten(distance, 10, 45);
     if (vol <= 0) return;
 
     this.play('scoutChargeStart', 1.5 * vol);
   }
+
+  enemyShot(distance = 0) {
+    if (!this.enabled || !this.ctx) return;
+
+    const vol = this._distanceAtten(distance, 10, 45);
+    if (vol <= 0) return;
+    const pitch = 0.95 + Math.random() * 0.2
+    this.play('enemyShot', 1.5 * vol, pitch);
+  }
+
 
   casingEject() {
     this.play('casingEject', 0.25, 0.95 + Math.random() * 0.15);

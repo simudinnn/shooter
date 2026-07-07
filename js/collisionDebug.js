@@ -3,6 +3,8 @@ import { TILE, CHUNK_WORLD } from './worldGen.js';
 import { CELL_DOOR, CELL_FLOOR, getBuildingCellAtWorld, isNavBlockedBuildingCell } from './buildingGen.js';
 import { PPU } from './renderConfig.js';
 import { getTileFlowFieldDebug, getPlayerBuilding } from './enemyNav.js';
+import { CHAR_NATIVE_PX, spriteFeetOffset, getEnemyNativePx, getEnemyDrawScale } from './sprites.js';
+import { PLAYER_SPRITE_SCALE } from './player.js';
 
 const FLOW_UNREACHABLE = 32767;
 
@@ -81,30 +83,69 @@ function drawWorldAabb(ctx, a, worldToScreen, stroke, fill) {
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 }
 
+function entityNativePx(ent) {
+  if (ent?.type) return getEnemyNativePx(ent.type);
+  return CHAR_NATIVE_PX;
+}
+
+function entitySpriteScale(ent) {
+  if (ent?.type) return getEnemyDrawScale(ent.type);
+  return PLAYER_SPRITE_SCALE;
+}
+
 function drawEntitySoftColliders(ctx, ent, worldToScreen, ppu = PPU) {
   if (!ent?.alive && !ent.emerging) return;
 
   const moveShape = ent.getMoveCollider?.(ppu);
-  const moveBox = moveShape ? shapeWorldAabb(ent.x, ent.z, moveShape) : null;
-  if (moveBox) {
-    drawWorldAabb(
-      ctx,
-      moveBox,
-      worldToScreen,
-      'rgba(255, 210, 60, 0.95)',
-      'rgba(255, 220, 80, 0.18)',
-    );
+  if (moveShape?.kind === 'aabb') {
+    const moveBox = shapeWorldAabb(ent.x, ent.z, moveShape);
+    if (moveBox) {
+      const isPlayer = !ent?.type;
+      ctx.save();
+      if (!isPlayer) ctx.setLineDash([5, 3]);
+      drawWorldAabb(
+        ctx,
+        moveBox,
+        worldToScreen,
+        isPlayer ? 'rgba(255, 210, 60, 0.95)' : 'rgba(120, 255, 255, 1)',
+        isPlayer ? 'rgba(255, 220, 80, 0.22)' : 'rgba(120, 220, 255, 0.22)',
+      );
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  } else if (moveShape?.kind === 'circle') {
+    const isPlayer = !ent?.type;
+    const s = isPlayer
+      ? worldToScreen(ent.x, ent.z + (moveShape.zOff ?? 0))
+      : worldToScreen(ent.x, ent.z);
+    const feetOffPx = spriteFeetOffset(entityNativePx(ent), entitySpriteScale(ent));
+    const cx = s.x;
+    const cy = isPlayer ? s.y : Math.round(s.y + feetOffPx);
+    const r = (moveShape.radius ?? ent.radius ?? 0.5) * ppu;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(3, r), 0, Math.PI * 2);
+    ctx.fillStyle = isPlayer ? 'rgba(255, 220, 80, 0.22)' : 'rgba(120, 220, 255, 0.22)';
+    ctx.fill();
+    ctx.strokeStyle = isPlayer ? 'rgba(255, 210, 60, 0.95)' : 'rgba(120, 255, 255, 1)';
+    ctx.lineWidth = 2;
+    if (!isPlayer) ctx.setLineDash([5, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
-  const s = worldToScreen(ent.x, ent.z);
-  const r = (ent.radius ?? 0.5) * ppu;
-  ctx.beginPath();
-  ctx.arc(s.x, s.y, Math.max(2, r), 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(120, 220, 255, 0.9)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 3]);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  const hitShape = ent.getHitCollider?.(ppu);
+  if (hitShape?.kind === 'circle' && !ent?.type) {
+    const s = worldToScreen(ent.x, ent.z);
+    const r = (hitShape.radius ?? ent.radius ?? 0.5) * ppu;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, Math.max(3, r), 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(80, 255, 120, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 }
 
 export function drawCollisionDebug(ctx, world, worldToScreen, minX, maxX, minZ, maxZ, game = null) {

@@ -157,6 +157,19 @@ function pushBuildingVisionSegments(out, building, vMinX, vMaxX, vMinZ, vMaxZ) {
   }
 }
 
+function obstacleInsideBuildingFootprint(building, obs) {
+  if (!building || !obs) return false;
+  const a = obsAabb(obs);
+  if (!a) return false;
+  const ox = building.originX;
+  const oz = building.originZ;
+  const bx2 = ox + building.w * TILE;
+  const bz2 = oz + building.h * TILE;
+  const cx = (a.minX + a.maxX) * 0.5;
+  const cz = (a.minZ + a.maxZ) * 0.5;
+  return cx >= ox && cx <= bx2 && cz >= oz && cz <= bz2;
+}
+
 /** Raycast blockers from collision AABBs (red debug boxes) — not wall-tile silhouettes. */
 export function collectVisionSegments(
   world,
@@ -176,6 +189,9 @@ export function collectVisionSegments(
 
   for (const obs of collectObstaclesInView(world, vMinX, vMaxX, vMinZ, vMaxZ)) {
     if (!obstacleBlocksVision(obs)) continue;
+    if (insideBuilding && obstacleInsideBuildingFootprint(insideBuilding, obs)) {
+      if (!obs.doorSeal) continue;
+    }
     pushObstacleFaceSegment(out, obs, vMinX, vMaxX, vMinZ, vMaxZ);
   }
 

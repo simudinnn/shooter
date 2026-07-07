@@ -701,12 +701,27 @@ export function isInOpenDoorNavZone(buildings, wx, wz) {
   return false;
 }
 
-/** True when an entity move AABB overlaps any open door corridor. */
+/** True when an entity move shape overlaps any open door corridor. */
 export function shapeOverlapsOpenDoorNavZone(buildings, px, pz, shape) {
-  if (!shape || shape.kind !== 'aabb') {
+  if (!shape) return isInOpenDoorNavZone(buildings, px, pz);
+  const acz = pz + (shape.zOff ?? 0);
+  if (shape.kind === 'circle') {
+    const r = shape.radius ?? 0;
+    const samples = [
+      [px, acz],
+      [px + r, acz],
+      [px - r, acz],
+      [px, acz + r],
+      [px, acz - r],
+    ];
+    for (const [sx, sz] of samples) {
+      if (isInOpenDoorNavZone(buildings, sx, sz)) return true;
+    }
+    return false;
+  }
+  if (shape.kind !== 'aabb') {
     return isInOpenDoorNavZone(buildings, px, pz);
   }
-  const acz = pz + (shape.zOff ?? 0);
   const samples = [
     [px, acz],
     [px - shape.halfW, acz - shape.halfH],
@@ -760,6 +775,14 @@ export const PLAYER_FEET_FRAC = 0.2;
 function playerShapeOverlapsObs(px, pz, shape, obs) {
   if (!shape || !obs.halfW || !obs.halfH) return false;
   const acz = pz + (shape.zOff ?? 0);
+  if (shape.kind === 'circle') {
+    const r = shape.radius ?? 0;
+    const closestX = Math.max(obs.x - obs.halfW, Math.min(px, obs.x + obs.halfW));
+    const closestZ = Math.max(obs.z - obs.halfH, Math.min(acz, obs.z + obs.halfH));
+    const dx = px - closestX;
+    const dz = acz - closestZ;
+    return dx * dx + dz * dz < r * r;
+  }
   return Math.abs(px - obs.x) < shape.halfW + obs.halfW
     && Math.abs(acz - obs.z) < shape.halfH + obs.halfH;
 }
@@ -797,7 +820,13 @@ function playerOverlapsDoorCloseRects(player, rects) {
   if (shape) {
     const acz = player.z + (shape.zOff ?? 0);
     for (const r of rects) {
-      if (player.x - shape.halfW < r.maxX && player.x + shape.halfW > r.minX
+      if (shape.kind === 'circle') {
+        const closestX = Math.max(r.minX, Math.min(player.x, r.maxX));
+        const closestZ = Math.max(r.minZ, Math.min(acz, r.maxZ));
+        const dx = player.x - closestX;
+        const dz = acz - closestZ;
+        if (dx * dx + dz * dz < (shape.radius ?? 0) ** 2) return true;
+      } else if (player.x - shape.halfW < r.maxX && player.x + shape.halfW > r.minX
         && acz - shape.halfH < r.maxZ && acz + shape.halfH > r.minZ) {
         return true;
       }
@@ -1152,7 +1181,12 @@ function northWallPropPos(originX, originZ, tx, tz) {
   };
 }
 
-const INTERIOR_PROP_COLLISION_FRAC = 0.72;
+export const INTERIOR_PROP_COLLISION_FRAC = 0.72;
+
+/** World-space half extents for interior props (fridge, table, chest). */
+export function interiorPropCollisionHalf() {
+  return TILE * INTERIOR_PROP_COLLISION_FRAC * 0.5;
+}
 
 function isReserved(tx, tz, reserved) {
   return reserved.some((t) => t.tx === tx && t.tz === tz);
@@ -1236,7 +1270,7 @@ export function buildBuildingInteriorProps(
         x: pos.x,
         z: pos.z,
         sortZ: pos.z - TILE * 0.12,
-        sortBias: -1,
+        sortBias: 2,
         tx: fridge.tx,
         tz: fridge.tz,
         interior: true,
@@ -1282,7 +1316,7 @@ export function buildBuildingInteriorProps(
       x: center.x,
       z: center.z + TILE * 0.08,
       sortZ: center.z - TILE * 0.16,
-      sortBias: -1,
+      sortBias: 2,
       tx: table.tx,
       tz: table.tz,
       interior: true,

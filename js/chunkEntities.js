@@ -1,7 +1,7 @@
 import { Robot, Scout, createGroundErupt, SCOUT_SPAWN_SHARE } from './enemies.js';
 import { CHUNK_WORLD, TILE, hash01, isInBase } from './worldGen.js';
-import { getRoadNetwork } from './highwayGen.js';
-import { BUILDING_CHUNK_SPAWN_RATE, MAX_NEARBY_BUILDINGS } from './buildings.js';
+import { getNearbyTownAnchors } from './highwayGen.js';
+import { BUILDING_CHUNK_SPAWN_RATE } from './buildings.js';
 
 /** Chunks around the player that stay populated with spiders/chests. */
 export const ENTITY_CHUNK_RADIUS = 4;
@@ -113,15 +113,17 @@ export class ChunkEntityManager {
   }
 
   _nearestTown(wx, wz) {
+    const ptx = Math.floor(wx / TILE);
+    const ptz = Math.floor(wz / TILE);
     let best = null;
     let bestD = Infinity;
-    for (const town of getRoadNetwork().towns) {
-      const tx = town.tx * TILE + TILE * 0.5;
-      const tz = town.tz * TILE + TILE * 0.5;
-      const d = Math.hypot(wx - tx, wz - tz);
+    for (const town of getNearbyTownAnchors(ptx, ptz, 3)) {
+      const townX = town.tx * TILE + TILE * 0.5;
+      const townZ = town.tz * TILE + TILE * 0.5;
+      const d = Math.hypot(wx - townX, wz - townZ);
       if (d < bestD) {
         bestD = d;
-        best = { town, x: tx, z: tz, dist: d };
+        best = { town, x: townX, z: townZ, dist: d };
       }
     }
     return best;
@@ -260,7 +262,7 @@ export class ChunkEntityManager {
   }
 
   _chunkAt(cx, cz) {
-    return this.world.chunks.get(`${cx},${cz}`);
+    return this.world.getChunk(cx, cz);
   }
 
   _populateEnemiesOnly(player) {
@@ -323,25 +325,15 @@ export class ChunkEntityManager {
     }
   }
 
-  _populateBuildingsOnly(player) {
-    if (this.game.buildings?._townsBootstrapped) return;
+  _populateBuildingsOnly(player, radiusChunks = ENTITY_CHUNK_RADIUS) {
     const { fx, fz } = this._getPlayerForward(player);
     const { cx: pcx, cz: pcz } = this._playerChunk(player);
-    const chunks = [];
-    for (let cz = pcz - ENTITY_CHUNK_RADIUS; cz <= pcz + ENTITY_CHUNK_RADIUS; cz++) {
-      for (let cx = pcx - ENTITY_CHUNK_RADIUS; cx <= pcx + ENTITY_CHUNK_RADIUS; cx++) {
+    for (let cz = pcz - radiusChunks; cz <= pcz + radiusChunks; cz++) {
+      for (let cx = pcx - radiusChunks; cx <= pcx + radiusChunks; cx++) {
         const chunk = this._chunkAt(cx, cz);
         if (!chunk || chunk.outOfBounds) continue;
-        if (!this._shouldPopulateChunk(chunk, player, fx, fz)) continue;
-        const center = this._chunkCenter(cx, cz);
-        const ahead = (center.x - player.x) * fx + (center.z - player.z) * fz;
-        chunks.push({ chunk, ahead });
+        if (!chunk.buildingsSpawned) this._spawnChunkBuildings(chunk, player, fx, fz);
       }
-    }
-    chunks.sort((a, b) => b.ahead - a.ahead);
-
-    for (const { chunk } of chunks) {
-      if (!chunk.buildingsSpawned) this._spawnChunkBuildings(chunk, player, fx, fz);
     }
   }
 
@@ -350,7 +342,7 @@ export class ChunkEntityManager {
       chunk,
       this.world,
       player,
-      () => this._countNearbyBuildings(player) < MAX_NEARBY_BUILDINGS,
+      null,
       {
         fx,
         fz,

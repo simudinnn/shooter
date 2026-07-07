@@ -29,7 +29,7 @@ export const CHEST_KIT_KEYS = ['repair_kit', 'sewing_kit', 'splint_kit', 'upgrad
 
 const CHEST_LOOT_KEYS = [...CHEST_MATERIAL_KEYS, ...CHEST_KIT_KEYS];
 
-export const LOOT_EMPTY_WEIGHT = 700;
+export const LOOT_EMPTY_WEIGHT = 1000;
 
 const RARITY_WEIGHT = {
   common: 50,
@@ -40,14 +40,14 @@ const RARITY_WEIGHT = {
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
-  { key: 'metal', rarity: 'common', min: 1, max: 3 },
-  { key: 'plastic', rarity: 'common', min: 1, max: 3 },
-  { key: 'fabric', rarity: 'common', min: 1, max: 3 },
-  { key: 'glass', rarity: 'common', min: 1, max: 3 },
+  { key: 'metal', rarity: 'common', min: 1, max: 2 },
+  { key: 'plastic', rarity: 'common', min: 1, max: 2 },
+  { key: 'fabric', rarity: 'common', min: 1, max: 2 },
+  { key: 'glass', rarity: 'common', min: 1, max: 2 },
   { key: 'nails', rarity: 'common', min: 1, max: 2 },
-  { key: 'wires', rarity: 'common', min: 1, max: 3 },
+  { key: 'wires', rarity: 'common', min: 1, max: 2 },
   { key: 'chemicals', rarity: 'common', min: 1, max: 2 },
-  { key: 'cloth', rarity: 'common', min: 1, max: 2 },
+  { key: 'cloth', rarity: 'common', min: 1, max: 1 },
   { key: 'wood', rarity: 'uncommon', min: 1, max: 2 },
   { key: 'adhesive', rarity: 'uncommon', min: 1, max: 2 },
   { key: 'plank', rarity: 'uncommon', min: 1, max: 2 },
@@ -76,10 +76,10 @@ const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 
 /** Chest gear category weights (compete with materials + empty). */
 const CHEST_GEAR_WEIGHT = {
-  ammo: 35,
-  bandage: 35,
-  melee: 20,
-  weapon: 15,
+  ammo: 22,
+  bandage: 22,
+  melee: 12,
+  weapon: 8,
 };
 
 function rollMaterialAmount(entry) {
@@ -88,12 +88,12 @@ function rollMaterialAmount(entry) {
 
 function rollChestAmmoItem() {
   const ammoType = AMMO_TYPE_KEYS[Math.floor(Math.random() * AMMO_TYPE_KEYS.length)];
-  const amount = 5 + Math.floor(Math.random() * 11);
+  const amount = 3 + Math.floor(Math.random() * 5);
   return normalizeAmmoItem({ kind: 'ammo', ammoType, amount });
 }
 
 function rollChestBandageItem() {
-  return { kind: 'bandage', amount: 1 + Math.floor(Math.random() * 3) };
+  return { kind: 'bandage', amount: 1 + Math.floor(Math.random() * 2) };
 }
 
 function rollChestMeleeItem() {

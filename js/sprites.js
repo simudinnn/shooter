@@ -122,6 +122,7 @@ const CORE_ASSETS = {
   cursor: 'assets/ui/cursor.png',
   cursor_melee: 'assets/ui/cursor_melee.png',
   cursor_shotgun: 'assets/ui/cursor_shotgun.png',
+  inv_cursor: 'assets/ui/inv_cursor.png',
   enemy_aggro: 'assets/ui/enemy_aggro.png',
   enemy_search: 'assets/ui/enemy_search.png',
 };
@@ -166,6 +167,7 @@ export const SPRITE_ANIM = {
     cursor: { frameW: 15, frameH: 15, frames: 1 },
     cursor_melee: { frameW: 15, frameH: 15, frames: 1 },
     cursor_shotgun: { frameW: 15, frameH: 15, frames: 1 },
+    inv_cursor: { frameW: 16, frameH: 16, frames: 1 },
     enemy_aggro: { frameW: 16, frameH: 16, frames: 1 },
     enemy_search: { frameW: 16, frameH: 16, frames: 1 },
     ...Object.fromEntries(
@@ -722,11 +724,59 @@ function buildParticleFxFallback(name) {
   return c;
 }
 
+function buildFoliageTreeFallback(name) {
+  const c = makeCanvas(24, 24);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const trunk = name === 'foliage_tree3' ? '#4a3020' : '#5a3828';
+  const leafA = name === 'foliage_tree2' ? '#4a8a40' : '#3a7a34';
+  const leafB = name === 'foliage_tree3' ? '#2a5a28' : '#5aaa48';
+  px(g, 10, 14, 4, 10, trunk);
+  px(g, 4, 4, 16, 12, leafA);
+  px(g, 6, 2, 12, 8, leafB);
+  px(g, 8, 6, 8, 6, leafA);
+  return c;
+}
+
+function buildBuildingPropFallback(name) {
+  const c = makeCanvas(16, 32);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  if (name === 'bld_fridge') {
+    px(g, 2, 0, 12, 32, '#d8dce0');
+    px(g, 3, 1, 10, 14, '#eef2f6');
+    px(g, 3, 17, 10, 14, '#eef2f6');
+    px(g, 11, 6, 2, 4, '#303030');
+    px(g, 11, 22, 2, 4, '#303030');
+    px(g, 2, 15, 12, 2, '#a8acb0');
+    return c;
+  }
+  if (name === 'bld_table') {
+    px(g, 1, 8, 14, 4, '#8a5a30');
+    px(g, 2, 9, 12, 2, '#b87840');
+    px(g, 3, 12, 2, 8, '#5a3818');
+    px(g, 11, 12, 2, 8, '#5a3818');
+    return c;
+  }
+  if (name.startsWith('bld_barrel')) {
+    px(g, 3, 2, 10, 12, '#4a6a9a');
+    px(g, 4, 3, 8, 10, '#5a7aaa');
+    px(g, 3, 6, 10, 2, '#304060');
+    return c;
+  }
+  px(g, 2, 2, 12, 12, '#7a7a80');
+  return c;
+}
+
 function buildFallback(name) {
   if (name.startsWith('item_')) {
     return buildWeaponItemFallback(name.slice(5));
   }
-  if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('bld_')) return null;
+  if (name === 'foliage_tree' || name === 'foliage_tree2' || name === 'foliage_tree3') {
+    return buildFoliageTreeFallback(name);
+  }
+  if (name.startsWith('bld_')) return buildBuildingPropFallback(name);
+  if (name.startsWith('floor_') || name.startsWith('foliage_')) return null;
   if (name.startsWith('player_') || name.startsWith('spider') || name.startsWith('scout')) {
     return buildCharFallback(name);
   }
@@ -1067,13 +1117,16 @@ export function getEnemyBodySheet(type, moving, shootPhase = null) {
   return getWalkSheet(type, moving);
 }
 
-/** Flipbook timing for enemy body sheets — walk rate is fixed via walkPhase, not move speed. */
+/** Flipbook timing for enemy body sheets — scout walk uses elapsed walkPhase at sheet fps. */
 export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null, opts = {}) {
   if (type === 'scout' && (shootPhase === 'charging' || shootPhase === 'firing')) {
     const elapsed = chargeAnimStart != null ? Math.max(0, time - chargeAnimStart) : 0;
     return { elapsed };
   }
-  return getWalkAnim(moving, 0, opts.walkPhase ?? 0);
+  if (type === 'scout' && moving) {
+    return { time };
+  }
+  return getWalkAnim(moving, time, opts.walkPhase ?? 0);
 }
 
 /** Time-based flipbook anim for walk sheets (respects SPRITE_ANIM fps). */
@@ -1275,13 +1328,11 @@ export class SpriteBank {
         else finish();
       };
       img.onerror = () => {
-        if (!name.startsWith('floor_') && !name.startsWith('foliage_') && !name.startsWith('bld_')) {
-          const fallback = buildFallback(name);
-          if (fallback) {
-            this.images[name] = fallback;
-            this._pathImages[path] = fallback;
-            this._parseFlipbook(name, fallback);
-          }
+        const fallback = buildFallback(name);
+        if (fallback) {
+          this.images[name] = fallback;
+          this._pathImages[path] = fallback;
+          this._parseFlipbook(name, fallback);
         }
         resolve();
       };
@@ -1384,13 +1435,26 @@ export class SpriteBank {
   }
 
   _getImage(name) {
-    if (this.images[name]) return this.images[name];
-    if (name.startsWith('floor_') || name.startsWith('foliage_') || name.startsWith('bld_')) return null;
+    const existing = this.images[name];
+    if (existing) {
+      const w = existing.naturalWidth || existing.width || 0;
+      const h = existing.naturalHeight || existing.height || 0;
+      if (w > 0 && h > 0) return existing;
+    }
     const fallback = buildFallback(name);
     if (!fallback) return null;
     this.images[name] = fallback;
     if (name.startsWith('floor_') || name.startsWith('foliage_')) this._parseFlipbook(name, fallback);
     return fallback;
+  }
+
+  /** Load art or synthesize a procedural fallback so props always draw. */
+  ensureSprite(name) {
+    const img = this._getImage(name);
+    if (!img) return false;
+    const w = img.naturalWidth || img.width || 0;
+    const h = img.naturalHeight || img.height || 0;
+    return w > 0 && h > 0;
   }
 
   _tintKey(tint) {
@@ -1447,6 +1511,42 @@ export class SpriteBank {
     }
     this._tileBitmapCache.set(key, canvas);
     return canvas;
+  }
+
+  hasSprite(name) {
+    const img = this.images[name];
+    if (!img) return false;
+    const w = img.naturalWidth || img.width || 0;
+    const h = img.naturalHeight || img.height || 0;
+    return w > 0 && h > 0;
+  }
+
+  hasTileSprite(name) {
+    return this.hasSprite(name);
+  }
+
+  /** Draw a tall/wide prop anchored at bottom-center (trees, furniture). */
+  drawPropSprite(ctx, name, screenX, screenY, drawHeight, opts = {}) {
+    if (!this.ensureSprite(name)) return false;
+    const img = this.images[name];
+    const nw = img.naturalWidth || img.width || 0;
+    const nh = img.naturalHeight || img.height || 0;
+    if (!nw || !nh) return false;
+    const drawH = Math.round(drawHeight);
+    const drawW = Math.round(drawH * (nw / nh));
+    const anchor = opts.anchor ?? 'bottom-center';
+    let x = screenX;
+    let y = screenY;
+    if (anchor === 'bottom-center') {
+      x -= drawW * 0.5;
+      y -= drawH;
+    } else if (anchor === 'center') {
+      x -= drawW * 0.5;
+      y -= drawH * 0.5;
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, Math.round(x), Math.round(y), drawW, drawH);
+    return true;
   }
 
   getTileBitmap(name, px, tint) {

@@ -32,7 +32,6 @@ import {
   wallFrontDrawZ,
   wallBackDrawZ,
   buildingGunClipBounds,
-  foliageOverlapsBuildingInterior,
   doorDrawsInFront,
   doorBackDrawZ,
   doorFrontDrawZ,
@@ -73,7 +72,7 @@ import {
   roomWebSocketUrl,
 } from './rooms.js';
 
-const VISION_DARKNESS = 0.15;
+const VISION_DARKNESS = 0.2;
 /** Y-sort bias — shadows on the floor, under walls and bodies. */
 const SORT_SHADOW = 0;
 const SORT_WALL_BACK = 1;
@@ -88,6 +87,13 @@ const SPRITE_BULLET = 1.2;
 const SPRITE_CASING = 1.5;
 const SPRITE_GUN = 1.35;
 const SPRITE_CURSOR = CURSOR_DRAW_SCALE;
+
+const GAME_CURSOR_SRC = {
+  inv_cursor: INV_CURSOR_SRC,
+  cursor: 'assets/ui/cursor.png',
+  cursor_melee: 'assets/ui/cursor_melee.png',
+  cursor_shotgun: 'assets/ui/cursor_shotgun.png',
+};
 const AUTO_AIM_TURN_RATE = 16;
 const AUTO_AIM_TARGET_TURN_RATE = 4.5;
 const AUTO_AIM_STICK_TURN_RATE = 12;
@@ -143,6 +149,7 @@ class Game {
     this._enemyVisAlpha = new Map();
     this._cachedYsortFoliage = [];
     this._exportingMap = false;
+    this._spawnReveal = null;
 
     this._initCanvas();
     this._initUI();
@@ -216,6 +223,8 @@ class Game {
       loadingScreen: document.getElementById('loading-screen'),
       loadingBarFill: document.getElementById('loading-bar-fill'),
       loadingStatus: document.getElementById('loading-status'),
+      spawnCurtain: document.getElementById('spawn-curtain'),
+      spawnCurtainStatus: document.getElementById('spawn-curtain-status'),
     };
     this.inventoryUI = new InventoryUI(this);
     this._menuCursorEl = null;
@@ -237,6 +246,8 @@ class Game {
     this.el.confirmDialog?.classList.add('hidden');
     this.el.hud?.classList.add('hidden');
     document.body.classList.remove('game-active');
+    this._hideGameCursor();
+    this._endSpawnReveal();
     this.el.mobileControls?.classList.add('hidden');
     this._enableMenuCursor();
     if (deathStats) {
@@ -303,6 +314,44 @@ class Game {
     if (this._menuCursorEl) this._menuCursorEl.style.visibility = 'hidden';
   }
 
+  _ensureGameCursor() {
+    if (this._gameCursorEl) return;
+    this._gameCursorEl = document.createElement('img');
+    this._gameCursorEl.className = 'game-cursor-follow';
+    this._gameCursorEl.alt = '';
+    this._gameCursorEl.draggable = false;
+    document.body.appendChild(this._gameCursorEl);
+  }
+
+  _hideGameCursor() {
+    if (this._gameCursorEl) this._gameCursorEl.style.visibility = 'hidden';
+  }
+
+  _panelOpen() {
+    return !!this.inventoryUI?.isOpen();
+  }
+
+  _syncGameCursor() {
+    if (this.mobile || !this.running || this.paused || this._panelOpen() || this._isSpawnRevealActive()) {
+      this._hideGameCursor();
+      return;
+    }
+    this._ensureGameCursor();
+    const sprite = this._getCursorSprite();
+    const src = GAME_CURSOR_SRC[sprite] ?? INV_CURSOR_SRC;
+    const path = src.startsWith('http') || src.startsWith('/') ? src : new URL(src, location.href).href;
+    if (this._gameCursorEl.dataset.sprite !== sprite) {
+      this._gameCursorEl.dataset.sprite = sprite;
+      this._gameCursorEl.src = path;
+    }
+    const size = sprite === 'inv_cursor' ? 56 : 48;
+    this._gameCursorEl.style.width = `${size}px`;
+    this._gameCursorEl.style.height = `${size}px`;
+    this._gameCursorEl.style.visibility = 'visible';
+    this._gameCursorEl.style.left = `${this.mouse.clientX}px`;
+    this._gameCursorEl.style.top = `${this.mouse.clientY}px`;
+  }
+
   _moveMenuCursor(e) {
     if (!this._menuCursorEl || this.mobile) return;
     this._menuCursorEl.style.visibility = 'visible';
@@ -349,6 +398,97 @@ class Game {
     if (message && this.el.loadingStatus) this.el.loadingStatus.textContent = message;
   }
 
+  _isSpawnRevealActive() {
+    return !!this._spawnReveal && this._spawnReveal.phase !== 'done';
+  }
+
+  _beginSpawnReveal() {
+    this._spawnReveal = {
+      phase: 'foliage',
+      opacity: 1,
+      fadeOutDuration: 2.4,
+      holdElapsed: 0,
+      minHold: 2.75,
+      maxHold: 10,
+      radiusChunks: 5,
+    };
+    this._disableMenuCursor();
+    this._hideGameCursor();
+    this.inventoryUI?._disableInvCursor?.();
+    if (this.el.spawnCurtainStatus) {
+      this.el.spawnCurtainStatus.textContent = 'Entering the ruins…';
+      this.el.spawnCurtainStatus.style.opacity = '0.85';
+    }
+    this.el.spawnCurtain?.classList.remove('hidden');
+    this.el.spawnCurtain?.classList.remove('is-fading-out');
+    if (this.el.spawnCurtain) {
+      this.el.spawnCurtain.classList.remove('is-entering');
+      this.el.spawnCurtain.style.opacity = '1';
+    }
+  }
+
+  _syncSpawnCurtain(opacity) {
+    const el = this.el.spawnCurtain;
+    if (!el) return;
+    const a = Math.max(0, Math.min(1, opacity));
+    el.style.opacity = String(a);
+    if (this.el.spawnCurtainStatus) {
+      this.el.spawnCurtainStatus.style.opacity = String(Math.min(0.85, a * 0.9));
+    }
+  }
+
+  _updateSpawnReveal(dt) {
+    const reveal = this._spawnReveal;
+    if (!reveal || reveal.phase === 'done') return;
+
+    if (reveal.phase === 'foliage') {
+      if (this.player && this.world) {
+        this.world.touchChunksAround(this.player.x, this.player.z, reveal.radiusChunks + 1);
+        this.chunkEntities?._populateBuildingsOnly(this.player, reveal.radiusChunks);
+        this.world.populateFoliageAround(this.player.x, this.player.z, reveal.radiusChunks);
+        this.world.stripFoliageFromSurfaceTilesAround(this.player.x, this.player.z, reveal.radiusChunks);
+        this.world.drainFoliageQueue(72);
+        const view = this.getViewBoundsWorld();
+        this._cachedYsortFoliage = this.world.collectYsortFoliage(
+          view.minX,
+          view.maxX,
+          view.minZ,
+          view.maxZ,
+        );
+      }
+      reveal.holdElapsed += dt;
+      const areaReady = this.world?.isSpawnAreaReadyAround(
+        this.player.x,
+        this.player.z,
+        reveal.radiusChunks,
+      );
+      const timedOut = reveal.holdElapsed >= reveal.maxHold;
+      if ((areaReady || timedOut) && reveal.holdElapsed >= reveal.minHold) {
+        reveal.phase = 'fadeOut';
+        reveal.opacity = 1;
+        this._syncSpawnCurtain(1);
+        if (this.el.spawnCurtainStatus) {
+          this.el.spawnCurtainStatus.style.opacity = '0';
+        }
+      }
+      return;
+    }
+
+    if (reveal.phase === 'fadeOut') {
+      reveal.opacity = Math.max(0, reveal.opacity - dt / reveal.fadeOutDuration);
+      this._syncSpawnCurtain(reveal.opacity);
+      if (reveal.opacity <= 0) this._endSpawnReveal();
+    }
+  }
+
+  _endSpawnReveal() {
+    if (this._spawnReveal) this._spawnReveal.phase = 'done';
+    this._spawnReveal = null;
+    this.el.spawnCurtain?.classList.add('hidden');
+    if (this.el.spawnCurtain) this.el.spawnCurtain.style.opacity = '';
+    this.canvas?.focus();
+  }
+
   _showConfirm(message, onYes, onNo) {
     this.el.confirmMessage.textContent = message;
     this.el.confirmDialog?.classList.remove('hidden');
@@ -364,7 +504,7 @@ class Game {
 
   _togglePause() {
     if (!this.running || !this.player?.alive) return;
-    if (this.inventoryUI?.isOpen()) return;
+    if (this._panelOpen()) return;
     if (this.el.confirmDialog && !this.el.confirmDialog.classList.contains('hidden')) return;
     if (this.paused) {
       this._hidePauseMenu();
@@ -582,9 +722,8 @@ class Game {
       e.preventDefault();
       e.stopPropagation();
     }
-    if (e.code === 'Tab') {
+    if (e.code === 'Tab' && this.running) {
       e.preventDefault();
-      if (this.running && !this.paused && !e.repeat) this.inventoryUI.toggle();
       return;
     }
     if (e.code === 'Escape') {
@@ -597,9 +736,27 @@ class Game {
       return;
     }
     if (!e.repeat) this.keys[e.code] = true;
+    if (e.code === 'KeyE' && !e.repeat) {
+      e.preventDefault();
+      if (this.lan?.isOnline) {
+        this.lan.queueInteract();
+        return;
+      }
+      if (this.inventoryUI?.isOpen()) {
+        this.inventoryUI.close();
+        return;
+      }
+      if (!this.running || this.paused) return;
+      if (this.mobile) {
+        this._tryInteract();
+      } else {
+        this.inventoryUI.toggle();
+      }
+      return;
+    }
     if (!this.running || this.paused) return;
     if (e.repeat) return;
-    if (this.inventoryUI?.isOpen()) return;
+    if (this._panelOpen()) return;
     if (e.code === 'F3') {
       e.preventDefault();
       this.debugCollision = !this.debugCollision;
@@ -613,10 +770,6 @@ class Game {
     if (e.code === 'KeyR') {
       if (this.lan?.isOnline) this.lan.queueReload();
       else this._tryStartReload(performance.now() / 1000);
-    }
-    if (e.code === 'KeyE') {
-      if (this.lan?.isOnline) this.lan.queueInteract();
-      else if (this.mobile) this._tryInteract();
     }
     if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
     if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
@@ -658,7 +811,7 @@ class Game {
     window.addEventListener('keydown', (e) => this._onGameKeyDown(e), true);
     window.addEventListener('keyup', (e) => this._onGameKeyUp(e), true);
     window.addEventListener('blur', () => {
-      if (this.inventoryUI?.isOpen()) return;
+      if (this._panelOpen()) return;
       this._clearKeyboardInput();
     });
 
@@ -667,7 +820,7 @@ class Game {
         this.canvas.focus();
       this.audio.resume();
         if (!this.paused) this.mouseDown = true;
-      } else if (e.button === 2 && this.running && !this.paused && !this.inventoryUI?.isOpen()) {
+      } else if (e.button === 2 && this.running && !this.paused && !this._panelOpen()) {
         if (this.lan?.isOnline) {
           if (this._getNearbyGroundDropForInteract() || this._getInteractDoor()) {
             this.lan.queueInteract();
@@ -696,7 +849,7 @@ class Game {
     document.addEventListener('dragstart', (e) => e.preventDefault());
 
     this.canvas.addEventListener('wheel', (e) => {
-      if (!this.running || this.paused || this.inventoryUI?.isOpen()) return;
+      if (!this.running || this.paused || this._panelOpen()) return;
       e.preventDefault();
       if (this.player?.toggleWeaponSlot()) this.audio.weaponSwitch();
     }, { passive: false });
@@ -837,20 +990,9 @@ class Game {
       this._aimVisPoly = null;
       return;
     }
-    this._visTick = (this._visTick ?? 0) + 1;
     const cam = this._camera();
     const px = this.player.x;
     const pz = this.player.z;
-    const moved = this._visCamX == null
-      || Math.hypot(cam.x - this._visCamX, cam.z - this._visCamZ) > 0.2
-      || Math.hypot(px - (this._visPx ?? px), pz - (this._visPz ?? pz)) > 0.3;
-    if (!moved && (this._visTick & 3) !== 0) return;
-    if (moved && (this._visTick & 2) !== 0) return;
-
-    this._visCamX = cam.x;
-    this._visCamZ = cam.z;
-    this._visPx = px;
-    this._visPz = pz;
 
     const viewHalfW = INTERNAL_W / PPU / 2 + TILE;
     const viewHalfH = INTERNAL_H / PPU / 2 + TILE;
@@ -987,7 +1129,7 @@ class Game {
   _updateCameraFollow(dt) {
     if (!this.player) return;
     const decay = 1 - Math.exp(-CAM_FOLLOW_SMOOTH * dt);
-    if (this.mobile || this.inventoryUI?.isOpen()) {
+    if (this.mobile || this._panelOpen()) {
       this.camOffset.x += (0 - this.camOffset.x) * decay;
       this.camOffset.z += (0 - this.camOffset.z) * decay;
       return;
@@ -1117,6 +1259,11 @@ class Game {
     }
   }
 
+  _isWorldPointVisible(wx, wz) {
+    if (!this._aimVisPoly) return true;
+    return pointInVisibilityPolygon(wx, wz, this._aimVisPoly);
+  }
+
   _enemyVisMul(robot) {
     if (!this._aimVisPoly) return 1;
     return this._enemyVisAlpha.get(robot) ?? 1;
@@ -1178,6 +1325,7 @@ class Game {
   }
 
   async _bootGame(saveData = null, bootOpts = null) {
+    this._beginSpawnReveal();
     if (bootOpts?.lan) {
       this.lan = bootOpts.lan;
     } else {
@@ -1198,6 +1346,7 @@ class Game {
     }
 
     this.world = new World();
+    this.world.setSpriteBank(this.sprites);
     await this.world.build();
     this.bullets = new BulletPool();
     this.robots = [];
@@ -1212,43 +1361,17 @@ class Game {
     if (saveData) {
       this.player = new Player();
       this.player.applySaveData(saveData.player);
-      await this.world.bootstrapWorld();
       this._applySaveState(saveData);
-      await this.world.preloadAllChunks((p) => {
-        this._setLoadingProgress(p * 0.3, 'Loading terrain…');
-      });
-      await this.world.finalizeWorldGeneration((p) => {
-        this._setLoadingProgress(0.3 + p * 0.35, 'Growing foliage…');
-      });
-      await this.world.prewarmAllGround(this.sprites, PPU, (p) => {
-        this._setLoadingProgress(0.65 + p * 0.35, 'Baking terrain…');
-      });
     } else {
-      this._showLoadingScreen();
-      await this.world.bootstrapWorld((p, msg) => {
-        this._setLoadingProgress(p * 0.25, msg);
-      });
-      this._setLoadingProgress(0.28, 'Placing towns…');
-      this.buildings.spawnAllTowns(this.world);
-      this._setLoadingProgress(0.38, 'Loading terrain…');
-      await this.world.preloadAllChunks((p) => {
-        this._setLoadingProgress(0.38 + p * 0.22, 'Loading terrain…');
-      });
-      this._setLoadingProgress(0.62, 'Growing foliage…');
-      await this.world.finalizeWorldGeneration((p) => {
-        this._setLoadingProgress(0.62 + p * 0.18, 'Growing foliage…');
-      });
-      this._setLoadingProgress(0.82, 'Baking terrain…');
-      await this.world.prewarmAllGround(this.sprites, PPU, (p) => {
-        this._setLoadingProgress(0.82 + p * 0.16, 'Baking terrain…');
-      });
       this.player = new Player();
       const spawn = this.world.getPlayerSpawn();
       this.player.x = spawn.x;
       this.player.z = spawn.z;
-      this._setLoadingProgress(1, 'Ready');
-      this._hideLoadingScreen();
     }
+    this.world.prewarmGround(this.player.x, this.player.z, 4);
+
+    this._disableMenuCursor();
+    this._hideGameCursor();
 
     this.chunkEntities = new ChunkEntityManager(this.world, this);
     this.chunkEntities.reset();
@@ -1323,15 +1446,24 @@ class Game {
   _update(dt, time) {
     if (this.paused) return;
 
+    if (this._isSpawnRevealActive()) {
+      this._updateSpawnReveal(dt);
+    }
+
     const online = this.lan?.isOnline;
     this.lan?.tick(dt, this);
 
-    const inventoryOpen = this.inventoryUI?.isOpen();
+    const inventoryOpen = this._panelOpen();
     if (!online) this.dayNight?.update(dt);
-    this.world?.drainFoliageQueue(3);
+    if (this.player?.alive && this.world) {
+      this.world.touchChunksAround(this.player.x, this.player.z, 5);
+    }
+    if (!this._isSpawnRevealActive()) {
+      this.world?.drainFoliageQueue(3);
+    }
     this.buildings?.update(this.player, dt);
 
-    if (this.player?.alive && this.world) {
+    if (this.player?.alive && this.world && !this._isSpawnRevealActive()) {
       const view = this.getViewBoundsWorld();
       this._cachedYsortFoliage = this.world.collectYsortFoliage(
         view.minX,
@@ -1339,7 +1471,7 @@ class Game {
         view.minZ,
         view.maxZ,
       );
-    } else {
+    } else if (!this._isSpawnRevealActive()) {
       this._cachedYsortFoliage = [];
     }
 
@@ -1347,7 +1479,7 @@ class Game {
     this._updateEnemyVisFades(dt);
 
     if (!inventoryOpen) {
-      if (!online) {
+      if (!online && !this._isSpawnRevealActive()) {
         const { moveX: rawMoveX, moveZ: rawMoveZ } = this._getMoveInput();
       let moveX = rawMoveX;
       let moveZ = rawMoveZ;
@@ -1473,10 +1605,12 @@ class Game {
       }
 
       this._updateCameraFollow(dt);
-      this._refreshAimVisibility();
-      this._syncAim(dt);
+      if (!this._isSpawnRevealActive()) {
+        this._refreshAimVisibility();
+        this._syncAim(dt);
+      }
 
-      if (!online) {
+      if (!online && !this._isSpawnRevealActive()) {
       const fireEdge = this.mouseDown && !this.prevMouseDown;
       const fireRelease = !this.mouseDown && this.prevMouseDown;
       const wantsShoot = this.player.isAutomaticWeapon()
@@ -1520,7 +1654,7 @@ class Game {
     }
 
     if (inventoryOpen) this._updateCameraFollow(dt);
-    if (!online) {
+    if (!online && !this._isSpawnRevealActive()) {
     const reloadResult = this.player.updateReload(time);
     if (reloadResult?.ejectCasings > 0) {
       const cfg = WEAPONS[this.player.weaponKey];
@@ -1603,7 +1737,7 @@ class Game {
         robot._prevShootPhase = phase;
       }
     }
-    } else {
+    } else if (!this._isSpawnRevealActive()) {
       this.chunkEntities.update(this.player);
     }
     const breathTarget = getPlayerIdleBreathY(this.player, time);
@@ -1705,7 +1839,7 @@ class Game {
   }
 
   _tryPickupGroundDrop(drop = null) {
-    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    if (!this.running || this._panelOpen()) return false;
     const target = drop
       ?? this._getHoveredGroundDrop()
       ?? (this.mobile ? this._getNearbyGroundDrop() : null);
@@ -1763,7 +1897,7 @@ class Game {
   }
 
   _tryToggleNearbyDoor() {
-    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    if (!this.running || this._panelOpen()) return false;
     const building = this._getInteractDoor();
     if (!building) return false;
     if (!this.buildings.toggleDoor(building, this.player)) {
@@ -1777,6 +1911,7 @@ class Game {
   }
 
   _tryInteract() {
+    if (this._isSpawnRevealActive()) return false;
     if (this._tryToggleNearbyDoor()) return true;
     if (this._tryPickupGroundDrop()) return true;
     if (this._tryOpenNearbyChest()) return true;
@@ -1792,7 +1927,7 @@ class Game {
   }
 
   _tryOpenNearbyChest() {
-    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    if (!this.running || this._panelOpen()) return false;
     const chest = this._getNearbyChest();
     if (!chest) return false;
     this.inventoryUI.openChest(chest);
@@ -1800,7 +1935,7 @@ class Game {
   }
 
   _tryOpenNearbyCorpse() {
-    if (!this.running || this.inventoryUI?.isOpen()) return false;
+    if (!this.running || this._panelOpen()) return false;
     const corpse = this._getNearbyCorpse();
     if (!corpse || !this.corpses.isInInteractRange(this.player, corpse)) return false;
     this.inventoryUI.openChest(corpse);
@@ -1816,8 +1951,8 @@ class Game {
 
   _getHoveredChest() {
     if (!this.chests?.chests?.length) return null;
-    const halfW = Math.round(CHEST_OPAQUE_HALF_W * SPRITE_CHEST);
-    const halfH = Math.round(CHEST_OPAQUE_HALF_H * SPRITE_CHEST);
+    const halfW = Math.round(CHEST_OPAQUE_HALF_W);
+    const halfH = Math.round(CHEST_OPAQUE_HALF_H);
     let best = null;
     let bestD = Infinity;
     for (const chest of this.chests.chests) {
@@ -1835,7 +1970,7 @@ class Game {
   }
 
   _getInteractHighlight(time) {
-    if (!this.running || this.inventoryUI?.isOpen() || !this.player) return null;
+    if (!this.running || this._panelOpen() || !this.player) return null;
     const door = this._getInteractDoor();
     const nearbyChest = this._getNearbyChest();
     const hoveredChest = this._getHoveredChest();
@@ -1865,8 +2000,8 @@ class Game {
         box: {
           x: s.x,
           y: s.y,
-          halfW: Math.round(CHEST_OPAQUE_HALF_W * SPRITE_CHEST) + 4,
-          halfH: Math.round(CHEST_OPAQUE_HALF_H * SPRITE_CHEST) + 6,
+          halfW: Math.round(CHEST_OPAQUE_HALF_W) + 4,
+          halfH: Math.round(CHEST_OPAQUE_HALF_H) + 6,
         },
       };
     }
@@ -2071,10 +2206,16 @@ class Game {
   }
 
   _getCursorSprite() {
-    if (!this.player) return 'cursor';
-    if (this.player.isMeleeActive() || this.player.isUnarmed()) return 'cursor_melee';
-    if (this.player.weaponKey === 'm870') return 'cursor_shotgun';
-    return 'cursor';
+    if (!this.player) return 'cursor_melee';
+    if (this.player.weaponSlot === 'melee' && (this.player.meleeKey || this.player.isMeleeActive())) {
+      return 'cursor_melee';
+    }
+    if (this.player.weaponSlot === 'gun' && this.player.weaponKey) {
+      if (this.player.weaponKey === 'm870') return 'cursor_shotgun';
+      return 'cursor';
+    }
+    if (this.player.isUnarmed()) return 'cursor_melee';
+    return 'cursor_melee';
   }
 
   _particleDrawSize(p, halfPlayerPx, lifeFade) {
@@ -2408,8 +2549,6 @@ class Game {
       drawBuildingFloors(ctx, building, worldToScreen, tilePx, this.sprites);
     }
 
-    this._drawVisibilityFog(ctx, useVisFog, visPoly, worldToScreen);
-
     const playerSortZ = this._playerSortZ();
     const playerX = this.player.x;
     const playerZ = this.player.z;
@@ -2417,32 +2556,10 @@ class Game {
     drawList.length = 0;
     const brightParticles = [];
     for (const building of visibleBuildings) {
-      const playerInside = insideBuilding === building;
-      const bOriginX = building.originX;
-      const bOriginZ = building.originZ;
-      for (const wall of building.walls) {
-        const wallWx = bOriginX + (wall.tx + 0.5) * TILE;
-        const wallWz = bOriginZ + (wall.tz + 0.5) * TILE;
-        if (!inView(wallWx, wallWz)) continue;
-        const drawWall = () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites);
-        if (wallDrawsInFront(wall, playerSortZ, playerInside, playerX, playerZ, building)) continue;
-        const sortBias = SORT_WALL_BACK;
-        const wallZ = wallBackDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building);
-        drawList.push({ z: wallZ, sortBias, draw: drawWall });
-      }
-      if (!doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
-        const doorWx = bOriginX + (building.doorTx ?? Math.floor(building.w / 2) + 0.5) * TILE;
-        const doorWz = bOriginZ + (building.doorTz ?? building.h - 1 + 0.5) * TILE;
-        if (inView(doorWx, doorWz)) {
-          drawList.push({
-            z: doorBackDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
-            sortBias: SORT_WALL_BACK,
-            draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
-          });
-        }
-      }
+      this.buildings?._ensureBuildingDecorSprites(building, this.sprites);
       for (const piece of building.decor ?? []) {
         if (!inView(piece.x, piece.z, TILE * 2)) continue;
+        this.sprites.ensureSprite(piece.sprite);
         drawList.push({
           z: piece.sortZ,
           sortBias: piece.sortBias ?? SORT_ENTITY,
@@ -2450,16 +2567,12 @@ class Game {
         });
       }
     }
-    const ysortFoliage = this._cachedYsortFoliage.filter((f) => {
-      for (const building of visibleBuildings) {
-        if (foliageOverlapsBuildingInterior(building, f)) return false;
-      }
-      return true;
-    });
+    const ysortFoliage = this._cachedYsortFoliage;
     for (const f of ysortFoliage) {
       if (!inView(f.x, f.z, spritePad)) continue;
       const sortZ = f.sortZ ?? (f.z + (f.sortZBias ?? 0));
       if (isTreeFoliage(f.kind)) {
+        this.sprites.ensureSprite(f.sprite);
         drawList.push({
           z: sortZ,
           sortBias: SORT_SHADOW,
@@ -2484,31 +2597,22 @@ class Game {
           const s = this._worldToScreen(f.x, f.z);
           const size = tilePx * (f.drawSize ?? 1);
           const tint = f.tintKey ? unpackTintGradient(f.tintKey) : null;
-          const drawX = Math.round(s.x - size * 0.5);
-          const drawY = Math.round(s.y - size);
           const fadeAlpha = this._treeFadeAlpha.get(this._treeFadeKey(f)) ?? 1;
           const prevAlpha = ctx.globalAlpha;
           if (isTreeFoliage(f.kind) && fadeAlpha < 0.999) ctx.globalAlpha = prevAlpha * fadeAlpha;
-          this.sprites.drawTile(ctx, f.sprite, drawX, drawY, size, tint, f.flipX ?? false);
+          this.sprites.ensureSprite(f.sprite);
+          if (isTreeFoliage(f.kind)) {
+            this.sprites.drawPropSprite(ctx, f.sprite, Math.round(s.x), Math.round(s.y), size, {
+              anchor: 'bottom-center',
+            });
+          } else {
+            const drawX = Math.round(s.x - size * 0.5);
+            const drawY = Math.round(s.y - size);
+            this.sprites.drawTile(ctx, f.sprite, drawX, drawY, size, tint, f.flipX ?? false);
+          }
           ctx.globalAlpha = prevAlpha;
         },
       });
-    }
-    for (const chest of this.chests.chests) {
-      if (!inView(chest.x, chest.z, TILE * 2)) continue;
-      drawList.push({ z: chest.z, sortBias: SORT_ENTITY, draw: () => {
-        const s = this._chestScreenPos(chest);
-        this.sprites.draw(
-          ctx,
-          chestSpriteName(chest.variant),
-          s.x,
-          s.y,
-          SPRITE_CHEST,
-          0,
-          false,
-          CHEST_DRAW_PIVOT,
-        );
-      }});
     }
     for (const corpse of this.corpses?.corpses ?? []) {
       if (!inView(corpse.x, corpse.z, TILE * 2)) continue;
@@ -2525,6 +2629,51 @@ class Game {
           0,
           false,
           'center',
+        );
+      }});
+    }
+    for (const building of visibleBuildings) {
+      const playerInside = insideBuilding === building;
+      const bOriginX = building.originX;
+      const bOriginZ = building.originZ;
+      for (const wall of building.walls) {
+        const wallWx = bOriginX + (wall.tx + 0.5) * TILE;
+        const wallWz = bOriginZ + (wall.tz + 0.5) * TILE;
+        if (!inView(wallWx, wallWz)) continue;
+        if (wallDrawsInFront(wall, playerSortZ, playerInside, playerX, playerZ, building)) continue;
+        drawList.push({
+          z: wallBackDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building),
+          sortBias: SORT_WALL_BACK,
+          fogBarrier: true,
+          draw: () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites),
+        });
+      }
+      if (!doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
+        const doorWx = bOriginX + (building.doorTx ?? Math.floor(building.w / 2) + 0.5) * TILE;
+        const doorWz = bOriginZ + (building.doorTz ?? building.h - 1 + 0.5) * TILE;
+        if (inView(doorWx, doorWz)) {
+          drawList.push({
+            z: doorBackDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
+            sortBias: SORT_WALL_BACK,
+            fogBarrier: true,
+            draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
+          });
+        }
+      }
+    }
+    for (const chest of this.chests.chests) {
+      if (!inView(chest.x, chest.z, TILE * 2)) continue;
+      drawList.push({ z: chest.z, sortBias: SORT_ENTITY, draw: () => {
+        const s = this._chestScreenPos(chest);
+        this.sprites.draw(
+          ctx,
+          chestSpriteName(chest.variant),
+          s.x,
+          s.y,
+          SPRITE_CHEST,
+          0,
+          false,
+          CHEST_DRAW_PIVOT,
         );
       }});
     }
@@ -2581,7 +2730,7 @@ class Game {
           : 0;
         const drawX = Math.round(s.x + shake.x + chargeShake);
         const shootPhase = robot.shoot?.phase ?? null;
-        const robotMoving = robot.moving && !robot.emerging
+        const robotMoving = (robot.moving || (robot.moveSpeed ?? 0) > 0.2) && !robot.emerging
           && shootPhase !== 'charging' && shootPhase !== 'firing';
         const canWalkBounce = robotMoving
           && !robot.jump?.active && !robot.jump?.charging;
@@ -2615,7 +2764,7 @@ class Game {
         const drawX = Math.round(s.x + shake.x + chargeShake);
         const shootPhase = robot.shoot?.phase ?? null;
         const isScout = robot.type === 'scout';
-        const robotMoving = robot.moving && !robot.emerging
+        const robotMoving = (robot.moving || (robot.moveSpeed ?? 0) > 0.2) && !robot.emerging
           && shootPhase !== 'charging' && shootPhase !== 'firing';
         const canWalkBounce = robotMoving
           && !robot.jump?.active && !robot.jump?.charging;
@@ -2766,6 +2915,7 @@ class Game {
         drawList.push({
           z: wallFrontDrawZ(wall, playerSortZ, playerInside, playerX, playerZ, building),
           sortBias: SORT_WALL_FRONT,
+          fogBarrier: true,
           draw: () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites),
         });
       }
@@ -2776,6 +2926,7 @@ class Game {
           drawList.push({
             z: doorFrontDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
             sortBias: SORT_WALL_FRONT,
+            fogBarrier: true,
             draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
           });
         }
@@ -2806,6 +2957,7 @@ class Game {
     for (const b of this.bullets.bullets) {
       if (!b.active) continue;
       if (!inView(b.x, b.z, TILE * 2)) continue;
+      if (useVisFog && visPoly && !this._isWorldPointVisible(b.x, b.z)) continue;
       const bulletZ = bulletDrawSortZ(b.x, b.z, visibleBuildings);
       drawList.push({
         z: bulletZ,
@@ -2820,7 +2972,17 @@ class Game {
       });
     }
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
-    for (const d of drawList) d.draw();
+    let fogDrawn = false;
+    for (const d of drawList) {
+      if (useVisFog && !fogDrawn && d.fogBarrier) {
+        this._drawVisibilityFog(ctx, useVisFog, visPoly, worldToScreen);
+        fogDrawn = true;
+      }
+      d.draw();
+    }
+    if (useVisFog && !fogDrawn) {
+      this._drawVisibilityFog(ctx, useVisFog, visPoly, worldToScreen);
+    }
 
     for (const building of visibleBuildings) {
       const alpha = this.buildings?.roofAlphaFor(building) ?? 1;
@@ -2849,9 +3011,7 @@ class Game {
       );
     }
 
-    if (this.running && !this.inventoryUI?.isOpen()) {
-      this.sprites.draw(ctx, this._getCursorSprite(), this.mouse.sx, this.mouse.sy, SPRITE_CURSOR);
-    }
+    this._syncGameCursor();
   }
 
   _drawPlayerCooldown(ctx, time) {

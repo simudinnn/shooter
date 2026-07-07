@@ -12,10 +12,10 @@ export const WORLD_SIZE_TILES = 400;
 export const WORLD_HALF_TILES = WORLD_SIZE_TILES / 2;
 export const WORLD_MARGIN_TILES = 6;
 
-export const TOWN_SITE_COUNT_MIN = 15;
-export const TOWN_SITE_COUNT_MAX = 20;
-export const TOWN_SITE_MARGIN_TILES = 34;
-export const TOWN_SITE_MIN_DIST_TILES = 92;
+/** Coarse grid cell for procedural town placement (infinite world). */
+export const TOWN_REGION_TILES = 80;
+export const TOWN_REGION_CHANCE = 0.78;
+export const TOWN_SITE_MIN_DIST_TILES = 180;
 /** Default stub half-length when a town has no rolled size. */
 export const TOWN_HIGHWAY_HALF_TILES = 24;
 export const TOWN_HALF_TILES_MIN = 15;
@@ -1586,47 +1586,73 @@ function paintTownMainArtery(roadTiles, town) {
   }
 }
 
-function buildRoadNetwork(seed) {
-  const towns = pickScatteredTowns(seed);
-  const roadTileSet = new Set();
-  /** @type {RoadPath[]} */
-  const roadPaths = [];
-  /** @type {{ x:number, z:number }[]} */
-  const mainPoints = [];
+function buildRoadNetwork() {
+  return {
+    roadPaths: [],
+    roadTileSet: new Set(),
+    towns: [],
+    mainPoints: [],
+    bounds: {
+      minTx: -1e9,
+      maxTx: 1e9,
+      minTz: -1e9,
+      maxTz: 1e9,
+    },
+  };
+}
 
-  for (const town of towns) {
-    paintTownMainArtery(roadTileSet, town);
+/** Deterministic town anchor for one region cell — no inter-town highways. */
+export function getTownAnchorAtRegion(gx, gz) {
+  const seed = getWorldSeed();
+  const guaranteed = gx === 0 && gz === 0;
+  if (guaranteed) {
+    return {
+      id: 'r0_0',
+      tx: HIGHWAY_SPAWN_TX,
+      tz: HIGHWAY_SPAWN_TZ,
+      axis: hash01(seed, 41) < 0.5 ? 'h' : 'v',
+      kind: 'main',
+      half: rollTownHalf(seed, HIGHWAY_SPAWN_TX, HIGHWAY_SPAWN_TZ, 0),
+    };
   }
+  if (hash01(seed, gx * 919 + gz * 733) > TOWN_REGION_CHANCE) return null;
 
-  const usedEnds = new Map(towns.map((t) => [t.id, new Set()]));
-
-  for (const [ai, bi] of mstEdges(towns)) {
-    const a = towns[ai];
-    const b = towns[bi];
-    const { a: epA, b: epB } = pickConnectionPair(a, b, usedEnds);
-    const leg = buildConnectorLeg(epA, epB, a, b, towns, seed, ai, bi);
-    paintHighwayAvoidingTownInteriors(leg, roadTileSet, towns, HIGHWAY_WIDTH_TILES, { bevel: true });
-    roadPaths.push({ points: leg, road: 'main' });
-    for (const p of leg) mainPoints.push(p);
-  }
-
-  fillCollinearRoadGaps(roadTileSet, HIGHWAY_WIDTH_TILES, 1);
-  scrubInteriorHighwayTiles(roadTileSet, towns);
+  const jitterX = (hash01(seed, gx * 17 + gz * 31 + 100) - 0.5) * TOWN_REGION_TILES * 0.44;
+  const jitterZ = (hash01(seed, gx * 23 + gz * 37 + 100) - 0.5) * TOWN_REGION_TILES * 0.44;
+  const tx = Math.round(gx * TOWN_REGION_TILES + TOWN_REGION_TILES * 0.5 + jitterX);
+  const tz = Math.round(gz * TOWN_REGION_TILES + TOWN_REGION_TILES * 0.5 + jitterZ);
 
   return {
-    roadPaths,
-    roadTileSet,
-    towns,
-    mainPoints,
-    bounds: fixedWorldBounds(),
+    id: `r${gx}_${gz}`,
+    tx,
+    tz,
+    axis: hash01(seed, gx * 41 + gz * 43) < 0.5 ? 'h' : 'v',
+    kind: 'main',
+    half: rollTownHalf(seed, tx, tz, gx * 1000 + gz),
   };
+}
+
+/** Nearby procedural town anchors (region cells around a tile). */
+export function getNearbyTownAnchors(tx, tz, regionRadius = 2) {
+  const gx0 = Math.floor(tx / TOWN_REGION_TILES) - regionRadius;
+  const gx1 = Math.floor(tx / TOWN_REGION_TILES) + regionRadius;
+  const gz0 = Math.floor(tz / TOWN_REGION_TILES) - regionRadius;
+  const gz1 = Math.floor(tz / TOWN_REGION_TILES) + regionRadius;
+  const out = [];
+  for (let gz = gz0; gz <= gz1; gz++) {
+    for (let gx = gx0; gx <= gx1; gx++) {
+      const anchor = getTownAnchorAtRegion(gx, gz);
+      if (anchor) out.push(anchor);
+    }
+  }
+  return out;
 }
 
 export function getRoadNetwork() {
   const seed = getWorldSeed();
   if (_cacheSeed === seed && _cache) return _cache;
   _cacheSeed = seed;
-  _cache = buildRoadNetwork(seed);
+  _cache = buildRoadNetwork();
   return _cache;
 }
 
@@ -1644,36 +1670,27 @@ export function getWorldBoundsWorld() {
   };
 }
 
-export function isInWorldBoundsTile(tx, tz) {
-  const b = getWorldBoundsTiles();
-  return tx >= b.minTx && tx <= b.maxTx && tz >= b.minTz && tz <= b.maxTz;
+export function isInWorldBoundsTile() {
+  return true;
 }
 
-export function chunkOverlapsWorldBounds(cx, cz) {
-  const minTx = cx * CHUNK_TILES;
-  const maxTx = minTx + CHUNK_TILES - 1;
-  const minTz = cz * CHUNK_TILES;
-  const maxTz = minTz + CHUNK_TILES - 1;
-  const b = getWorldBoundsTiles();
-  return maxTx >= b.minTx && minTx <= b.maxTx && maxTz >= b.minTz && minTz <= b.maxTz;
+export function chunkOverlapsWorldBounds() {
+  return true;
 }
 
 export function clampWorldPosition(x, z) {
-  const b = getWorldBoundsWorld();
-  const pad = TILE * 0.5;
-  return {
-    x: Math.max(b.minX + pad, Math.min(b.maxX - pad, x)),
-    z: Math.max(b.minZ + pad, Math.min(b.maxZ - pad, z)),
-  };
+  return { x, z };
 }
 
 export function getHighwayPlayerSpawn() {
-  const tx = HIGHWAY_SPAWN_TX;
-  const tz = HIGHWAY_SPAWN_TZ + 1;
-  return clampWorldPosition(
-    tx * TILE + TILE * 0.5,
-    tz * TILE + TILE * 0.5,
-  );
+  const anchor = getTownAnchorAtRegion(0, 0);
+  if (anchor) {
+    return {
+      x: anchor.tx * TILE + TILE * 0.5,
+      z: (anchor.tz + 10) * TILE + TILE * 0.5,
+    };
+  }
+  return { x: TILE * 0.5, z: TILE * 0.5 };
 }
 
 export function isHighwayTile(tx, tz) {
@@ -1795,7 +1812,6 @@ export function nearestRoadEdge(tx, tz) {
 }
 
 export function collectHighwayTilesInChunk(cx, cz) {
-  if (!chunkOverlapsWorldBounds(cx, cz)) return [];
   const minTx = cx * CHUNK_TILES;
   const maxTx = minTx + CHUNK_TILES - 1;
   const minTz = cz * CHUNK_TILES;
@@ -1810,17 +1826,29 @@ export function collectHighwayTilesInChunk(cx, cz) {
 }
 
 export function getTownSiteById(id) {
-  return getRoadNetwork().towns.find((t) => t.id === id) ?? null;
+  const match = /^r(-?\d+)_(-?\d+)$/.exec(id);
+  if (!match) return null;
+  return getTownAnchorAtRegion(Number(match[1]), Number(match[2]));
 }
 
 export function getTownsInChunk(cx, cz) {
-  const minTx = cx * CHUNK_TILES - 40;
-  const maxTx = minTx + CHUNK_TILES + 80;
-  const minTz = cz * CHUNK_TILES - 40;
-  const maxTz = minTz + CHUNK_TILES + 80;
-  return getRoadNetwork().towns.filter(
-    (t) => t.tx >= minTx && t.tx <= maxTx && t.tz >= minTz && t.tz <= maxTz,
-  );
+  const minTx = cx * CHUNK_TILES;
+  const maxTx = minTx + CHUNK_TILES - 1;
+  const minTz = cz * CHUNK_TILES;
+  const maxTz = minTz + CHUNK_TILES - 1;
+  const pad = TOWN_HALF_TILES_MAX + 48;
+  const minGx = Math.floor((minTx - pad) / TOWN_REGION_TILES);
+  const maxGx = Math.floor((maxTx + pad) / TOWN_REGION_TILES);
+  const minGz = Math.floor((minTz - pad) / TOWN_REGION_TILES);
+  const maxGz = Math.floor((maxTz + pad) / TOWN_REGION_TILES);
+  const towns = [];
+  for (let gz = minGz; gz <= maxGz; gz++) {
+    for (let gx = minGx; gx <= maxGx; gx++) {
+      const anchor = getTownAnchorAtRegion(gx, gz);
+      if (anchor) towns.push(anchor);
+    }
+  }
+  return towns;
 }
 
 export function collectTownStreetTiles(anchor, layout) {

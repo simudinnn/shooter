@@ -3,7 +3,7 @@ import {
   HIGHWAY_WIDTH_TILES,
   collectTownStreetTiles,
   getLocalRoadBand,
-  getRoadNetwork,
+  getNearbyTownAnchors,
   isHighwayTile,
   nearestRoadEdge,
   townHalf,
@@ -95,15 +95,40 @@ function canPlaceLot(tx, tz, w, h, placed, roadKeys, gap = TOWN_BUILDING_GAP) {
 }
 
 function inOtherTownZone(tx, tz, anchorId) {
-  const self = getRoadNetwork().towns.find((t) => t.id === anchorId);
+  const nearby = getNearbyTownAnchors(tx, tz, 2);
+  const self = nearby.find((t) => t.id === anchorId);
   if (!self) return false;
   const selfDist = Math.abs(self.tx - tx) + Math.abs(self.tz - tz);
-  for (const t of getRoadNetwork().towns) {
+  for (const t of nearby) {
     if (t.id === anchorId) continue;
     const d = Math.abs(t.tx - tx) + Math.abs(t.tz - tz);
     if (d < TOWN_EXCLUSION_RADIUS && d < selfDist) return true;
   }
   return false;
+}
+
+function syntheticRoadBand(tx, tz, axis) {
+  const pad = Math.floor(HIGHWAY_WIDTH_TILES / 2);
+  if (axis === 'v') {
+    return {
+      axis: 'v',
+      rx: tx,
+      rz: tz,
+      minTx: tx - pad,
+      maxTx: tx + pad,
+      minTz: tz - townHalf({ half: TOWN_CROSS_HALF_TILES }),
+      maxTz: tz + townHalf({ half: TOWN_CROSS_HALF_TILES }),
+    };
+  }
+  return {
+    axis: 'h',
+    rx: tx,
+    rz: tz,
+    minTx: tx - townHalf({ half: TOWN_CROSS_HALF_TILES }),
+    maxTx: tx + townHalf({ half: TOWN_CROSS_HALF_TILES }),
+    minTz: tz - pad,
+    maxTz: tz + pad,
+  };
 }
 
 /** Pick spur anchor — center or at cross-street end (edge variety). */
@@ -695,6 +720,9 @@ export function rollTownLayoutAtAnchor(anchor, seedA, seedB) {
       az = edge.rz;
       band = getLocalRoadBand(ax, az);
     }
+    if (!band) {
+      band = syntheticRoadBand(ax, az, anchor.axis ?? (hash01(seedA, seedB) < 0.5 ? 'h' : 'v'));
+    }
   }
   const gap = wallRoadGap(seedA, seedB, 0);
   const houseCount = TOWN_MIN_HOUSES
@@ -713,10 +741,6 @@ export function rollTownLayoutAtAnchor(anchor, seedA, seedB) {
     streetKeys.add(key);
     streetTiles.push({ tx, tz });
   };
-
-  if (!band) {
-    return emptyLayout(anchor, ax, az, 'h', gap);
-  }
 
   const { roadTiles: townRoadTiles, roadKeys: townRoadKeys, roadMeta } = buildReferenceTownRoads(
     ax, az, band, seedA, seedB, townHalf(anchor),
