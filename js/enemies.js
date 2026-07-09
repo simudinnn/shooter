@@ -1,4 +1,4 @@
-import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, didDisplace, MOTION_IDLE_EPS } from './collision.js';
+import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, didDisplace, MOTION_IDLE_EPS, entityPushRadius } from './collision.js';
 import {
   updateChaseNav,
   canMeleeTarget,
@@ -20,8 +20,15 @@ import {
   SCOUT_DETECT_RANGE,
 } from './enemyNav.js';
 import { getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, resolveFlipX } from './sprites.js';
+import { PLAYER_MOVE_W_PX, PLAYER_MOVE_H_PX } from './player.js';
 import { PPU } from './renderConfig.js';
 import { TILE } from './worldGen.js';
+
+function playerMoveRadius(ppu) {
+  const halfW = (PLAYER_MOVE_W_PX / ppu) * 0.5;
+  const halfH = (PLAYER_MOVE_H_PX / ppu) * 0.5;
+  return Math.sqrt(halfW * halfH);
+}
 
 /** Base robot enemy — `type` selects sprite sheet (spider, walker, scout, …). */
 export const SCOUT_SPAWN_SHARE = 0.12;
@@ -42,7 +49,7 @@ export class Robot {
     this.radius = 1.45;
     this.moveRadius = 0.95;
     this.meleeDamage = Math.floor((12 + Math.random() * 10) * (1 + (wave - 1) * 0.07));
-    this.meleeRange = 1.7;
+    this.meleeRange = 2.1;
     this.attackRate = Math.max(0.45, 0.75 + Math.random() * 0.35 - (wave - 1) * 0.03);
     this.meleeCooldown = 0.3 + Math.random() * 0.5;
     this.walkPhase = Math.random() * Math.PI * 2;
@@ -87,24 +94,37 @@ export class Robot {
   }
 
   /** World wall collision — circular feet collider. */
-  getWorldCollider() {
-    return { kind: 'circle', radius: this.radius };
+  getWorldCollider(ppu = PPU) {
+    const move = this.getMoveCollider(ppu);
+    return { kind: 'circle', radius: move.radius };
   }
 
-  /** Feet-level movement AABB — larger than legacy circle for smoother wall slides. */
+  /** Feet-level movement circle — slightly larger than the player's. */
   getMoveCollider(ppu = PPU) {
     const nativePx = getEnemyNativePx(this.type);
     const scale = getEnemyDrawScale(this.type);
     const feetSouth = spriteFeetOffset(nativePx, scale) / ppu;
+    const base = playerMoveRadius(ppu);
     const sizeMul = (nativePx / 16) * (scale / getEnemyDrawScale('spider'));
-    const halfW = 1.55 * sizeMul;
-    const halfH = 1.05 * sizeMul;
+    const radius = base * (1.1 + Math.max(0, sizeMul - 1) * 0.08);
     return {
-      kind: 'aabb',
-      halfW,
-      halfH,
-      zOff: feetSouth - halfH,
+      kind: 'circle',
+      radius,
+      zOff: feetSouth - radius,
     };
+  }
+
+  getPushCollider(ppu = PPU) {
+    const move = this.getMoveCollider(ppu);
+    return {
+      kind: 'circle',
+      radius: move.radius * 0.92,
+      zOff: move.zOff,
+    };
+  }
+
+  getHitCollider(ppu = PPU) {
+    return this.getPushCollider(ppu);
   }
 
   static createEmerging(x, z, wave, world, type = 'spider') {
@@ -178,8 +198,8 @@ export class Robot {
       return false;
     }
     const targets = collectCollisionTargets({ player, robots, exclude: this });
-    const body = { kind: 'circle', radius: this.radius };
-    const worldCol = this.getMoveCollider();
+    const body = this.getMoveCollider(PPU);
+    const worldCol = body;
     const r = moveWithEntityCollision(
       world,
       this.x,
@@ -236,7 +256,7 @@ export class Robot {
     this.x = r.x;
     this.z = r.z;
     if (!ignoreRobots) {
-      applyApproachPush(this, prevX, prevZ, this.x, this.z, this.radius, targets, 0.24, world, PPU);
+      applyApproachPush(this, prevX, prevZ, this.x, this.z, entityPushRadius(this, PPU), targets, 0.24, world, PPU);
     }
     if (ignoreRobots) this._softSeparateFromRobots(robots);
     if (world.checkCollisionShape(this.x, this.z, worldCol, false, moveOpts)) {
@@ -604,11 +624,10 @@ export class Scout extends Robot {
   }
 
   applyHit(damage, fromX, fromZ, world, opts = {}) {
-    const inShoot = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';
     return super.applyHit(damage, fromX, fromZ, world, {
       ...opts,
       knockMult: 0.28,
-      noStagger: inShoot,
+      noStagger: true,
     });
   }
 
@@ -649,12 +668,15 @@ export class Scout extends Robot {
       return;
     }
 
+    const inAttackEarly = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';
     if (this.stagger > 0) {
       this.stagger -= dt;
       this._applyKnockback(dt, world, player, robots);
-      this.moving = false;
-      this.moveSpeed = 0;
-      return;
+      if (!inAttackEarly) {
+        this.moving = false;
+        this.moveSpeed = 0;
+        return;
+      }
     }
 
     const prevX = this.x;

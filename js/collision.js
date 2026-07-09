@@ -18,8 +18,15 @@ function pushAabbFromCircle(acx, acz, halfW, halfH, ox, oz, or) {
   };
 }
 
+/** Radius used for entity–entity push separation (feet-level when getPushCollider exists). */
+export function entityPushRadius(ent, ppu = 8) {
+  const shape = ent?.getPushCollider?.(ppu);
+  if (shape?.kind === 'circle' && shape.radius != null) return shape.radius;
+  return ent?.radius ?? 0;
+}
+
 /** Push a circle out of overlapping entities (player / robots). */
-export function resolveEntityPosition(x, z, radius, entities, exclude = null) {
+export function resolveEntityPosition(x, z, radius, entities, exclude = null, ppu = 8) {
   let nx = x;
   let nz = z;
 
@@ -29,7 +36,7 @@ export function resolveEntityPosition(x, z, radius, entities, exclude = null) {
       if (ent.alive === false) continue;
       if (ent.emerging) continue;
 
-      const otherR = ent.radius ?? 0;
+      const otherR = entityPushRadius(ent, ppu);
       const dx = nx - ent.x;
       const dz = nz - ent.z;
       const distSq = dx * dx + dz * dz;
@@ -53,9 +60,9 @@ export function resolveEntityPosition(x, z, radius, entities, exclude = null) {
   return { x: nx, z: nz };
 }
 
-export function resolveEntityPositionShape(x, z, shape, entities, exclude = null) {
+export function resolveEntityPositionShape(x, z, shape, entities, exclude = null, ppu = 8) {
   if (!shape || shape.kind === 'circle') {
-    return resolveEntityPosition(x, z, shape?.radius ?? 0, entities, exclude);
+    return resolveEntityPosition(x, z, shape?.radius ?? 0, entities, exclude, ppu);
   }
 
   let acx = x;
@@ -67,7 +74,7 @@ export function resolveEntityPositionShape(x, z, shape, entities, exclude = null
       if (ent.alive === false) continue;
       if (ent.emerging) continue;
 
-      const pushed = pushAabbFromCircle(acx, acz, shape.halfW, shape.halfH, ent.x, ent.z, ent.radius ?? 0);
+      const pushed = pushAabbFromCircle(acx, acz, shape.halfW, shape.halfH, ent.x, ent.z, entityPushRadius(ent, ppu));
       acx = pushed.cx;
       acz = pushed.cz;
     }
@@ -104,7 +111,7 @@ export function applyApproachPush(mover, prevX, prevZ, newX, newZ, moverRadius, 
     const dx = ent.x - newX;
     const dz = ent.z - newZ;
     const dist = Math.hypot(dx, dz) || 0.001;
-    const minDist = moverRadius + (ent.radius ?? 0);
+    const minDist = moverRadius + entityPushRadius(ent, ppu);
     const overlap = minDist - dist;
     if (overlap <= 0) continue;
 
@@ -146,7 +153,7 @@ export function moveWithEntityCollision(world, x, z, dx, dz, entityShape, worldS
   } else {
     moved = world.moveAxisShape(x, z, dx, dz, worldShape, opts);
   }
-  let pos = resolveEntityPositionShape(moved.x, moved.z, entityShape, targets, exclude);
+  let pos = resolveEntityPositionShape(moved.x, moved.z, entityShape, targets, exclude, opts.ppu ?? 8);
   if (world.checkCollisionShape(pos.x, pos.z, worldShape, false, opts)) pos = moved;
   return pos;
 }

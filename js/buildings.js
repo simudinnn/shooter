@@ -1,4 +1,4 @@
-import { TILE, CHUNK_WORLD, CHUNK_TILES, isInBase, snapWorldPoint } from './worldGen.js';
+import { TILE, CHUNK_WORLD, CHUNK_TILES, isInBase, snapWorldPoint, PLAYER_SPAWN_TOWN_CLEARANCE_TILES } from './worldGen.js';
 import { INTERNAL_W, INTERNAL_H } from './renderConfig.js';
 import {
   BUILDING_MAX_W,
@@ -38,7 +38,7 @@ import {
   buildingFootprintsTooClose,
   BUILDING_MIN_GAP_TILES,
   buildingFoliageClearRects,
-  foliageOverlapsBuildingInterior,
+  foliageOverlapsBuildingClearZone,
   roofRaiseWorld,
   wallDrawsInFront,
   wallFrontDrawZ,
@@ -682,6 +682,7 @@ export class BuildingManager {
     if (!this._townAnchorsSpawned) this._townAnchorsSpawned = new Set();
 
     if (anchors.every((a) => this._townAnchorsSpawned.has(a.id))) {
+      this.reconcileFoliageInChunk(chunk, world);
       chunk.buildingsSpawned = true;
       return;
     }
@@ -828,6 +829,17 @@ export class BuildingManager {
     }
   }
 
+  _townLayoutTooCloseToSpawn(layout, spawn) {
+    const ox = layout.originTileX * TILE;
+    const oz = layout.originTileZ * TILE;
+    const pad = PLAYER_SPAWN_TOWN_CLEARANCE_TILES * TILE;
+    const minX = ox - pad;
+    const maxX = ox + layout.townW * TILE + pad;
+    const minZ = oz - pad;
+    const maxZ = oz + layout.townDepth * TILE + pad;
+    return spawn.x >= minX && spawn.x <= maxX && spawn.z >= minZ && spawn.z <= maxZ;
+  }
+
   _spawnSingleInChunk(chunk, world, player, canSpawn, spawnBias) {
     const shape = rollBuildingShape(chunk.cx * 31 + 7, chunk.cz * 37 + 11);
     const layout = this._findChunkOrigin(chunk, world, player, spawnBias, shape);
@@ -845,6 +857,9 @@ export class BuildingManager {
   _spawnTownAtAnchor(anchor, chunk, world, player, canSpawn, spawnBias, opts = {}) {
     const layout = rollTownLayoutAtAnchor(anchor, anchor.tx * 41, anchor.tz * 43);
     if (layout.lots.length === 0) return false;
+
+    const spawn = world._cachedPlayerSpawn ?? world.getPlayerSpawn?.();
+    if (spawn && this._townLayoutTooCloseToSpawn(layout, spawn)) return false;
 
     const ox = layout.originTileX * TILE;
     const oz = layout.originTileZ * TILE;
@@ -907,7 +922,37 @@ export class BuildingManager {
     for (const rect of buildingFoliageClearRects(building)) {
       world.clearFoliageInRect(rect.minX, rect.maxX, rect.minZ, rect.maxZ, { markBlocked: true });
     }
-    world.removeFoliageWhere((f) => foliageOverlapsBuildingInterior(building, f));
+    world.removeFoliageWhere((f) => foliageOverlapsBuildingClearZone(building, f));
+    this._markBuildingFootprintBlocked(world, building);
+  }
+
+  _markBuildingFootprintBlocked(world, building) {
+    const minTx = Math.floor(building.originX / TILE);
+    const minTz = Math.floor(building.originZ / TILE);
+    const maxTx = Math.ceil((building.originX + building.w * TILE) / TILE) - 1;
+    const maxTz = Math.ceil((building.originZ + building.h * TILE) / TILE) - 1;
+    const tiles = [];
+    for (let tz = minTz; tz <= maxTz; tz++) {
+      for (let tx = minTx; tx <= maxTx; tx++) {
+        tiles.push({ tx, tz });
+      }
+    }
+    world.markFoliageBlockedTiles(tiles);
+  }
+
+  /** Re-strip foliage when a chunk reloads but town buildings already exist. */
+  reconcileFoliageInChunk(chunk, world) {
+    if (!chunk || chunk.outOfBounds) return;
+    const minX = chunk.cx * CHUNK_WORLD;
+    const maxX = minX + CHUNK_WORLD;
+    const minZ = chunk.cz * CHUNK_WORLD;
+    const maxZ = minZ + CHUNK_WORLD;
+    for (const building of this.buildings) {
+      const bMaxX = building.originX + building.w * TILE;
+      const bMaxZ = building.originZ + building.h * TILE;
+      if (building.originX >= maxX || bMaxX <= minX || building.originZ >= maxZ || bMaxZ <= minZ) continue;
+      this._clearFoliageForBuilding(world, building);
+    }
   }
 
   remove(building) {

@@ -5,8 +5,8 @@
 export const PPU = 8;
 
 /** Internal framebuffer (logical pixels). Wider than 480×270 = more world at same PPU. */
-export const INTERNAL_W = 960;
-export const INTERNAL_H = 540;
+export const INTERNAL_W = 760;
+export const INTERNAL_H = 440;
 
 /** Supersample buffer for sharper fullscreen upscale. */
 export const RENDER_SCALE = 2;

@@ -12,6 +12,27 @@ import {
   materialSpritePath,
   normalizeMaterialItem,
 } from './materials.js';
+import {
+  consumableSpritePath,
+  getConsumableDescription,
+  getConsumableDisplayName,
+  isQuickEquipItem,
+  normalizeConsumableItem,
+} from './consumables.js';
+import {
+  equipmentSpritePath,
+  getEquipmentDescription,
+  getEquipmentDisplayName,
+  isEquipmentItem,
+  normalizeEquipmentItem,
+} from './equipment.js';
+import {
+  getThrowableDescription,
+  getThrowableDisplayName,
+  isThrowableItem,
+  normalizeThrowableItem,
+  throwableSpritePath,
+} from './throwables.js';
 
 export const CHEST_SLOT_COUNT = 8;
 export const CHEST_COLS = 4;
@@ -93,7 +114,7 @@ function rollChestAmmoItem() {
 }
 
 function rollChestBandageItem() {
-  return { kind: 'bandage', amount: 1 + Math.floor(Math.random() * 2) };
+  return { kind: 'consumable', key: 'bandage', amount: 1 + Math.floor(Math.random() * 2) };
 }
 
 function rollChestMeleeItem() {
@@ -209,8 +230,22 @@ export function getItemDisplayName(item) {
     return getAmmoDisplayName(normalized.ammoType, normalized.amount);
   }
   if (item.kind === 'bandage') {
-    const n = item.amount ?? 1;
-    return n > 1 ? `Bandage x${n}` : 'Bandage';
+    const normalized = normalizeConsumableItem(item);
+    return getConsumableDisplayName(normalized.key, normalized.amount);
+  }
+  if (item.kind === 'consumable') {
+    const normalized = normalizeConsumableItem(item);
+    return getConsumableDisplayName(normalized.key, normalized.amount);
+  }
+  if (item.kind === 'equipment') {
+    const normalized = normalizeEquipmentItem(item);
+    return getEquipmentDisplayName(normalized.key);
+  }
+  if (item.kind === 'throwable') {
+    const normalized = normalizeThrowableItem(item);
+    const n = normalized.amount ?? 1;
+    const name = getThrowableDisplayName(normalized.key);
+    return n > 1 ? `${name} x${n}` : name;
   }
   if (item.kind === 'material') {
     const normalized = normalizeMaterialItem(item);
@@ -237,18 +272,31 @@ export function getItemDescription(item) {
     const normalized = normalizeAmmoItem(item);
     return `${getAmmoDisplayName(normalized.ammoType, normalized.amount)} for reloading.`;
   }
-  if (item.kind === 'bandage') {
-    const n = item.amount ?? 1;
-    return n > 1
-      ? `${n} bandages. Each restores 30 HP.`
-      : 'Bandage. Restores 30 HP when used.';
+  if (item.kind === 'bandage' || item.kind === 'consumable') {
+    const normalized = normalizeConsumableItem(item);
+    if (!normalized) return '';
+    return getConsumableDescription(normalized.key);
+  }
+  if (item.kind === 'equipment') {
+    const normalized = normalizeEquipmentItem(item);
+    if (!normalized) return item.key;
+    return getEquipmentDescription(normalized.key);
+  }
+  if (item.kind === 'throwable') {
+    const normalized = normalizeThrowableItem(item);
+    if (!normalized) return '';
+    return getThrowableDescription(normalized.key);
   }
   if (item.kind === 'material') {
-    const normalized = normalizeMaterialItem(item);
-    return `${getMaterialDisplayName(normalized.key, 1)} — crafting material.`;
+    return 'Crafting material.';
+  }
+  if (item.kind === 'throwable') {
+    return 'Throwable item.';
   }
   return '';
 }
+
+export { isQuickEquipItem, isThrowableItem };
 
 export function getItemIconSrc(item) {
   if (!item) return '';
@@ -258,7 +306,18 @@ export function getItemIconSrc(item) {
     const normalized = normalizeAmmoItem(item);
     return ammoSpritePath(normalized.ammoType);
   }
-  if (item.kind === 'bandage') return 'assets/items/consumable/bandage.png';
+  if (item.kind === 'bandage' || item.kind === 'consumable') {
+    const normalized = normalizeConsumableItem(item);
+    return consumableSpritePath(normalized?.key ?? 'bandage');
+  }
+  if (item.kind === 'equipment') {
+    const normalized = normalizeEquipmentItem(item);
+    return equipmentSpritePath(normalized?.key ?? item.key);
+  }
+  if (item.kind === 'throwable') {
+    const normalized = normalizeThrowableItem(item);
+    return throwableSpritePath(normalized?.key ?? item.key);
+  }
   if (item.kind === 'material') return materialSpritePath(item.key);
   return '';
 }
@@ -278,7 +337,18 @@ export function getItemSpriteName(item) {
     const normalized = normalizeAmmoItem(item);
     return AMMO_TYPES[normalized.ammoType]?.sprite ?? 'pistol_ammo';
   }
-  if (item.kind === 'bandage') return 'bandage';
+  if (item.kind === 'bandage' || item.kind === 'consumable') {
+    const normalized = normalizeConsumableItem(item);
+    return normalized?.key ?? 'bandage';
+  }
+  if (item.kind === 'equipment') {
+    const normalized = normalizeEquipmentItem(item);
+    return normalized ? `equip_${normalized.key}` : null;
+  }
+  if (item.kind === 'throwable') {
+    const normalized = normalizeThrowableItem(item);
+    return normalized?.key ?? null;
+  }
   if (item.kind === 'material') return item.key;
   return null;
 }

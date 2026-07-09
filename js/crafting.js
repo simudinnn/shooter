@@ -1,22 +1,202 @@
 import { MATERIAL_STACK_MAX, getMaterialDisplayName } from './materials.js';
 import { getItemDisplayName } from './loot.js';
-import { AMMO_STACK_MAX, BANDAGE_STACK_MAX } from './ammo.js';
+import { AMMO_STACK_MAX } from './ammo.js';
+import { CONSUMABLE_STACK_MAX, normalizeConsumableItem } from './consumables.js';
+import { normalizeEquipmentItem } from './equipment.js';
+import { normalizeThrowableItem } from './throwables.js';
+
+export const CRAFT_MAX_MATERIALS = 4;
 
 export const CRAFT_RECIPES = [
   {
     id: 'bandage',
-    output: { kind: 'bandage', amount: 1 },
+    output: { kind: 'consumable', key: 'bandage', amount: 1 },
     costs: { cloth: 2, adhesive: 1 },
   },
   {
     id: 'pistol_ammo',
     output: { kind: 'ammo', ammoType: 'pistol', amount: 12 },
-    costs: { metal: 2, chemicals: 1, plastic: 1 },
+    costs: { metal: 2, chemicals: 1},
   },
   {
     id: 'shotgun_ammo',
     output: { kind: 'ammo', ammoType: 'shotgun', amount: 6 },
     costs: { metal: 2, chemicals: 1, plastic: 1 },
+  },
+  {
+    id: 'rifle_ammo',
+    output: { kind: 'ammo', ammoType: 'rifle', amount: 15 },
+    costs: { metal: 3, chemicals: 2},
+  },
+  {
+    id: 'sniper_ammo',
+    output: { kind: 'ammo', ammoType: 'sniper', amount: 6 },
+    costs: { metal: 3, chemicals: 2, plastic: 2 },
+  },
+  {
+    id: 'spring',
+    output: { kind: 'material', key: 'spring', amount: 1 },
+    costs: { metal: 3 },
+  },
+  {
+    id: 'mechanical_comp',
+    output: { kind: 'material', key: 'mechanical_comp', amount: 1 },
+    costs: { metal: 3, spring: 2 },
+  },
+  {
+    id: 'electrical_comp',
+    output: { kind: 'material', key: 'electrical_comp', amount: 1 },
+    costs: { plastic: 3, microchip: 3 },
+  },
+  {
+    id: 'repair_kit',
+    output: { kind: 'material', key: 'repair_kit', amount: 1 },
+    costs: { metal: 3, tape: 2, adhesive: 2 },
+  },
+  {
+    id: 'sewing_kit',
+    output: { kind: 'material', key: 'sewing_kit', amount: 1 },
+    costs: { cloth: 3, rope: 2, fabric: 3 },
+  },
+  {
+    id: 'splint_kit',
+    output: { kind: 'material', key: 'splint_kit', amount: 1 },
+    costs: { plank: 3, tape: 2 },
+  },
+  {
+    id: 'upgrade_kit',
+    output: { kind: 'material', key: 'upgrade_kit', amount: 1 },
+    costs: { metal: 3, mechanical_comp: 2 },
+  },
+  {
+    id: 'fabric',
+    output: { kind: 'material', key: 'fabric', amount: 1 },
+    costs: { cloth: 2 },
+  },
+  {
+    id: 'fuel',
+    output: { kind: 'material', key: 'fuel', amount: 1 },
+    costs: { plastic: 3, chemicals: 3 },
+  },
+  {
+    id: 'battery',
+    output: { kind: 'material', key: 'battery', amount: 1 },
+    costs: { metal: 2, chemicals: 3 },
+  },
+  {
+    id: 'glock',
+    output: { kind: 'weapon', key: 'glock' },
+    costs: { gun_parts: 1, metal: 3, spring: 1 },
+  },
+  {
+    id: 'revolver',
+    output: { kind: 'weapon', key: 'revolver' },
+    costs: { gun_parts: 2, metal: 4, spring: 2 },
+  },
+  {
+    id: 'uzi',
+    output: { kind: 'weapon', key: 'uzi' },
+    costs: { gun_parts: 2, metal: 5, spring: 2, mechanical_comp: 1 },
+  },
+  {
+    id: 'm870',
+    output: { kind: 'weapon', key: 'm870' },
+    costs: { gun_parts: 2, metal: 4, wood: 2, mechanical_comp: 1 },
+  },
+  {
+    id: 'm16',
+    output: { kind: 'weapon', key: 'm16' },
+    costs: { gun_parts: 3, metal: 6, mechanical_comp: 2, spring: 2 },
+  },
+  {
+    id: 'famas',
+    output: { kind: 'weapon', key: 'famas' },
+    costs: { gun_parts: 3, metal: 5, mechanical_comp: 2, electrical_comp: 1 },
+  },
+  {
+    id: 'fal',
+    output: { kind: 'weapon', key: 'fal' },
+    costs: { gun_parts: 3, metal: 7, mechanical_comp: 3, military_comp: 1 },
+  },
+  {
+    id: 'm24',
+    output: { kind: 'weapon', key: 'm24' },
+    costs: { gun_parts: 3, metal: 6, mechanical_comp: 4, spring: 2 },
+  },
+  {
+    id: 'knife',
+    output: { kind: 'melee', key: 'knife' },
+    costs: { metal: 2 },
+  },
+  {
+    id: 'wooden_bat',
+    output: { kind: 'melee', key: 'wooden_bat' },
+    costs: { plank: 2, tape: 1 },
+  },
+  {
+    id: 'crowbar',
+    output: { kind: 'melee', key: 'crowbar' },
+    costs: { metal: 3, metal_pipe: 1 },
+  },
+  {
+    id: 'fire_axe',
+    output: { kind: 'melee', key: 'fire_axe' },
+    costs: { metal: 3, plank: 2, mechanical_comp: 1 },
+  },
+  {
+    id: 'grenade',
+    output: { kind: 'throwable', key: 'grenade' },
+    costs: { chemicals: 3, metal: 2, gun_parts: 1 },
+  },
+  {
+    id: 'molotov',
+    output: { kind: 'throwable', key: 'molotov' },
+    costs: { fuel: 1, glass_bottle: 1, cloth: 1 },
+  },
+  {
+    id: 'flare',
+    output: { kind: 'throwable', key: 'flare' },
+    costs: { chemicals: 2, plastic: 2, metal: 1 },
+  },
+  {
+    id: 'vest',
+    output: { kind: 'equipment', key: 'vest' },
+    costs: { fabric: 3, cloth: 2, tape: 1 },
+  },
+  {
+    id: 'hunting_vest',
+    output: { kind: 'equipment', key: 'hunting_vest' },
+    costs: { fabric: 4, cloth: 3, rope: 1 },
+  },
+  {
+    id: 'police_vest',
+    output: { kind: 'equipment', key: 'police_vest' },
+    costs: { fabric: 4, metal: 3, tape: 2 },
+  },
+  {
+    id: 'military_vest',
+    output: { kind: 'equipment', key: 'military_vest' },
+    costs: { fabric: 5, metal: 5, military_comp: 1, sewing_kit: 1 },
+  },
+  {
+    id: 'tool_belt',
+    output: { kind: 'equipment', key: 'tool_belt' },
+    costs: { fabric: 2, cloth: 3, metal: 2, tape: 2 },
+  },
+  {
+    id: 'backpack_1',
+    output: { kind: 'equipment', key: 'backpack_1' },
+    costs: { cloth: 4, rope: 2, fabric: 2 },
+  },
+  {
+    id: 'backpack2',
+    output: { kind: 'equipment', key: 'backpack2' },
+    costs: { cloth: 5, rope: 3, fabric: 3, sewing_kit: 1 },
+  },
+  {
+    id: 'backpack3',
+    output: { kind: 'equipment', key: 'backpack3' },
+    costs: { cloth: 6, rope: 3, fabric: 4, upgrade_kit: 1 },
   },
 ];
 
@@ -39,10 +219,36 @@ const RECYCLE_TABLE = {
     gun_parts: [{ key: 'metal', amount: 2 }, { key: 'spring', amount: 1 }],
     military_comp: [{ key: 'electrical_comp', amount: 2 }, { key: 'wires', amount: 2 }, { key: 'metal', amount: 3 }],
     nails: [{ key: 'metal', amount: 2 }],
+    spring: [{ key: 'metal', amount: 2 }],
+    battery: [{ key: 'metal', amount: 1 },{ key: 'chemicals', amount: 2 }],
     rope: [{ key: 'cloth', amount: 1 }],
     wires: [{ key: 'metal', amount: 1 }],
   },
 };
+
+export function getCraftableRecipes(player) {
+  return CRAFT_RECIPES.filter((recipe) => isRecipeUnlocked(player, recipe));
+}
+
+export function isRecipeUnlocked(player, recipe) {
+  const blueprintId = recipe.blueprint;
+  if (!blueprintId) return true;
+  const learned = player?.learnedBlueprints;
+  if (!learned) return false;
+  if (learned instanceof Set) return learned.has(blueprintId);
+  if (Array.isArray(learned)) return learned.includes(blueprintId);
+  return false;
+}
+
+export function recipeMaterialCosts(recipe, limit = CRAFT_MAX_MATERIALS) {
+  return Object.entries(recipe.costs ?? {})
+    .slice(0, limit)
+    .map(([key, amount]) => ({
+    kind: 'material',
+    key,
+    amount,
+  }));
+}
 
 export function getRecipeLabel(recipe) {
   return getItemDisplayName(recipe.output);
@@ -87,20 +293,34 @@ export function canStoreItem(player, item) {
     }
     return left <= 0;
   }
-  if (item.kind === 'bandage') {
-    let left = item.amount ?? 1;
+  if (item.kind === 'bandage' || item.kind === 'consumable') {
+    const normalized = normalizeConsumableItem(item);
+    if (!normalized) return false;
+    let left = normalized.amount ?? 1;
     for (let i = 0; i < player.itemSlots.length; i++) {
       if (!player.isItemSlotUnlocked(i)) continue;
       const slot = player.itemSlots[i];
-      if (slot?.kind === 'bandage') {
-        left -= Math.max(0, BANDAGE_STACK_MAX - (slot.amount ?? 1));
+      const slotItem = normalizeConsumableItem(slot);
+      if (slotItem?.key === normalized.key) {
+        left -= Math.max(0, CONSUMABLE_STACK_MAX - slotItem.amount);
       }
     }
     for (let i = 0; i < player.itemSlots.length && left > 0; i++) {
       if (!player.isItemSlotUnlocked(i)) continue;
-      if (player.itemSlots[i] == null) left -= BANDAGE_STACK_MAX;
+      if (player.itemSlots[i] == null) left -= CONSUMABLE_STACK_MAX;
     }
     return left <= 0;
+  }
+  if (item.kind === 'equipment') {
+    return !!normalizeEquipmentItem(item)
+      && player.itemSlots.some((s, i) => s == null && player.isItemSlotUnlocked(i));
+  }
+  if (item.kind === 'throwable') {
+    return !!normalizeThrowableItem(item)
+      && player.itemSlots.some((s, i) => s == null && player.isItemSlotUnlocked(i));
+  }
+  if (item.kind === 'weapon' || item.kind === 'melee') {
+    return player.itemSlots.some((s, i) => s == null && player.isItemSlotUnlocked(i));
   }
   if (item.kind === 'material') {
     return materialRoom(player, item.key, item.amount ?? 1);

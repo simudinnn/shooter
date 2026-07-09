@@ -115,12 +115,11 @@ function drawEntitySoftColliders(ctx, ent, worldToScreen, ppu = PPU) {
     }
   } else if (moveShape?.kind === 'circle') {
     const isPlayer = !ent?.type;
-    const s = isPlayer
-      ? worldToScreen(ent.x, ent.z + (moveShape.zOff ?? 0))
-      : worldToScreen(ent.x, ent.z);
+    const acz = ent.z + (moveShape.zOff ?? 0);
+    const s = worldToScreen(ent.x, acz);
     const feetOffPx = spriteFeetOffset(entityNativePx(ent), entitySpriteScale(ent));
     const cx = s.x;
-    const cy = isPlayer ? s.y : Math.round(s.y + feetOffPx);
+    const cy = Math.round(s.y + (moveShape.zOff != null ? 0 : feetOffPx));
     const r = (moveShape.radius ?? ent.radius ?? 0.5) * ppu;
 
     ctx.beginPath();
@@ -134,12 +133,17 @@ function drawEntitySoftColliders(ctx, ent, worldToScreen, ppu = PPU) {
     ctx.setLineDash([]);
   }
 
-  const hitShape = ent.getHitCollider?.(ppu);
-  if (hitShape?.kind === 'circle' && !ent?.type) {
-    const s = worldToScreen(ent.x, ent.z);
+  const hitShape = ent.getPushCollider?.(ppu) ?? ent.getHitCollider?.(ppu);
+  if (hitShape?.kind === 'circle') {
+    const acz = ent.z + (hitShape.zOff ?? 0);
+    const s = worldToScreen(ent.x, acz);
+    const feetOffPx = spriteFeetOffset(entityNativePx(ent), entitySpriteScale(ent));
+    const cx = s.x;
+    const cy = Math.round(s.y + (hitShape.zOff != null ? 0 : feetOffPx));
     const r = (hitShape.radius ?? ent.radius ?? 0.5) * ppu;
+
     ctx.beginPath();
-    ctx.arc(s.x, s.y, Math.max(3, r), 0, Math.PI * 2);
+    ctx.arc(cx, cy, Math.max(3, r), 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(80, 255, 120, 0.85)';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([3, 4]);

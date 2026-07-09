@@ -1,4 +1,4 @@
-import { TILE, hash01, hash32, foliageSpriteBounds } from './worldGen.js';
+import { TILE, hash01, hash32, foliageSpriteBounds, foliageIntersectsRect } from './worldGen.js';
 import { PPU } from './renderConfig.js';
 import { CHAR_NATIVE_PX, spriteFeetOffset, getEnemyNativePx, getEnemyDrawScale } from './sprites.js';
 import {
@@ -960,9 +960,24 @@ export function foliageOverlapsBuildingInterior(building, foliage) {
   );
 }
 
-/** Clear all foliage on the building footprint (walls + interior); exterior tiles keep grass. */
-export function buildingFoliageClearRects(building) {
-  return [getBuildingFootprintRect(building.originX, building.originZ, building.w, building.h)];
+/** Foliage sprite overlaps footprint plus exterior clear pad (trees/bushes near walls). */
+export function foliageOverlapsBuildingClearZone(building, foliage, padTiles = BUILDING_FOLIAGE_CLEAR_PAD_TILES) {
+  for (const rect of buildingFoliageClearRects(building, padTiles)) {
+    if (foliageIntersectsRect(foliage, rect.minX, rect.maxX, rect.minZ, rect.maxZ)) return true;
+  }
+  return false;
+}
+
+/** Clear foliage on footprint plus pad so large sprites do not clip walls/roofs. */
+export function buildingFoliageClearRects(building, padTiles = BUILDING_FOLIAGE_CLEAR_PAD_TILES) {
+  const rect = getBuildingFootprintRect(building.originX, building.originZ, building.w, building.h);
+  const pad = TILE * padTiles;
+  return [{
+    minX: rect.minX - pad,
+    maxX: rect.maxX + pad,
+    minZ: rect.minZ - pad,
+    maxZ: rect.maxZ + pad,
+  }];
 }
 
 /** @deprecated — use buildingFoliageClearRects */
@@ -1044,6 +1059,8 @@ export function computeInteriorBounds(originX, originZ, w, h, cells) {
 
 /** Minimum clear tile gap between building footprints (roof grid bbox). */
 export const BUILDING_MIN_GAP_TILES = 4;
+/** Clear foliage this many tiles beyond the roof footprint (large y-sort sprites). */
+export const BUILDING_FOLIAGE_CLEAR_PAD_TILES = 5;
 
 export function getBuildingFootprintRect(originX, originZ, w, h) {
   return {

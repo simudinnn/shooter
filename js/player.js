@@ -3,6 +3,15 @@ import { bulletOwnerFeetZ } from './bulletCollision.js';
 import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX } from './sprites.js';
 import { AMMO_STACK_MAX, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
 import { MATERIAL_STACK_MAX, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
+import {
+  CONSUMABLE_STACK_MAX,
+  getConsumableHealAmount,
+  isQuickEquipItem,
+  mergeConsumableStacks,
+  normalizeConsumableItem,
+} from './consumables.js';
+import { isEquipmentItem, normalizeEquipmentItem } from './equipment.js';
+import { isThrowableItem, normalizeThrowableItem } from './throwables.js';
 
 export const GUN_HOLD_OFFSET = 1.1;
 /** Extra distance from gun hold point to barrel tip (world units). */
@@ -19,9 +28,10 @@ export const PLAYER_SPRITE_SCALE = 1.5;
 
 const SCREEN_PPU = 5.5;
 
-export const ITEM_STORAGE_SIZE = 20;
-export const UNLOCKED_ITEM_SLOTS = 20;
+export const ITEM_STORAGE_SIZE = 25;
+export const UNLOCKED_ITEM_SLOTS = 25;
 export const EQUIPMENT_SLOT_COUNT = 4;
+export const HAND_SLOT_COUNT = 2;
 
 export const WEAPONS = {
   glock: {
@@ -258,6 +268,7 @@ export class Player {
     this.health = 100;
     this.alive = true;
     this.radius = PLAYER_HIT_RADIUS;
+    this.learnedBlueprints = new Set();
     this.isMoving = false;
     this.isSprinting = false;
     this.moveSpeed = 0;
@@ -290,10 +301,18 @@ export class Player {
     this.powerUps = { speed: { until: 0 }, damage: { mult: 1.5, until: 0 } };
     this.itemSlots = Array(ITEM_STORAGE_SIZE).fill(null);
     this.equipmentSlots = Array(EQUIPMENT_SLOT_COUNT).fill(null);
-    this.weaponKey = 'glock';
-    this.weapon = this._buildWeaponRuntime('glock', WEAPONS.glock.magSize);
+    this.handSlots = [null, null];
+    this.activeHandSlot = 0;
+    this.quickSlot = null;
+    this.throwableSlot = null;
+    this.handSlots[0] = { kind: 'weapon', key: 'glock', ammo: WEAPONS.glock.magSize };
+    this.handSlots[1] = { kind: 'melee', key: 'wooden_bat' };
+    this.weaponKey = null;
+    this.weapon = null;
+    this.meleeKey = null;
+    this._applyActiveHand();
     this.itemSlots[0] = { kind: 'ammo', ammoType: 'pistol', amount: 30 };
-    this.itemSlots[1] = { kind: 'bandage', amount: 1 };
+    this.itemSlots[1] = { kind: 'consumable', key: 'bandage', amount: 1 };
   }
 
   /** Hydrate player from a save snapshot. */
@@ -305,10 +324,25 @@ export class Player {
     this.maxHealth = data.maxHealth ?? 100;
     this.shield = data.shield ?? 0;
     this.alive = data.alive !== false;
-    this.weaponSlot = data.weaponSlot ?? 'gun';
-    this.meleeKey = data.meleeKey ?? 'wooden_bat';
     this.itemSlots = data.itemSlots.map((s) => (s ? { ...s } : null));
     this.equipmentSlots = data.equipmentSlots.map((s) => (s ? { ...s } : null));
+    this.quickSlot = data.quickSlot ? { ...data.quickSlot } : null;
+    this.throwableSlot = data.throwableSlot ? { ...data.throwableSlot } : null;
+    if (Array.isArray(data.handSlots)) {
+      this.handSlots = data.handSlots.map((s) => (s ? { ...s } : null));
+      this.activeHandSlot = data.activeHandSlot === 1 ? 1 : 0;
+    } else {
+      this.handSlots = [null, null];
+      if (data.weaponKey && WEAPONS[data.weaponKey]) {
+        const ammo = data.weaponAmmo ?? WEAPONS[data.weaponKey].magSize;
+        this.handSlots[0] = { kind: 'weapon', key: data.weaponKey, ammo };
+      }
+      if (data.meleeKey && MELEE_WEAPONS[data.meleeKey]) {
+        this.handSlots[1] = { kind: 'melee', key: data.meleeKey };
+      }
+      this.activeHandSlot = (data.weaponSlot === 'melee') ? 1 : 0;
+    }
+    this.learnedBlueprints = new Set(data.learnedBlueprints ?? []);
     this.powerUps = {
       speed: { until: data.powerUps?.speed?.until ?? 0 },
       damage: {
@@ -326,15 +360,7 @@ export class Player {
       hitApplied: false,
     };
     this.reloadAim = { phase: 'idle', fromAngle: 0, lowerStart: 0 };
-
-    if (data.weaponKey && WEAPONS[data.weaponKey]) {
-      this.weaponKey = data.weaponKey;
-      const ammo = data.weaponAmmo ?? WEAPONS[data.weaponKey].magSize;
-      this.weapon = this._buildWeaponRuntime(data.weaponKey, ammo);
-    } else {
-      this.weaponKey = null;
-      this.weapon = null;
-    }
+    this._applyActiveHand();
   }
 
   _normalizeWeaponItem(item) {
@@ -370,8 +396,18 @@ export class Player {
     };
   }
 
-  getHitCollider() {
-    return { kind: 'circle', radius: this.radius };
+  /** Smaller feet-level circle for entity push / bump. */
+  getPushCollider(ppu = 8) {
+    const move = this.getMoveCollider(ppu);
+    return {
+      kind: 'circle',
+      radius: move.radius * 0.88,
+      zOff: move.zOff,
+    };
+  }
+
+  getHitCollider(ppu = 8) {
+    return this.getPushCollider(ppu);
   }
 
   _cancelActiveReload() {
@@ -386,6 +422,251 @@ export class Player {
   _meleeItemFromEquipped() {
     if (!this.meleeKey) return null;
     return { kind: 'melee', key: this.meleeKey };
+  }
+
+  _normalizeHandItem(item) {
+    if (!item) return null;
+    if (item.kind === 'weapon') return this._normalizeWeaponItem(item);
+    if (item.kind === 'melee' && MELEE_WEAPONS[item.key]) return { kind: 'melee', key: item.key };
+    return null;
+  }
+
+  _persistActiveHand() {
+    const i = this.activeHandSlot;
+    if (this.weaponSlot === 'gun' && this.weaponKey && this.weapon) {
+      this.handSlots[i] = { kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo ?? 0 };
+    } else if (this.weaponSlot === 'melee' && this.meleeKey) {
+      this.handSlots[i] = { kind: 'melee', key: this.meleeKey };
+    } else {
+      this.handSlots[i] = null;
+    }
+  }
+
+  _applyActiveHand() {
+    const item = this.handSlots[this.activeHandSlot];
+    this.weaponKey = null;
+    this.weapon = null;
+    this.meleeKey = null;
+    if (!item) {
+      this.weaponSlot = 'gun';
+      return;
+    }
+    if (item.kind === 'weapon' && WEAPONS[item.key]) {
+      this.weaponKey = item.key;
+      this.weapon = this._buildWeaponRuntime(item.key, item.ammo ?? WEAPONS[item.key].magSize);
+      this.weaponSlot = 'gun';
+      return;
+    }
+    if (item.kind === 'melee' && MELEE_WEAPONS[item.key]) {
+      this.meleeKey = item.key;
+      this.weaponSlot = 'melee';
+      this.melee.charging = false;
+      return;
+    }
+    this.handSlots[this.activeHandSlot] = null;
+    this.weaponSlot = 'gun';
+  }
+
+  getHandSlotItem(index) {
+    const item = this.handSlots[index];
+    if (!item) return null;
+    if (item.kind === 'weapon') {
+      return { kind: 'weapon', key: item.key, ammo: item.ammo ?? 0 };
+    }
+    if (item.kind === 'melee') return { kind: 'melee', key: item.key };
+    return null;
+  }
+
+  _preferredHandSlotForItem(item) {
+    if (!this.handSlots[this.activeHandSlot]) return this.activeHandSlot;
+    if (!this.handSlots[1 - this.activeHandSlot]) return 1 - this.activeHandSlot;
+    return this.activeHandSlot;
+  }
+
+  setActiveHandSlot(index) {
+    if (index !== 0 && index !== 1) return false;
+    if (index === this.activeHandSlot) {
+      this._applyActiveHand();
+      return true;
+    }
+    this._persistActiveHand();
+    if (this.weaponSlot === 'gun' && this.weaponKey) {
+      this.casingMidEmitted = true;
+      this.casingCooldownWeaponKey = null;
+    }
+    this._abortReloadForMeleeSwitch();
+    this.activeHandSlot = index;
+    this._applyActiveHand();
+    this.melee.charging = false;
+    return true;
+  }
+
+  equipIntoHandSlot(handIndex, incomingItem, inventorySlotIndex = null) {
+    if (handIndex !== 0 && handIndex !== 1) return false;
+    if (inventorySlotIndex != null && !this.isItemSlotUnlocked(inventorySlotIndex)) return false;
+    const incoming = this._normalizeHandItem(incomingItem);
+    if (!incoming) return false;
+    const outgoing = this.getHandSlotItem(handIndex);
+    if (handIndex === this.activeHandSlot) {
+      if (incoming.kind === 'melee') this._abortReloadForMeleeSwitch();
+      else this._cancelActiveReload();
+    }
+    if (incoming.kind === 'weapon') {
+      this.handSlots[handIndex] = {
+        kind: 'weapon',
+        key: incoming.key,
+        ammo: incoming.ammo ?? WEAPONS[incoming.key].magSize,
+      };
+    } else {
+      this.handSlots[handIndex] = { kind: 'melee', key: incoming.key };
+    }
+    if (inventorySlotIndex != null) {
+      this.itemSlots[inventorySlotIndex] = outgoing;
+    }
+    if (handIndex === this.activeHandSlot) {
+      this._applyActiveHand();
+      if (incoming.kind === 'weapon') {
+        this.casingMidEmitted = true;
+        this.casingCooldownWeaponKey = null;
+      }
+    }
+    return true;
+  }
+
+  suspendHandSlotForDrag(handIndex) {
+    const item = this.getHandSlotItem(handIndex);
+    if (!item) return null;
+    this.handSlots[handIndex] = null;
+    if (handIndex === this.activeHandSlot) {
+      if (item.kind === 'weapon') {
+        this._cancelActiveReload();
+        this.weaponKey = null;
+        this.weapon = null;
+      } else {
+        this._abortReloadForMeleeSwitch();
+        this.meleeKey = null;
+        if (this.weaponSlot === 'melee') this.weaponSlot = 'gun';
+      }
+    }
+    return item;
+  }
+
+  restoreHandSlot(handIndex, item) {
+    const normalized = this._normalizeHandItem(item);
+    if (!normalized) return;
+    if (normalized.kind === 'weapon') {
+      this.handSlots[handIndex] = {
+        kind: 'weapon',
+        key: normalized.key,
+        ammo: normalized.ammo ?? WEAPONS[normalized.key]?.magSize ?? 0,
+      };
+    } else {
+      this.handSlots[handIndex] = { kind: 'melee', key: normalized.key };
+    }
+    if (handIndex === this.activeHandSlot) this._applyActiveHand();
+  }
+
+  canPlaceQuickItem(item) {
+    return isQuickEquipItem(item);
+  }
+
+  equipQuickFromInventory(slotIndex) {
+    if (!this.isItemSlotUnlocked(slotIndex)) return false;
+    const item = this.itemSlots[slotIndex];
+    const incoming = normalizeConsumableItem(item);
+    if (!incoming) return false;
+    const outgoing = this.quickSlot ? normalizeConsumableItem(this.quickSlot) : null;
+    this.quickSlot = { ...incoming };
+    this.itemSlots[slotIndex] = outgoing;
+    return true;
+  }
+
+  suspendQuickSlotForDrag() {
+    const item = this.quickSlot ? normalizeConsumableItem(this.quickSlot) : null;
+    this.quickSlot = null;
+    return item;
+  }
+
+  restoreQuickSlot(item) {
+    const normalized = normalizeConsumableItem(item);
+    if (!normalized) return;
+    this.quickSlot = { ...normalized };
+  }
+
+  canPlaceThrowableItem(item) {
+    return isThrowableItem(item);
+  }
+
+  equipThrowableFromInventory(slotIndex) {
+    if (!this.isItemSlotUnlocked(slotIndex)) return false;
+    const item = this.itemSlots[slotIndex];
+    const incoming = normalizeThrowableItem(item);
+    if (!incoming) return false;
+    const outgoing = this.throwableSlot ? normalizeThrowableItem(this.throwableSlot) : null;
+    this.throwableSlot = { ...incoming };
+    this.itemSlots[slotIndex] = outgoing;
+    return true;
+  }
+
+  suspendThrowableSlotForDrag() {
+    const item = this.throwableSlot ? normalizeThrowableItem(this.throwableSlot) : null;
+    this.throwableSlot = null;
+    return item;
+  }
+
+  restoreThrowableSlot(item) {
+    const normalized = normalizeThrowableItem(item);
+    if (!normalized) return;
+    this.throwableSlot = { ...normalized };
+  }
+
+  canPlaceEquipmentItem(item) {
+    return isEquipmentItem(item);
+  }
+
+  equipEquipmentFromInventory(slotIndex, equipmentIndex) {
+    if (!this.isItemSlotUnlocked(slotIndex)) return false;
+    if (equipmentIndex < 0 || equipmentIndex >= EQUIPMENT_SLOT_COUNT) return false;
+    const item = this.itemSlots[slotIndex];
+    const incoming = normalizeEquipmentItem(item);
+    if (!incoming) return false;
+    const outgoing = this.equipmentSlots[equipmentIndex];
+    this.equipmentSlots[equipmentIndex] = { ...incoming };
+    this.itemSlots[slotIndex] = outgoing;
+    return true;
+  }
+
+  suspendEquipmentForDrag(equipmentIndex) {
+    if (equipmentIndex < 0 || equipmentIndex >= EQUIPMENT_SLOT_COUNT) return null;
+    const item = this.equipmentSlots[equipmentIndex];
+    if (!item) return null;
+    this.equipmentSlots[equipmentIndex] = null;
+    return { ...item };
+  }
+
+  restoreEquipmentSlot(equipmentIndex, item) {
+    const normalized = normalizeEquipmentItem(item);
+    if (!normalized || equipmentIndex < 0 || equipmentIndex >= EQUIPMENT_SLOT_COUNT) return;
+    this.equipmentSlots[equipmentIndex] = { ...normalized };
+  }
+
+  useQuickSlot() {
+    const item = normalizeConsumableItem(this.quickSlot);
+    if (!item) return false;
+    const heal = getConsumableHealAmount(item.key);
+    if (heal > 0) {
+      if (this.health >= this.maxHealth) return false;
+      if (!this.heal(heal)) return false;
+      const left = (item.amount ?? 1) - 1;
+      if (left <= 0) this.quickSlot = null;
+      else this.quickSlot = { kind: 'consumable', key: item.key, amount: left };
+      return true;
+    }
+    return false;
+  }
+
+  useThrowableSlot() {
+    return false;
   }
 
   _buildWeaponRuntime(key, ammo = null) {
@@ -415,35 +696,32 @@ export class Player {
     return this.equipWeaponIntoSlot(slotIndex, incoming);
   }
 
-  /** Equip a gun into the main hand; previous main weapon goes into slotIndex. */
+  /** Equip a gun into a hand slot; previous hand item goes into slotIndex. */
   equipWeaponIntoSlot(slotIndex, incomingItem) {
     if (!this.isItemSlotUnlocked(slotIndex)) return false;
     const incoming = this._normalizeWeaponItem(incomingItem);
-    if (!incoming || incoming.kind !== 'weapon' || !WEAPONS[incoming.key]) return false;
-    this._cancelActiveReload();
-    const outgoing = this._weaponItemFromEquipped();
-    this.weaponKey = incoming.key;
-    this.weapon = this._buildWeaponRuntime(incoming.key, incoming.ammo);
-    this.weaponSlot = 'gun';
-    if (incoming.key !== this.casingCooldownWeaponKey) {
+    if (!incoming || !WEAPONS[incoming.key]) return false;
+    return this.equipIntoHandSlot(this._preferredHandSlotForItem(incoming), incoming, slotIndex);
+  }
+
+  /** Equip a gun from a chest slot; previous hand item goes into that chest slot. */
+  equipWeaponFromChest(chestSlots, chestIndex, item, handIndex = null) {
+    const incoming = this._normalizeWeaponItem(item);
+    if (!WEAPONS[incoming.key]) return false;
+    const targetHand = handIndex ?? this._preferredHandSlotForItem(incoming);
+    const outgoing = this.getHandSlotItem(targetHand);
+    if (targetHand === this.activeHandSlot) this._cancelActiveReload();
+    this.handSlots[targetHand] = {
+      kind: 'weapon',
+      key: incoming.key,
+      ammo: incoming.ammo ?? WEAPONS[incoming.key].magSize,
+    };
+    chestSlots[chestIndex] = outgoing;
+    if (targetHand === this.activeHandSlot) {
+      this._applyActiveHand();
       this.casingMidEmitted = true;
       this.casingCooldownWeaponKey = null;
     }
-    this.itemSlots[slotIndex] = outgoing;
-    return true;
-  }
-
-  /** Equip a gun from a chest slot; previous main weapon goes into that chest slot. */
-  equipWeaponFromChest(chestSlots, chestIndex, item) {
-    const incoming = this._normalizeWeaponItem(item);
-    if (!WEAPONS[incoming.key]) return false;
-    this._cancelActiveReload();
-    chestSlots[chestIndex] = this._weaponItemFromEquipped();
-    this.weaponKey = incoming.key;
-    this.weapon = this._buildWeaponRuntime(incoming.key, incoming.ammo);
-    this.weaponSlot = 'gun';
-    this.casingMidEmitted = true;
-    this.casingCooldownWeaponKey = null;
     return true;
   }
 
@@ -456,56 +734,41 @@ export class Player {
     if (!this.isItemSlotUnlocked(slotIndex)) return false;
     const incoming = incomingItem ?? this.itemSlots[slotIndex];
     if (!incoming || incoming.kind !== 'melee' || !MELEE_WEAPONS[incoming.key]) return false;
-    if (incoming.key === this.meleeKey && this.weaponSlot === 'melee') return false;
-    this._abortReloadForMeleeSwitch();
-    const outgoing = this._meleeItemFromEquipped();
-    this.meleeKey = incoming.key;
-    this.weaponSlot = 'melee';
-    this.melee.charging = false;
-    this.itemSlots[slotIndex] = outgoing;
-    return true;
+    const handIndex = this._preferredHandSlotForItem(incoming);
+    if (handIndex === this.activeHandSlot && this.getHandSlotItem(handIndex)?.key === incoming.key) {
+      return false;
+    }
+    return this.equipIntoHandSlot(handIndex, incoming, slotIndex);
   }
 
-  equipMeleeFromChest(chestSlots, chestIndex, item) {
+  equipMeleeFromChest(chestSlots, chestIndex, item, handIndex = null) {
     if (!item || item.kind !== 'melee' || !MELEE_WEAPONS[item.key]) return false;
-    this._abortReloadForMeleeSwitch();
-    chestSlots[chestIndex] = this._meleeItemFromEquipped();
-    this.meleeKey = item.key;
-    this.weaponSlot = 'melee';
-    this.melee.charging = false;
+    const targetHand = handIndex ?? this._preferredHandSlotForItem(item);
+    const outgoing = this.getHandSlotItem(targetHand);
+    if (targetHand === this.activeHandSlot) this._abortReloadForMeleeSwitch();
+    this.handSlots[targetHand] = { kind: 'melee', key: item.key };
+    chestSlots[chestIndex] = outgoing;
+    if (targetHand === this.activeHandSlot) {
+      this._applyActiveHand();
+      this.melee.charging = false;
+    }
     return true;
   }
 
   suspendMainWeaponForDrag() {
-    const item = this._weaponItemFromEquipped();
-    if (!item) return null;
-    this._cancelActiveReload();
-    this.weaponKey = null;
-    this.weapon = null;
-    return item;
+    return this.suspendHandSlotForDrag(0);
   }
 
   restoreMainWeapon(item) {
-    if (!item || item.kind !== 'weapon' || !WEAPONS[item.key]) return;
-    this.weaponKey = item.key;
-    this.weapon = this._buildWeaponRuntime(item.key, item.ammo ?? 0);
-    this.weaponSlot = 'gun';
+    this.restoreHandSlot(0, item);
   }
 
   suspendMeleeForDrag() {
-    const item = this._meleeItemFromEquipped();
-    if (!item) return null;
-    this._abortReloadForMeleeSwitch();
-    if (this.weaponSlot === 'melee') this.weaponSlot = 'gun';
-    this.meleeKey = null;
-    return item;
+    return this.suspendHandSlotForDrag(1);
   }
 
   restoreMeleeWeapon(item) {
-    if (!item || item.kind !== 'melee' || !MELEE_WEAPONS[item.key]) return;
-    this.meleeKey = item.key;
-    this.weaponSlot = 'melee';
-    this.melee.charging = false;
+    this.restoreHandSlot(1, item);
   }
 
   hasEquippedMelee() {
@@ -617,26 +880,31 @@ export class Player {
     return amount - left;
   }
 
-  addBandageToInventory(amount = 1) {
+  addConsumableToInventory(key, amount = 1) {
     let left = Math.max(1, Math.floor(amount));
     for (let i = 0; i < this.itemSlots.length && left > 0; i++) {
       if (!this.isItemSlotUnlocked(i)) continue;
       const slot = this.itemSlots[i];
-      if (slot?.kind !== 'bandage') continue;
-      const room = BANDAGE_STACK_MAX - (slot.amount ?? 1);
+      const normalized = normalizeConsumableItem(slot);
+      if (!normalized || normalized.key !== key) continue;
+      const room = CONSUMABLE_STACK_MAX - (normalized.amount ?? 1);
       if (room <= 0) continue;
       const add = Math.min(room, left);
-      slot.amount = (slot.amount ?? 1) + add;
+      this.itemSlots[i] = { kind: 'consumable', key, amount: normalized.amount + add };
       left -= add;
     }
     while (left > 0) {
       const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
       if (idx < 0) break;
-      const add = Math.min(left, BANDAGE_STACK_MAX);
-      this.itemSlots[idx] = { kind: 'bandage', amount: add };
+      const add = Math.min(left, CONSUMABLE_STACK_MAX);
+      this.itemSlots[idx] = { kind: 'consumable', key, amount: add };
       left -= add;
     }
     return amount - left;
+  }
+
+  addBandageToInventory(amount = 1) {
+    return this.addConsumableToInventory('bandage', amount);
   }
 
   countMaterial(key) {
@@ -647,6 +915,17 @@ export class Player {
       if (slot?.kind === 'material' && slot.key === key) total += slot.amount ?? 1;
     }
     return total;
+  }
+
+  hasLearnedBlueprint(id) {
+    return !!id && (this.learnedBlueprints?.has(id) ?? false);
+  }
+
+  learnBlueprint(id) {
+    if (!id) return false;
+    if (!this.learnedBlueprints) this.learnedBlueprints = new Set();
+    this.learnedBlueprints.add(id);
+    return true;
   }
 
   hasMaterials(costs) {
@@ -714,14 +993,34 @@ export class Player {
       }
       return { ok: false, remainder: item };
     }
-    if (item.kind === 'bandage') {
-      const amount = item.amount ?? 1;
-      const stored = this.addBandageToInventory(amount);
-      if (stored >= amount) return { ok: true, remainder: null };
+    if (item.kind === 'bandage' || item.kind === 'consumable') {
+      const normalized = normalizeConsumableItem(item);
+      if (!normalized) return { ok: false, remainder: item };
+      const stored = this.addConsumableToInventory(normalized.key, normalized.amount);
+      if (stored >= normalized.amount) return { ok: true, remainder: null };
       if (stored > 0) {
-        return { ok: true, remainder: { kind: 'bandage', amount: amount - stored } };
+        return {
+          ok: true,
+          remainder: { kind: 'consumable', key: normalized.key, amount: normalized.amount - stored },
+        };
       }
       return { ok: false, remainder: item };
+    }
+    if (item.kind === 'equipment') {
+      const normalized = normalizeEquipmentItem(item);
+      if (!normalized) return { ok: false, remainder: item };
+      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      if (idx < 0) return { ok: false, remainder: item };
+      this.itemSlots[idx] = { ...normalized };
+      return { ok: true, remainder: null };
+    }
+    if (item.kind === 'throwable') {
+      const normalized = normalizeThrowableItem(item);
+      if (!normalized) return { ok: false, remainder: item };
+      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      if (idx < 0) return { ok: false, remainder: item };
+      this.itemSlots[idx] = { ...normalized };
+      return { ok: true, remainder: null };
     }
     if (item.kind === 'material') {
       const normalized = normalizeMaterialItem(item);
@@ -774,9 +1073,12 @@ export class Player {
 
   equipMelee(key) {
     if (!MELEE_WEAPONS[key]) return false;
-    this._abortReloadForMeleeSwitch();
-    this.meleeKey = key;
-    this.weaponSlot = 'melee';
+    const handIndex = this.handSlots[0]?.kind === 'melee' ? 0
+      : (this.handSlots[1]?.kind === 'melee' ? 1 : this._preferredHandSlotForItem({ kind: 'melee', key }));
+    if (handIndex === this.activeHandSlot) this._abortReloadForMeleeSwitch();
+    this.handSlots[handIndex] = { kind: 'melee', key };
+    if (handIndex !== this.activeHandSlot) this.setActiveHandSlot(handIndex);
+    else this._applyActiveHand();
     this.melee.charging = false;
     return true;
   }
@@ -825,9 +1127,7 @@ export class Player {
   }
 
   toggleWeaponSlot() {
-    if (this.isMeleeActive()) return this.setWeaponSlot('gun');
-    if (this.meleeKey) return this.equipMelee(this.meleeKey);
-    return this.setWeaponSlot('melee');
+    return this.setActiveHandSlot(1 - this.activeHandSlot);
   }
 
   swapItemSlots(a, b) {
@@ -849,17 +1149,9 @@ export class Player {
   }
 
   setWeaponSlot(slot) {
-    if (slot !== 'gun' && slot !== 'melee') return false;
-    if (slot === 'melee') {
-      this._abortReloadForMeleeSwitch();
-      if (this.weaponSlot === 'gun') {
-        this.casingMidEmitted = true;
-        this.casingCooldownWeaponKey = null;
-      }
-    }
-    this.melee.charging = false;
-    this.weaponSlot = slot;
-    return true;
+    if (slot === 'gun') return this.setActiveHandSlot(0);
+    if (slot === 'melee') return this.setActiveHandSlot(1);
+    return false;
   }
 
   isMeleeActive() {
@@ -879,17 +1171,16 @@ export class Player {
 
   getWeaponCycleList() {
     const list = [];
-    if (this.weaponKey) {
-      list.push({ type: 'gun', key: this.weaponKey, slot: null });
+    for (let h = 0; h < HAND_SLOT_COUNT; h++) {
+      const item = this.getHandSlotItem(h);
+      if (item?.kind === 'weapon') list.push({ type: 'gun', key: item.key, slot: null, hand: h });
+      if (item?.kind === 'melee') list.push({ type: 'melee', key: item.key, slot: null, hand: h });
     }
     for (let i = 0; i < this.itemSlots.length; i++) {
       if (!this.isItemSlotUnlocked(i)) continue;
       const s = this.itemSlots[i];
       if (s?.kind === 'weapon') list.push({ type: 'gun', key: s.key, slot: i });
       if (s?.kind === 'melee') list.push({ type: 'melee', key: s.key, slot: i });
-    }
-    if (this.meleeKey) {
-      list.push({ type: 'melee', key: this.meleeKey, slot: null });
     }
     return list;
   }
@@ -898,23 +1189,26 @@ export class Player {
     const list = this.getWeaponCycleList();
     if (list.length <= 1) return false;
 
-    let idx = list.findIndex((s) => (
-      s.type === 'melee'
-        ? this.isMeleeActive() && s.key === this.meleeKey && s.slot == null
-        : !this.isMeleeActive() && s.key === this.weaponKey && s.slot == null
-    ));
+    let idx = list.findIndex((s) => {
+      if (s.hand != null) {
+        return s.hand === this.activeHandSlot
+          && ((s.type === 'melee' && this.isMeleeActive() && s.key === this.meleeKey)
+            || (s.type === 'gun' && !this.isMeleeActive() && s.key === this.weaponKey));
+      }
+      return false;
+    });
     if (idx < 0) idx = 0;
 
     const next = list[(idx + delta + list.length) % list.length];
+    if (next.hand != null) {
+      return this.setActiveHandSlot(next.hand);
+    }
     if (next.type === 'melee') {
       if (next.slot != null) return this.equipMeleeFromSlot(next.slot);
-      if (this.isMeleeActive() && next.key === this.meleeKey) return false;
       return this.equipMelee(next.key);
     }
     if (next.slot != null) return this.swapItemSlotWithMain(next.slot);
-    if (!this.isMeleeActive() && next.key === this.weaponKey) return false;
-    this.setWeaponSlot('gun');
-    return true;
+    return false;
   }
 
   getDisplayWeapon() {

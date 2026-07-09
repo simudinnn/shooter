@@ -3,6 +3,7 @@ import {
   CHUNK_TILES,
   CHUNK_WORLD,
   BASE_RADIUS,
+  PLAYER_SPAWN_TOWN_CLEARANCE_TILES,
   FLOOR_KIND,
   generateChunk,
   populateChunkFoliage,
@@ -36,6 +37,8 @@ import {
   isHighwayTile,
   isInWorldBoundsTile,
   ROAD_CLEARANCE_TILES,
+  getNearbyTownAnchors,
+  townHalf,
 } from './highwayGen.js';
 
 export { TILE, CHUNK_TILES, CHUNK_WORLD, BASE_RADIUS } from './worldGen.js';
@@ -147,14 +150,6 @@ export class World {
     return false;
   }
 
-  _clearFoliageNearRoad(tx, tz, clearance = ROAD_CLEARANCE_TILES) {
-    const minX = (tx - clearance) * TILE;
-    const maxX = (tx + clearance + 1) * TILE;
-    const minZ = (tz - clearance) * TILE;
-    const maxZ = (tz + clearance + 1) * TILE;
-    this.clearFoliageInRect(minX, maxX, minZ, maxZ);
-  }
-
   /** Persist town roads/paths so they survive chunk eviction. */
   registerTownFloorTiles(tiles) {
     for (const { tx, tz, kind } of tiles) {
@@ -173,6 +168,7 @@ export class World {
   _applyTownFloorToChunk(chunk) {
     if (!chunk || chunk.outOfBounds || this._townFloorTiles.size === 0) return;
     let dirty = false;
+    let foliageDirty = false;
     for (const tile of chunk.tiles) {
       const kind = this._townFloorTiles.get(`${tile.tx},${tile.tz}`);
       if (!kind) continue;
@@ -181,18 +177,28 @@ export class World {
         dirty = true;
       }
       if (kind !== FLOOR_KIND) chunk.hasOverlayFloors = true;
+      if (chunk.foliagePopulated && kind !== FLOOR_KIND) {
+        const minX = tile.tx * TILE;
+        const minZ = tile.tz * TILE;
+        const before = chunk.foliage.length;
+        this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE, { markBlocked: false });
+        if (chunk.foliage.length !== before) foliageDirty = true;
+      }
     }
     if (dirty) chunk.bakedLayer = null;
+    if (foliageDirty) this.syncFoliageObstacles();
   }
 
   populateFoliageForChunk(chunk) {
     if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
-    populateChunkFoliage(
-      chunk,
-      (tx, tz) => this._foliageSkipTile(tx, tz),
-      (tx, tz) => this.isNearRoadSurface(tx, tz),
-    );
+    populateChunkFoliage(chunk, (tx, tz) => this._foliageSkipTile(tx, tz));
     this._pruneFoliageWithoutSprites(chunk);
+    this._onFoliagePopulated?.(chunk);
+  }
+
+  /** Optional hook — e.g. clear foliage around buildings after chunk regen. */
+  setFoliagePopulatedHook(fn) {
+    this._onFoliagePopulated = fn ?? null;
   }
 
   setSpriteBank(sprites) {
@@ -362,12 +368,26 @@ export class World {
   }
 
   /** Keep terrain/foliage/spawn state warm around a moving focus point. */
-  touchChunksAround(wx, wz, radiusChunks = 5) {
+  touchChunksAround(wx, wz, radiusChunks = 5, opts = {}) {
+    const eager = !!opts.eager;
     const { cx: pcx, cz: pcz } = worldToChunk(wx, wz);
+    const toLoad = [];
     for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
       for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
-        this.getChunk(pcx + dx, pcz + dz);
+        const cx = pcx + dx;
+        const cz = pcz + dz;
+        const key = this._chunkKey(cx, cz);
+        if (this.chunks.has(key)) {
+          this._bumpChunk(key);
+        } else {
+          toLoad.push({ cx, cz, d: dx * dx + dz * dz });
+        }
       }
+    }
+    toLoad.sort((a, b) => a.d - b.d);
+    const budget = eager ? toLoad.length : 4;
+    for (let i = 0; i < Math.min(budget, toLoad.length); i++) {
+      this.getChunk(toLoad[i].cx, toLoad[i].cz);
     }
   }
 
@@ -462,12 +482,11 @@ export class World {
 
     const chunk = generateChunk(cx, cz);
     this.chunks.set(key, chunk);
+    if (this._foliageReady && !chunk.foliagePopulated) {
+      this.populateFoliageForChunk(chunk);
+    }
     this.paintHighwayInChunk(cx, cz);
     this._applyTownFloorToChunk(chunk);
-    if (this._foliageReady && !chunk.foliagePopulated) {
-      if (this._fullyPrewarmed) this.populateFoliageForChunk(chunk);
-      else this.queueFoliageForChunk(chunk);
-    }
     while (!this._holdAllChunks && this.chunks.size > MAX_CACHED_CHUNKS) this._evictOldestChunk();
     return chunk;
   }
@@ -506,13 +525,9 @@ export class World {
       if (kind === 'path' && tile.floorKind === 'road') continue;
       tile.floorKind = kind;
       this._foliageBlocked.add(`${tx},${tz}`);
-      if (kind === 'road' || kind === 'path') {
-        this._clearFoliageNearRoad(tx, tz);
-      } else {
-        const minX = tx * TILE;
-        const minZ = tz * TILE;
-        this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE, { markBlocked: false });
-      }
+      const minX = tx * TILE;
+      const minZ = tz * TILE;
+      this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE, { markBlocked: false });
       const key = this._chunkKey(
         Math.floor(tx / CHUNK_TILES),
         Math.floor(tz / CHUNK_TILES),
@@ -541,9 +556,6 @@ export class World {
           if (!tile) continue;
           tile.floorKind = kind;
           this._foliageBlocked.add(`${worldTx},${worldTz}`);
-          if (kind === 'road' || kind === 'path') {
-            this._clearFoliageNearRoad(worldTx, worldTz, 0);
-          }
           touched.add(this._chunkKey(
             Math.floor(worldTx / CHUNK_TILES),
             Math.floor(worldTz / CHUNK_TILES),
@@ -891,9 +903,74 @@ export class World {
     return { x: minDistFromCenter, z: 0 };
   }
 
+  _tooCloseToTownAnchor(x, z) {
+    const tx = Math.floor(x / TILE);
+    const tz = Math.floor(z / TILE);
+    const anchors = getNearbyTownAnchors(tx, tz, 3);
+    const pad = PLAYER_SPAWN_TOWN_CLEARANCE_TILES * TILE;
+    for (const anchor of anchors) {
+      const ax = anchor.tx * TILE + TILE * 0.5;
+      const az = anchor.tz * TILE + TILE * 0.5;
+      const extent = (townHalf(anchor) * 2 + 24) * TILE + pad;
+      const dx = Math.abs(x - ax);
+      const dz = Math.abs(z - az);
+      if (dx < extent && dz < extent) return true;
+    }
+    return false;
+  }
+
+  _isValidPlayerSpawn(x, z) {
+    if (this.checkCollision(x, z, PLAYER_RADIUS)) return false;
+    if (this._tooCloseToTownAnchor(x, z)) return false;
+    const tx = Math.floor(x / TILE);
+    const tz = Math.floor(z / TILE);
+    if (isHighwayTile(tx, tz)) return false;
+    const tile = this.getTile(tx, tz);
+    if (tile?.floorKind === 'road' || tile?.floorKind === 'path') return false;
+    return true;
+  }
+
+  /** Nudge spawn point out of walls/buildings after nearby chunks finish generating. */
+  ensureClearSpawnPosition(x, z, radius = PLAYER_RADIUS) {
+    if (!this.checkCollision(x, z, radius) && this._isValidPlayerSpawn(x, z)) {
+      return { x, z };
+    }
+    for (let ring = 1; ring <= 24; ring++) {
+      const dist = ring * (TILE * 0.75);
+      for (let i = 0; i < 14; i++) {
+        const angle = (i / 14) * Math.PI * 2;
+        const nx = x + Math.sin(angle) * dist;
+        const nz = z + Math.cos(angle) * dist;
+        if (!this.checkCollision(nx, nz, radius) && this._isValidPlayerSpawn(nx, nz)) {
+          return { x: nx, z: nz };
+        }
+      }
+    }
+    return { x, z };
+  }
+
+  _pickPlayerSpawn() {
+    const minDist = BASE_RADIUS + 48;
+    for (let i = 0; i < 140; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = minDist + Math.random() * 120;
+      const x = Math.sin(angle) * dist;
+      const z = Math.cos(angle) * dist;
+      if (this._isValidPlayerSpawn(x, z)) return { x, z };
+    }
+    for (let i = 0; i < 80; i++) {
+      const angle = (i / 80) * Math.PI * 2;
+      const dist = minDist + 40 + (i % 12) * 18;
+      const x = Math.sin(angle) * dist;
+      const z = Math.cos(angle) * dist;
+      if (this._isValidPlayerSpawn(x, z)) return { x, z };
+    }
+    return { x: minDist + 80, z: 0 };
+  }
+
   getPlayerSpawn() {
     if (this._cachedPlayerSpawn) return this._cachedPlayerSpawn;
-    this._cachedPlayerSpawn = this.randomMapPoint(BASE_RADIUS + 48);
+    this._cachedPlayerSpawn = this._pickPlayerSpawn();
     return this._cachedPlayerSpawn;
   }
 

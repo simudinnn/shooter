@@ -121,10 +121,15 @@ const SHELL = [
   './js/collisionDebug.js',
   './assets/fonts/game-pixel.woff2',
   './assets/fonts/game-pixel.ttf',
+  './assets/fonts/ascii.png',
   './assets/ui/inventory.png',
+  './assets/ui/crafting.png',
   './assets/ui/inv_slot.png',
   './assets/ui/inv_cursor.png',
   './assets/ui/chest_inventory.png',
+  './assets/ui/ui_panel_9slice.png',
+  './assets/ui/ui_button_9slice.png',
+  './assets/ui/craft_toggle.png',
   './assets/items/misc/lock.png',
 ];
 

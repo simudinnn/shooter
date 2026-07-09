@@ -159,8 +159,13 @@ export function captureGameState(game) {
       weaponSlot: player.weaponSlot,
       meleeKey: player.meleeKey,
       weaponAmmo: player.weapon?.ammo ?? 0,
+      handSlots: cloneSlots(player.handSlots),
+      activeHandSlot: player.activeHandSlot ?? 0,
+      quickSlot: player.quickSlot ? { ...player.quickSlot } : null,
+      throwableSlot: player.throwableSlot ? { ...player.throwableSlot } : null,
       itemSlots: cloneSlots(player.itemSlots),
       equipmentSlots: cloneSlots(player.equipmentSlots),
+      learnedBlueprints: [...(player.learnedBlueprints ?? [])],
       powerUps: {
         speed: { until: player.powerUps?.speed?.until ?? 0 },
         damage: {

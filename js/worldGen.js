@@ -7,6 +7,8 @@ export const TILE = 4;
 export const CHUNK_TILES = 8;
 export const CHUNK_WORLD = TILE * CHUNK_TILES;
 export const BASE_RADIUS = 22;
+/** Keep towns/buildings away from the player spawn. */
+export const PLAYER_SPAWN_TOWN_CLEARANCE_TILES = 36;
 
 export const WORLD_SEED = 90210;
 
@@ -287,6 +289,8 @@ const TALL_GRASS_PATCH_CHANCE = 0.11;
 const BUSH_PATCH_CHANCE = 0.09;
 const TALL_GRASS_PATCH_FILL = 0.58;
 const BUSH_PATCH_FILL = 0.52;
+/** Short ground grass — disabled for performance (too many tiny sprites). */
+const ENABLE_SHORT_GRASS = false;
 
 function patchRoll(tx, tz, patchTiles, salt) {
   const px = Math.floor(tx / patchTiles);
@@ -298,14 +302,14 @@ function tileRoll(tx, tz, salt) {
   return hash01(tx * 19 + salt * 3, tz * 29 + salt * 5);
 }
 
-function pickFoliageForTile(tx, tz, foliage, obstacles, reserved, wx, wz, nearRoad = null) {
+function pickFoliageForTile(tx, tz, foliage, obstacles, reserved, wx, wz) {
   if (isFoliageReserved(reserved, tx, tz)) return;
 
   const scatter = hash01(tx * 113 + 5, tz * 97 + 11);
   const detail = hash01(tx * 53 + 7, tz * 71 + 11);
   const outsideBase = !isInBase(wx, wz);
 
-  if (outsideBase && scatter > 0.978 && !nearRoad?.(tx, tz)) {
+  if (outsideBase && scatter > 0.978) {
     if (tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickTreeVariant(tx, tz, 71), 71)) return;
   }
 
@@ -325,7 +329,7 @@ function pickFoliageForTile(tx, tz, foliage, obstacles, reserved, wx, wz, nearRo
     if (tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickFromVariants(tx, tz, 53, ['pebble', 'pebble2']), 53)) return;
   }
 
-  if (scatter < 0.7) {
+  if (ENABLE_SHORT_GRASS && scatter < 0.7) {
     tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickGrassVariant(tx, tz, 23), 23);
   }
 }
@@ -344,8 +348,8 @@ export function generateChunk(cx, cz) {
   return { cx, cz, tiles, foliage: [], obstacles: [], foliagePopulated: false };
 }
 
-/** Fill chunk foliage after roads/buildings are placed. skipTile(tx,tz) => true to leave bare. */
-export function populateChunkFoliage(chunk, skipTile = null, nearRoad = null) {
+/** Fill chunk foliage — skip blocked/building tiles; buildings also reconcile after load. */
+export function populateChunkFoliage(chunk, shouldSkipTile = null) {
   if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
   const reserved = new Set();
   for (const f of chunk.foliage) {
@@ -356,10 +360,10 @@ export function populateChunkFoliage(chunk, skipTile = null, nearRoad = null) {
     for (let lx = 0; lx < CHUNK_TILES; lx++) {
       const tx = chunk.cx * CHUNK_TILES + lx;
       const tz = chunk.cz * CHUNK_TILES + lz;
-      if (skipTile?.(tx, tz)) continue;
+      if (shouldSkipTile?.(tx, tz)) continue;
       const wx = tx * TILE + TILE * 0.5;
       const wz = tz * TILE + TILE * 0.5;
-      pickFoliageForTile(tx, tz, chunk.foliage, chunk.obstacles, reserved, wx, wz, nearRoad);
+      pickFoliageForTile(tx, tz, chunk.foliage, chunk.obstacles, reserved, wx, wz);
     }
   }
   chunk.foliagePopulated = true;

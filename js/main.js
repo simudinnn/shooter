@@ -1,3 +1,4 @@
+import { setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
@@ -38,9 +39,9 @@ import {
   bulletDrawSortZ,
   entityFeetZ,
 } from './buildingGen.js';
-import { chestSpriteName } from './loot.js';
+import { chestSpriteName, getItemIconSrc } from './loot.js';
 import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, resolveFlipX, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, CURSOR_DRAW_SCALE, ENEMY_STATUS_ICON_SCALE } from './sprites.js';
-import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, updateLocomotion, isSprintAnimSpeed } from './collision.js';
+import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, updateLocomotion, isSprintAnimSpeed, entityPushRadius } from './collision.js';
 import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
 import { VirtualJoystick } from './joystick.js';
@@ -72,7 +73,7 @@ import {
   roomWebSocketUrl,
 } from './rooms.js';
 
-const VISION_DARKNESS = 0.2;
+const VISION_DARKNESS = 0.25;
 /** Y-sort bias — shadows on the floor, under walls and bodies. */
 const SORT_SHADOW = 0;
 const SORT_WALL_BACK = 1;
@@ -232,6 +233,40 @@ class Game {
     this._waveBannerTimer = null;
     this._confirmYes = null;
     this._confirmNo = null;
+    preloadPixelTextAtlas().then(() => this._initStaticPixelLabels());
+  }
+
+  _setPixelText(el, text, scale = PIXEL_TEXT_SCALE) {
+    if (!el) return;
+    if (!text) {
+      el.replaceChildren?.();
+      return;
+    }
+    setElementPixelText(el, text, scale);
+  }
+
+  _setPixelBtn(btn, text, scale = PIXEL_TEXT_SCALE) {
+    this._setPixelText(btn, text, scale);
+  }
+
+  _initStaticPixelLabels() {
+    const T = PIXEL_TEXT_SCALE;
+    const S = PIXEL_TEXT_SCALE_SM;
+    document.querySelectorAll('#overlay button.ui-slice-button, #mobile-controls button.ui-slice-button').forEach((btn) => {
+      const label = btn.textContent.trim();
+      if (label) this._setPixelBtn(btn, label, T);
+    });
+    this._setPixelText(document.querySelector('#main-menu h1'), 'Robot Ruins', T);
+    document.querySelectorAll('#loading-screen .menu-heading, #pause-menu .menu-heading').forEach((el) => {
+      const label = el.textContent.trim();
+      if (label) this._setPixelText(el, label, T);
+    });
+    this._setPixelText(this.el.reloadIndicator, 'Reloading...', T);
+    this._setPixelText(this.el.spawnCurtainStatus, 'Entering the ruins...', T);
+    this._setPixelText(document.querySelector('.ammo-sep'), '/', T);
+    if (this.el.loadingStatus?.textContent.trim()) {
+      this._setPixelText(this.el.loadingStatus, this.el.loadingStatus.textContent.trim(), T);
+    }
   }
 
   _refreshMainMenuButtons() {
@@ -251,10 +286,10 @@ class Game {
     this.el.mobileControls?.classList.add('hidden');
     this._enableMenuCursor();
     if (deathStats) {
-      this.el.menuSubtitle.textContent = deathStats;
+      this._setPixelText(this.el.menuSubtitle, deathStats, PIXEL_TEXT_SCALE_SM);
       this.el.menuSubtitle.classList.remove('hidden');
     } else {
-      this.el.menuSubtitle.textContent = '';
+      this._setPixelText(this.el.menuSubtitle, '');
       this.el.menuSubtitle.classList.add('hidden');
     }
   }
@@ -267,13 +302,14 @@ class Game {
   _showPauseMenu() {
     this.paused = true;
     this.el.pauseMenu?.classList.remove('hidden');
+    this._hideGameCursor();
     this._enableMenuCursor();
     if (this.el.pauseRoomCode) {
       if (this._roomCode && this.lan?.isOnline) {
-        this.el.pauseRoomCode.textContent = `Room code: ${this._roomCode}`;
+        this._setPixelText(this.el.pauseRoomCode, `Room code: ${this._roomCode}`, PIXEL_TEXT_SCALE);
         this.el.pauseRoomCode.classList.remove('hidden');
       } else {
-        this.el.pauseRoomCode.textContent = '';
+        this._setPixelText(this.el.pauseRoomCode, '');
         this.el.pauseRoomCode.classList.add('hidden');
       }
     }
@@ -352,7 +388,7 @@ class Game {
       this._gameCursorEl.dataset.sprite = sprite;
       this._gameCursorEl.src = path;
     }
-    const size = sprite === 'inv_cursor' ? 56 : 48;
+    const size = sprite === 'inv_cursor' ? 56 : (this.mobile ? 32 : 48);
     this._gameCursorEl.style.width = `${size}px`;
     this._gameCursorEl.style.height = `${size}px`;
     if (this.mobile) {
@@ -363,7 +399,7 @@ class Game {
     } else {
       this._gameCursorEl.style.left = `${this.mouse.clientX}px`;
       this._gameCursorEl.style.top = `${this.mouse.clientY}px`;
-      this._gameCursorEl.style.transform = '';
+      this._gameCursorEl.style.transform = 'translate(-50%, -50%)';
     }
     this._gameCursorEl.style.visibility = 'visible';
   }
@@ -411,7 +447,7 @@ class Game {
   _setLoadingProgress(fraction, message) {
     const pct = Math.max(0, Math.min(1, fraction)) * 100;
     if (this.el.loadingBarFill) this.el.loadingBarFill.style.width = `${pct}%`;
-    if (message && this.el.loadingStatus) this.el.loadingStatus.textContent = message;
+    if (message && this.el.loadingStatus) this._setPixelText(this.el.loadingStatus, message, PIXEL_TEXT_SCALE);
   }
 
   _isSpawnRevealActive() {
@@ -432,7 +468,7 @@ class Game {
     this._hideGameCursor();
     this.inventoryUI?._disableInvCursor?.();
     if (this.el.spawnCurtainStatus) {
-      this.el.spawnCurtainStatus.textContent = 'Entering the ruins…';
+      this._setPixelText(this.el.spawnCurtainStatus, 'Entering the ruins...', PIXEL_TEXT_SCALE);
       this.el.spawnCurtainStatus.style.opacity = '0.85';
     }
     this.el.spawnCurtain?.classList.remove('hidden');
@@ -458,12 +494,16 @@ class Game {
     if (!reveal || reveal.phase === 'done') return;
 
     if (reveal.phase === 'foliage') {
-      if (this.player && this.world) {
-        this.world.touchChunksAround(this.player.x, this.player.z, reveal.radiusChunks + 1);
+      if (this.player && this.world && !reveal.areaBootstrapped) {
+        reveal.areaBootstrapped = true;
+        this.world.touchChunksAround(this.player.x, this.player.z, reveal.radiusChunks + 1, { eager: true });
         this.chunkEntities?._populateBuildingsOnly(this.player, reveal.radiusChunks);
-        this.world.populateFoliageAround(this.player.x, this.player.z, reveal.radiusChunks);
-        this.world.stripFoliageFromSurfaceTilesAround(this.player.x, this.player.z, reveal.radiusChunks);
-        this.world.drainFoliageQueue(72);
+        const cleared = this.world.ensureClearSpawnPosition(this.player.x, this.player.z);
+        if (cleared.x !== this.player.x || cleared.z !== this.player.z) {
+          this.player.x = cleared.x;
+          this.player.z = cleared.z;
+          this.world._cachedPlayerSpawn = { x: cleared.x, z: cleared.z };
+        }
         const view = this.getViewBoundsWorld();
         this._cachedYsortFoliage = this.world.collectYsortFoliage(
           view.minX,
@@ -506,7 +546,9 @@ class Game {
   }
 
   _showConfirm(message, onYes, onNo) {
-    this.el.confirmMessage.textContent = message;
+    const frame = this.el.confirmDialog?.querySelector('.menu-frame--confirm');
+    const maxWidth = Math.max(200, Math.min(432, (frame?.clientWidth || 432) - 48));
+    setElementWrappedPixelText(this.el.confirmMessage, message, maxWidth, PIXEL_TEXT_SCALE_SM);
     this.el.confirmDialog?.classList.remove('hidden');
     this._confirmYes = onYes;
     this._confirmNo = onNo ?? (() => this.el.confirmDialog?.classList.add('hidden'));
@@ -571,10 +613,10 @@ class Game {
   _setLanStatus(text) {
     if (!this.el.lanStatus) return;
     if (text) {
-      this.el.lanStatus.textContent = text;
+      this._setPixelText(this.el.lanStatus, text, PIXEL_TEXT_SCALE_SM);
       this.el.lanStatus.classList.remove('hidden');
     } else {
-      this.el.lanStatus.textContent = '';
+      this._setPixelText(this.el.lanStatus, '');
       this.el.lanStatus.classList.add('hidden');
     }
   }
@@ -626,7 +668,11 @@ class Game {
       const room = await createRoom(this._playerName());
       this.el.roomCodeDisplay?.classList.remove('hidden');
       if (this.el.roomCodeDisplay) {
-        this.el.roomCodeDisplay.textContent = `Room code: ${room.code} — share with friends`;
+        this._setPixelText(
+          this.el.roomCodeDisplay,
+          `Room code: ${room.code} - share with friends`,
+          PIXEL_TEXT_SCALE_SM,
+        );
       }
       await this._connectToRoom(room, { isHost: true });
     } catch (err) {
@@ -696,7 +742,7 @@ class Game {
   showWaveBanner(text, duration = 2) {
     if (!this.el.waveBanner) return;
     const banner = this.el.waveBanner;
-    banner.textContent = text;
+    this._setPixelText(banner, text, PIXEL_TEXT_SCALE + 1);
     banner.classList.toggle('cleared', text.toLowerCase().includes('cleared'));
     banner.classList.remove('hidden');
     requestAnimationFrame(() => banner.classList.add('show'));
@@ -787,8 +833,21 @@ class Game {
       if (this.lan?.isOnline) this.lan.queueReload();
       else this._tryStartReload(performance.now() / 1000);
     }
-    if (e.code === 'Digit1') this.player.setWeaponSlot('gun');
-    if (e.code === 'Digit2') this.player.setWeaponSlot('melee');
+    if (e.code === 'Digit1') this.player?.setActiveHandSlot(0);
+    if (e.code === 'Digit2') this.player?.setActiveHandSlot(1);
+    if (e.code === 'KeyF' || e.code === 'Digit3') {
+      const before = this.player?.health;
+      if (this.player?.useQuickSlot()) {
+        const healed = Math.max(0, Math.round(this.player.health - before));
+        this.items.setPickupMsg(`+${healed} HP`);
+        this.audio.pickup();
+      } else if (this.player?.quickSlot) {
+        this.items.setPickupMsg('Already at full health', { error: true });
+      }
+    }
+    if (e.code === 'KeyQ' || e.code === 'Digit4') {
+      this.player?.useThrowableSlot();
+    }
   }
 
   _onGameKeyUp(e) {
@@ -938,8 +997,20 @@ class Game {
     });
 
     bindPress('mb-pause', () => this._togglePause());
-    bindPress('mb-gun', () => { if (this.running) this.player?.setWeaponSlot('gun'); });
-    bindPress('mb-knife', () => { if (this.running) this.player?.setWeaponSlot('melee'); });
+    bindPress('mb-hand-0', () => { if (this.running) this.player?.setActiveHandSlot(0); });
+    bindPress('mb-hand-1', () => { if (this.running) this.player?.setActiveHandSlot(1); });
+    bindPress('mb-quick', () => {
+      if (!this.running) return;
+      const before = this.player?.health;
+      if (this.player?.useQuickSlot()) {
+        const healed = Math.max(0, Math.round(this.player.health - before));
+        this.items.setPickupMsg(`+${healed} HP`);
+        this.audio.pickup();
+      } else if (this.player?.quickSlot) {
+        this.items.setPickupMsg('Already at full health', { error: true });
+      }
+    });
+    bindPress('mb-throw', () => { if (this.running) this.player?.useThrowableSlot(); });
 
     bindPress('mb-interact', () => {
       if (this.running) {
@@ -1374,6 +1445,10 @@ class Game {
     this.corpses = new CorpseManager(this.world);
     this.groundDrops = new GroundDropManager(this.world);
     this.buildings = new BuildingManager(this.world, this.chests);
+    this.world.setFoliagePopulatedHook((chunk) => {
+      this.buildings.reconcileFoliageInChunk(chunk, this.world);
+    });
+    preloadPixelTextAtlas();
     this.particles = [];
     this.dayNight = new DayNightCycle();
 
@@ -1477,8 +1552,10 @@ class Game {
       if (f.buildingsSpawned) chunk.buildingsSpawned = true;
       if (f.chestsSpawned) chunk.chestsSpawned = true;
     }
+    for (const b of this.buildings.buildings) {
+      this.buildings._clearFoliageForBuilding(this.world, b);
+    }
     this.world.touchChunksAround(this.player.x, this.player.z, 6);
-    for (let i = 0; i < 24; i++) this.world.drainFoliageQueue(16);
     const view = this.getViewBoundsWorld();
     this._cachedYsortFoliage = this.world.collectYsortFoliage(
       view.minX,
@@ -1502,9 +1579,6 @@ class Game {
     if (!online) this.dayNight?.update(dt);
     if (this.player?.alive && this.world) {
       this.world.touchChunksAround(this.player.x, this.player.z, 5);
-    }
-    if (!this._isSpawnRevealActive()) {
-      this.world?.drainFoliageQueue(3);
     }
     this.buildings?.update(this.player, dt);
 
@@ -1576,7 +1650,7 @@ class Game {
           playerPrevZ,
           this.player.x,
           this.player.z,
-          this.player.radius,
+          entityPushRadius(this.player, PPU),
           targets,
           0.42,
           this.world,
@@ -2550,7 +2624,10 @@ class Game {
 
   _draw() {
     if (!this.running || !this.player) return;
-    if (this.paused) return;
+    if (this.paused) {
+      this._hideGameCursor();
+      return;
+    }
 
     const ctx = this.ctx;
     const nightFactor = this.dayNight?.getNightFactor() ?? 0;
@@ -2604,6 +2681,8 @@ class Game {
       this.buildings?._ensureBuildingDecorSprites(building, this.sprites);
       for (const piece of building.decor ?? []) {
         if (!inView(piece.x, piece.z, TILE * 2)) continue;
+        const isInterior = !!piece.interior;
+        if (useVisFog && visPoly && !isInterior && !this._isWorldPointVisible(piece.x, piece.z)) continue;
         this.sprites.ensureSprite(piece.sprite);
         drawList.push({
           z: piece.sortZ,
@@ -2615,6 +2694,7 @@ class Game {
     const ysortFoliage = this._cachedYsortFoliage;
     for (const f of ysortFoliage) {
       if (!inView(f.x, f.z, spritePad)) continue;
+      if (useVisFog && visPoly && !this._isWorldPointVisible(f.x, f.z)) continue;
       const sortZ = f.sortZ ?? (f.z + (f.sortZBias ?? 0));
       if (isTreeFoliage(f.kind)) {
         this.sprites.ensureSprite(f.sprite);
@@ -2745,7 +2825,6 @@ class Game {
           bob,
           GROUND_DROP_RES_PX,
         );
-        this.sprites.drawGroundItemLabel(ctx, drop.label, s.x, s.y, bob, GROUND_DROP_DISPLAY_PX);
       }});
     }
     for (const robot of this.robots) {
@@ -3102,6 +3181,40 @@ class Game {
     this.el.interactPrompt.style.transform = 'translate(-50%, -100%)';
   }
 
+  _setMobileSlotBtn(id, item, fallbackLabel) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.replaceChildren();
+    if (!item) {
+      this._setPixelText(btn, fallbackLabel, PIXEL_TEXT_SCALE_SM);
+      return;
+    }
+    const src = getItemIconSrc(item);
+    if (!src) {
+      this._setPixelText(btn, fallbackLabel, PIXEL_TEXT_SCALE_SM);
+      return;
+    }
+    const img = document.createElement('img');
+    img.className = 'mb-btn-icon';
+    img.alt = '';
+    img.draggable = false;
+    img.decoding = 'sync';
+    const dataUrl = this.sprites?.getIconDataUrl?.(src);
+    img.src = dataUrl || src;
+    btn.appendChild(img);
+  }
+
+  _syncMobileQuickBar() {
+    if (!this.mobile) return;
+    const p = this.player;
+    this._setMobileSlotBtn('mb-hand-0', p?.getHandSlotItem(0), '1');
+    this._setMobileSlotBtn('mb-hand-1', p?.getHandSlotItem(1), '2');
+    this._setMobileSlotBtn('mb-quick', p?.quickSlot, '3');
+    this._setMobileSlotBtn('mb-throw', p?.throwableSlot, '4');
+    document.getElementById('mb-hand-0')?.classList.toggle('mb-active', p?.activeHandSlot === 0);
+    document.getElementById('mb-hand-1')?.classList.toggle('mb-active', p?.activeHandSlot === 1);
+  }
+
   _drawAmmoHudIcon(ammoType) {
     const canvas = this.el.ammoIcon;
     if (!canvas) return;
@@ -3131,55 +3244,63 @@ class Game {
     const time = performance.now() / 1000;
     const hpPct = (this.player.health / this.player.maxHealth) * 100;
     this.el.healthBar.style.width = `${hpPct}%`;
-    this.el.healthText.textContent = Math.ceil(this.player.health) + (this.player.shield > 0 ? ` (+${Math.ceil(this.player.shield)})` : '');
-    this.el.weaponName.textContent = w?.name ?? 'Hand';
+    this._setPixelText(
+      this.el.healthText,
+      String(Math.ceil(this.player.health)) + (this.player.shield > 0 ? ` (+${Math.ceil(this.player.shield)})` : ''),
+      PIXEL_TEXT_SCALE,
+    );
+    this._setPixelText(this.el.weaponName, w?.name ?? 'Hand', PIXEL_TEXT_SCALE);
     if (this.player.isMeleeActive() || this.player.isUnarmed()) {
-      this.el.ammoCurrent.textContent = '—';
-      this.el.ammoReserve.textContent = '—';
-      this.el.ammoCurrent.style.color = '#e8e4dc';
+      this._setPixelText(this.el.ammoCurrent, '-', PIXEL_TEXT_SCALE);
+      this._setPixelText(this.el.ammoReserve, '-', PIXEL_TEXT_SCALE);
+      this.el.ammoCurrent.classList.remove('ammo-low');
+      this.el.ammoReserve.classList.remove('ammo-low');
       this.el.reloadIndicator.classList.add('hidden');
       this._drawAmmoHudIcon(null);
     } else {
       const gun = this.player.getWeapon();
       if (!gun) {
-        this.el.ammoCurrent.textContent = '—';
-        this.el.ammoReserve.textContent = '0';
+        this._setPixelText(this.el.ammoCurrent, '-', PIXEL_TEXT_SCALE);
+        this._setPixelText(this.el.ammoReserve, '0', PIXEL_TEXT_SCALE);
+        this.el.ammoCurrent.classList.remove('ammo-low');
+        this.el.ammoReserve.classList.toggle('ammo-low', true);
         this.el.reloadIndicator.classList.add('hidden');
         this._drawAmmoHudIcon(null);
       } else {
         const reserve = this.player.getReserveAmmo();
-        this.el.ammoCurrent.textContent = `${gun.ammo}/${gun.magSize}`;
-        this.el.ammoReserve.textContent = reserve;
-        this.el.ammoCurrent.style.color = gun.ammo === 0 ? '#ff4040' : '#e8e4dc';
-        this.el.ammoReserve.style.color = reserve > 0 ? '#8899aa' : '#556066';
+        this._setPixelText(this.el.ammoCurrent, `${gun.ammo}/${gun.magSize}`, PIXEL_TEXT_SCALE);
+        this._setPixelText(this.el.ammoReserve, String(reserve), PIXEL_TEXT_SCALE);
+        this.el.ammoCurrent.classList.toggle('ammo-low', gun.ammo === 0);
+        this.el.ammoReserve.classList.toggle('ammo-low', reserve <= 0);
         this.el.reloadIndicator.classList.toggle('hidden', !gun.reloading);
         this._drawAmmoHudIcon(getWeaponAmmoType(this.player.weaponKey));
       }
     }
 
     if (this.el.zoneLabel) {
-      this.el.zoneLabel.textContent = '';
+      this._setPixelText(this.el.zoneLabel, '', PIXEL_TEXT_SCALE);
     }
 
     if (this.el.gameDay && this.dayNight) {
-      this.el.gameDay.textContent = this.dayNight.formatDay();
+      this._setPixelText(this.el.gameDay, this.dayNight.formatDay(), PIXEL_TEXT_SCALE);
     }
     if (this.el.gameClock && this.dayNight) {
-      this.el.gameClock.textContent = this.dayNight.formatClock();
+      this._setPixelText(this.el.gameClock, this.dayNight.formatClock(), PIXEL_TEXT_SCALE);
     }
 
     if (this.items.pickupMsg) {
-      this.el.pickupStatus.textContent = this.items.pickupMsg;
+      this._setPixelText(this.el.pickupStatus, this.items.pickupMsg, PIXEL_TEXT_SCALE);
       this.el.pickupStatus.classList.add('active');
       this.el.pickupStatus.classList.toggle('error', this.items.pickupMsgError);
     } else {
-      this.el.pickupStatus.textContent = '';
+      this._setPixelText(this.el.pickupStatus, '');
       this.el.pickupStatus.classList.remove('active', 'error');
     }
 
     const power = this.player.getActivePowerUpLabel(time);
-    this.el.powerupStatus.textContent = power;
+    this._setPixelText(this.el.powerupStatus, power || '', PIXEL_TEXT_SCALE);
     this.el.powerupStatus.classList.toggle('active', !!power);
+    this._syncMobileQuickBar();
 
     const hoveredChest = this._getHoveredChest();
     const nearbyChest = this._getNearbyChest();
@@ -3209,21 +3330,24 @@ class Game {
     const canToggleDoor = !this.inventoryUI.open && interactDoor;
     const mbInteract = document.getElementById('mb-interact');
     mbInteract?.classList.toggle('mb-nearby', canToggleDoor || canOpenChestMobile || canOpenCorpseMobile || canPickupDropMobile);
+    const pickupDrop = canPickupDrop ? (hoveredDrop ?? nearbyDrop) : null;
     const showPrompt = canToggleDoor || canOpenChest || canOpenCorpse || canPickupDrop;
     this.el.interactPrompt.classList.toggle('hidden', !showPrompt);
     if (showPrompt) {
       const doorVerb = interactDoor?.doorOpen ? 'close' : 'open';
       if (this.mobile) {
-        this.el.interactPrompt.textContent = canToggleDoor
+        const mobileText = canToggleDoor
           ? `E to ${doorVerb} door`
-          : (canOpenCorpse ? 'E to loot' : (canPickupDrop ? 'E to pick up' : 'E to open'));
+          : (canOpenCorpse ? 'E to loot' : (pickupDrop ? `E ${pickupDrop.label}` : 'E to open'));
+        setElementPixelText(this.el.interactPrompt, mobileText, PIXEL_TEXT_SCALE);
         this._positionInteractPromptAbovePlayer();
       } else {
         const mx = this.mouse.clientX;
         const my = this.mouse.clientY;
-        this.el.interactPrompt.textContent = canToggleDoor
+        const desktopText = canToggleDoor
           ? `RMB to ${doorVerb} door`
-          : (canOpenCorpse ? 'RMB to loot' : (canPickupDrop ? 'RMB to pick up' : 'RMB to open'));
+          : (canOpenCorpse ? 'RMB to loot' : (pickupDrop ? `RMB ${pickupDrop.label}` : 'RMB to open'));
+        setElementPixelText(this.el.interactPrompt, desktopText, PIXEL_TEXT_SCALE);
         this.el.interactPrompt.style.left = `${mx}px`;
         this.el.interactPrompt.style.top = `${my - 28}px`;
         this.el.interactPrompt.style.bottom = 'auto';
