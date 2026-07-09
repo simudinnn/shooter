@@ -375,6 +375,8 @@ export class InventoryUI {
     this._craftPickerResizeObs = new ResizeObserver(() => this._syncCraftPickerLayout());
     this._craftPickerResizeObs.observe(this.craftPickerEl);
     if (this.craftCostGridEl) this._craftPickerResizeObs.observe(this.craftCostGridEl);
+    const craftRow = this.craftCostGridEl?.parentElement;
+    if (craftRow) this._craftPickerResizeObs.observe(craftRow);
   }
 
   _syncCraftPickerLayout() {
@@ -393,10 +395,15 @@ export class InventoryUI {
     }
     const costGrid = this.craftCostGridEl;
     if (costGrid) {
-      const width = costGrid.clientWidth;
+      const row = costGrid.parentElement;
+      const btnW = this.craftBtnEl?.offsetWidth ?? 96;
+      const rowGap = 6;
+      const slotGap = 5;
+      const width = row?.clientWidth
+        ? row.clientWidth - btnW - rowGap
+        : costGrid.clientWidth;
       if (width > 0) {
-        const gap = 5;
-        const cell = Math.max(36, Math.floor((width - gap * (CRAFT_MAX_MATERIALS - 1)) / CRAFT_MAX_MATERIALS));
+        const cell = Math.max(36, Math.floor((width - slotGap * (CRAFT_MAX_MATERIALS - 1)) / CRAFT_MAX_MATERIALS));
         costGrid.style.setProperty('--craft-cost-cell', `${cell}px`);
       }
     }
@@ -437,6 +444,7 @@ export class InventoryUI {
     const maxH = window.innerHeight - padTop - padBottom;
     const scale = Math.min(1, maxW / w, maxH / h);
     this.dualWrap.style.setProperty('--inv-mobile-scale', String(Math.max(0.32, scale)));
+    if (this.craftOpen) this._syncCraftPickerLayout();
   }
 
   _syncMobilePanelScaleSoon() {

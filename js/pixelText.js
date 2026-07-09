@@ -8,7 +8,8 @@ const TRAIL_PAD_PX = 1;
 export const PIXEL_TEXT_SCALE = 3;
 export const PIXEL_TEXT_SCALE_SM = 2;
 export const PIXEL_TEXT_SCALE_XS = 2;
-const TEXT_SHADOW_OFFSET = 2;
+const TEXT_SHADOW_OFFSET = 1;
+const TEXT_SHADOW_ALPHA = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 0.72 : 0.5;
 const LINE_GAP_PX = 1;
 
 let atlas = null;
@@ -85,7 +86,7 @@ function drawGlyphRun(ctx, text, scale, img, offsetX, offsetY, { shadow = false 
       const sy = Math.floor(code / COLS) * CELL;
       if (shadow) {
         ctx.filter = 'brightness(0)';
-        ctx.globalAlpha = 0.88;
+        ctx.globalAlpha = TEXT_SHADOW_ALPHA;
         ctx.drawImage(img, sx, sy, CELL, CELL, x, offsetY, CELL * scale, height);
         ctx.filter = 'none';
         ctx.globalAlpha = 1;
