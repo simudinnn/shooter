@@ -137,6 +137,7 @@ export class InventoryUI {
       this._tryCraftRecipe(recipe);
     });
     this._ensureCraftPickerResizeObserver();
+    this._ensureMobileScaleObserver();
     this._syncCraftBtnLabel();
     preloadPixelTextAtlas().then(() => {
       this._syncCraftBtnLabel();
@@ -282,6 +283,7 @@ export class InventoryUI {
     this._syncCraftBtnLabel();
     this._syncCraftToggleLabel();
     this.render();
+    this._syncMobilePanelScaleSoon();
     this._prewarmInventoryIcons().then(() => {
       if (this.open && !this.drag?.moved) this.render();
     });
@@ -299,6 +301,7 @@ export class InventoryUI {
       this.root?.classList.remove('chest-mode');
       this.chestPanelRoot?.classList.add('hidden');
     }
+    this._syncMobilePanelScaleSoon();
   }
 
   close() {
@@ -402,7 +405,44 @@ export class InventoryUI {
   _syncCraftPickerLayoutSoon() {
     requestAnimationFrame(() => {
       this._syncCraftPickerLayout();
-      requestAnimationFrame(() => this._syncCraftPickerLayout());
+      requestAnimationFrame(() => {
+        this._syncCraftPickerLayout();
+        this._syncMobilePanelScale();
+      });
+    });
+  }
+
+  _ensureMobileScaleObserver() {
+    if (!this.game.mobile || this._mobileScaleObs) return;
+    const onResize = () => this._syncMobilePanelScale();
+    this._mobileScaleObs = new ResizeObserver(onResize);
+    if (this.dualWrap) this._mobileScaleObs.observe(this.dualWrap);
+    window.addEventListener('resize', onResize);
+    this._mobileScaleOnResize = onResize;
+  }
+
+  _syncMobilePanelScale() {
+    if (!this.game.mobile || !this.dualWrap) {
+      this.dualWrap?.style.removeProperty('--inv-mobile-scale');
+      return;
+    }
+    this.dualWrap.style.setProperty('--inv-mobile-scale', '1');
+    const w = this.dualWrap.offsetWidth;
+    const h = this.dualWrap.offsetHeight;
+    if (w <= 0 || h <= 0) return;
+    const padX = 16;
+    const padTop = 40;
+    const padBottom = 150;
+    const maxW = window.innerWidth - padX * 2;
+    const maxH = window.innerHeight - padTop - padBottom;
+    const scale = Math.min(1, maxW / w, maxH / h);
+    this.dualWrap.style.setProperty('--inv-mobile-scale', String(Math.max(0.32, scale)));
+  }
+
+  _syncMobilePanelScaleSoon() {
+    requestAnimationFrame(() => {
+      this._syncMobilePanelScale();
+      requestAnimationFrame(() => this._syncMobilePanelScale());
     });
   }
 

@@ -46,7 +46,6 @@
         <div class="menu-btn-stack">
           <button type="button" id="resume-btn" class="ui-slice-button">Resume</button>
           <button type="button" id="save-game-btn" class="ui-slice-button">Save Game</button>
-          <button type="button" id="world-map-btn" class="ui-slice-button">Export World Map</button>
           <button type="button" id="back-to-menu-btn" class="ui-slice-button">Back to Menu</button>
         </div>
       </div>
@@ -139,6 +138,12 @@
   </div>
 
   <div id="mobile-controls" class="hidden">
+    <div id="mobile-hotbar" class="mb-slot-group">
+      <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-hand-0" title="Weapon 1">1</button>
+      <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-hand-1" title="Weapon 2">2</button>
+      <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-quick" title="Quick equip">3</button>
+      <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-throw" title="Throwable">4</button>
+    </div>
     <div id="mobile-bottom-bar">
       <div id="mobile-move" class="joystick-wrap">
         <div class="joystick-base" id="move-joystick-base">
@@ -146,14 +151,6 @@
         </div>
       </div>
       <div id="mobile-actions">
-        <div class="mb-slot-group mb-weapon-group">
-          <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-hand-0" title="Weapon 1">1</button>
-          <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-hand-1" title="Weapon 2">2</button>
-        </div>
-        <div class="mb-slot-group mb-utility-group">
-          <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-quick" title="Quick equip">3</button>
-          <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-throw" title="Throwable">4</button>
-        </div>
         <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-reload" title="Reload">R</button>
         <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-interact" title="Interact">E</button>
         <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-inventory" title="Inventory">INV</button>

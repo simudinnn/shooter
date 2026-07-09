@@ -13,7 +13,6 @@ import {
   writeSave,
 } from './saveGame.js';
 import { SoundManager } from './audio.js';
-import { downloadWorldMapPng } from './worldMap.js';
 import { ItemManager } from './items.js';
 import { GroundDropManager, GROUND_DROP_DISPLAY_PX, GROUND_DROP_RES_PX } from './groundDrops.js';
 import { getEnemyStatusIcon, tickTileFlowField } from './enemyNav.js';
@@ -214,7 +213,6 @@ class Game {
       lanStatus: document.getElementById('lan-status'),
       resumeBtn: document.getElementById('resume-btn'),
       saveGameBtn: document.getElementById('save-game-btn'),
-      worldMapBtn: document.getElementById('world-map-btn'),
       backToMenuBtn: document.getElementById('back-to-menu-btn'),
       confirmYesBtn: document.getElementById('confirm-yes-btn'),
       confirmNoBtn: document.getElementById('confirm-no-btn'),
@@ -420,28 +418,6 @@ class Game {
 
   _hideLoadingScreen() {
     this.el.loadingScreen?.classList.add('hidden');
-  }
-
-  async _exportWorldMap() {
-    if (this._exportingMap || !this.world) return;
-    this._exportingMap = true;
-    const hideAfter = this.el.loadingScreen?.classList.contains('hidden') ?? true;
-    try {
-      this.el.loadingScreen?.classList.remove('hidden');
-      this._setLoadingProgress(0, 'Rendering world map…');
-      await downloadWorldMapPng(this.world, this.sprites, `world-map-${getWorldSeed()}.png`, {
-        onProgress: (p) => this._setLoadingProgress(p, 'Rendering world map…'),
-      });
-      this._setLoadingProgress(1, 'Map saved');
-    } catch (err) {
-      console.error('World map export failed:', err);
-      this._setLoadingProgress(0, 'Map export failed');
-    } finally {
-      this._exportingMap = false;
-      if (hideAfter) {
-        setTimeout(() => this._hideLoadingScreen(), 400);
-      }
-    }
   }
 
   _setLoadingProgress(fraction, message) {
@@ -824,11 +800,6 @@ class Game {
       this.debugCollision = !this.debugCollision;
       return;
     }
-    if (e.code === 'F9') {
-      e.preventDefault();
-      if (!e.repeat) this._exportWorldMap();
-      return;
-    }
     if (e.code === 'KeyR') {
       if (this.lan?.isOnline) this.lan.queueReload();
       else this._tryStartReload(performance.now() / 1000);
@@ -875,7 +846,6 @@ class Game {
       this._saveCurrentGame();
       this._hidePauseMenu();
     });
-    this.el.worldMapBtn?.addEventListener('click', () => this._exportWorldMap());
     this.el.backToMenuBtn?.addEventListener('click', () => this._requestBackToMenu());
     this.el.confirmYesBtn?.addEventListener('click', () => this._confirmYes?.());
     this.el.confirmNoBtn?.addEventListener('click', () => this._confirmNo?.());
@@ -939,15 +909,23 @@ class Game {
       const btn = document.getElementById(id);
       if (!btn) return;
       let lastAt = 0;
+      const clearPressed = () => btn.classList.remove('mb-pressed');
       const run = (e) => {
         e.preventDefault();
         e.stopPropagation();
+        btn.classList.add('mb-pressed');
         const now = performance.now();
-        if (now - lastAt < 250) return;
+        if (now - lastAt < 250) {
+          clearPressed();
+          return;
+        }
         lastAt = now;
         onPress();
+        setTimeout(clearPressed, 120);
       };
       btn.addEventListener('pointerdown', run, { passive: false });
+      btn.addEventListener('pointerup', clearPressed);
+      btn.addEventListener('pointercancel', clearPressed);
     };
 
     const bindHold = (id, onDown, onUp) => {
@@ -959,11 +937,13 @@ class Game {
         e.stopPropagation();
         if (held) return;
         held = true;
+        btn.classList.add('mb-pressed');
         onDown();
       };
       const end = (e) => {
         if (!held) return;
         held = false;
+        btn.classList.remove('mb-pressed');
         e.preventDefault();
         onUp();
       };
@@ -1496,10 +1476,6 @@ class Game {
 
     this.lastTime = performance.now();
     if (this.lan?.isOnline) clearNetEntities(this);
-
-    if (!saveData && new URLSearchParams(location.search).get('worldmap') === '1') {
-      await this._exportWorldMap();
-    }
 
     this._loop();
   }
