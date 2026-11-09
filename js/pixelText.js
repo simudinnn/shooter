@@ -13,6 +13,7 @@ const TEXT_SHADOW_ALPHA = ('ontouchstart' in window || navigator.maxTouchPoints 
 const LINE_GAP_PX = 1;
 
 let atlas = null;
+let shadowAtlas = null;
 let atlasPromise = null;
 /** @type {Map<number, number> | null} */
 let advances = null;
@@ -61,6 +62,14 @@ function loadAtlas() {
       img.decoding = 'sync';
       img.onload = () => {
         atlas = img;
+        shadowAtlas = document.createElement('canvas');
+        shadowAtlas.width = img.naturalWidth;
+        shadowAtlas.height = img.naturalHeight;
+        const shadowCtx = shadowAtlas.getContext('2d');
+        shadowCtx.drawImage(img, 0, 0);
+        shadowCtx.globalCompositeOperation = 'source-in';
+        shadowCtx.fillStyle = '#100b0a';
+        shadowCtx.fillRect(0, 0, shadowAtlas.width, shadowAtlas.height);
         initAdvances(img);
         resolve(atlas);
       };
@@ -78,6 +87,10 @@ function charAdvance(ch, scale) {
 }
 
 function drawGlyphRun(ctx, text, scale, img, offsetX, offsetY, { shadow = false } = {}) {
+  const sheet = shadow ? shadowAtlas : img;
+  if (!sheet) return;
+  const alpha = ctx.globalAlpha;
+  if (shadow) ctx.globalAlpha = alpha * TEXT_SHADOW_ALPHA;
   let x = offsetX;
   const height = CELL * scale;
   for (const ch of text) {
@@ -85,18 +98,11 @@ function drawGlyphRun(ctx, text, scale, img, offsetX, offsetY, { shadow = false 
       const code = ch.charCodeAt(0) & 255;
       const sx = (code % COLS) * CELL;
       const sy = Math.floor(code / COLS) * CELL;
-      if (shadow) {
-        ctx.filter = 'brightness(0)';
-        ctx.globalAlpha = TEXT_SHADOW_ALPHA;
-        ctx.drawImage(img, sx, sy, CELL, CELL, x, offsetY, CELL * scale, height);
-        ctx.filter = 'none';
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.drawImage(img, sx, sy, CELL, CELL, x, offsetY, CELL * scale, height);
-      }
+      ctx.drawImage(sheet, sx, sy, CELL, CELL, x, offsetY, CELL * scale, height);
     }
     x += charAdvance(ch, scale);
   }
+  if (shadow) ctx.globalAlpha = alpha;
 }
 
 /** @param {string} text */

@@ -2407,9 +2407,81 @@ body.game-active.mobile-ui #kill-counter {
   right: max(var(--mobile-gutter), env(safe-area-inset-right, 0px));
 }
 
-body.game-active.mobile-ui #inventory-dual-wrap {
+body.mobile-ui #inventory {
+  box-sizing: border-box;
+  padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+}
+
+body.mobile-ui #inventory-dual-wrap {
+  --inv-panel-full-width: 440px;
+  --inv-panel-half-width: 300px;
+  --chest-slot-size: 44px;
+  --chest-inner-pad: 8px;
+  --craft-toggle-size: 34px;
+  --inv-gear-slot-size: 56px;
+  flex: none;
   transform: scale(var(--inv-mobile-scale, 1));
   transform-origin: center center;
+}
+
+body.mobile-ui #inventory-panel {
+  height: 290px;
+}
+
+body.mobile-ui #inventory #craft-panel,
+body.mobile-ui #inventory.open.craft-open #craft-panel {
+  transition: opacity 0.24s ease;
+}
+
+body.mobile-ui #inventory-layout {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+body.mobile-ui .inv-gear-columns {
+  grid-template-columns: repeat(2, var(--inv-gear-slot-size));
+  align-content: center;
+}
+
+body.mobile-ui .inv-equipment-grid,
+body.mobile-ui .inv-weapons-grid {
+  height: auto;
+  grid-template-rows: repeat(4, var(--inv-gear-slot-size));
+}
+
+body.mobile-ui #chest-panel {
+  width: calc(var(--chest-slot-size) * 4 + 18px + 2 * (var(--chest-inner-pad) + var(--ui-panel-border)));
+  height: calc(var(--chest-slot-size) * 2 + 6px + 2 * (var(--chest-inner-pad) + var(--ui-panel-border)));
+  max-width: none;
+}
+
+@media (orientation: portrait) {
+  body.mobile-ui #inv-slide-track {
+    flex-direction: column-reverse;
+    align-items: center;
+    gap: 10px;
+  }
+
+  body.mobile-ui #inv-main-cluster {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  body.mobile-ui #chest-panel {
+    align-self: center;
+  }
+
+  body.mobile-ui #inventory #craft-panel {
+    display: none;
+  }
+
+  body.mobile-ui #inventory.open.craft-open #craft-panel {
+    display: block;
+    align-self: center;
+    height: 250px;
+    margin-right: 0;
+  }
 }
 
 body.mobile-ui .menu-frame,

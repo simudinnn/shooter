@@ -403,7 +403,8 @@ export class InventoryUI {
         ? row.clientWidth - btnW - rowGap
         : costGrid.clientWidth;
       if (width > 0) {
-        const cell = Math.max(36, Math.floor((width - slotGap * (CRAFT_MAX_MATERIALS - 1)) / CRAFT_MAX_MATERIALS));
+        const minCell = this.game.mobile ? 24 : 36;
+        const cell = Math.max(minCell, Math.floor((width - slotGap * (CRAFT_MAX_MATERIALS - 1)) / CRAFT_MAX_MATERIALS));
         costGrid.style.setProperty('--craft-cost-cell', `${cell}px`);
       }
     }
@@ -425,7 +426,7 @@ export class InventoryUI {
     this._mobileScaleObs = new ResizeObserver(onResize);
     if (this.dualWrap) this._mobileScaleObs.observe(this.dualWrap);
     window.addEventListener('resize', onResize);
-    this._mobileScaleOnResize = onResize;
+    window.visualViewport?.addEventListener('resize', onResize);
   }
 
   _syncMobilePanelScale() {
@@ -433,18 +434,17 @@ export class InventoryUI {
       this.dualWrap?.style.removeProperty('--inv-mobile-scale');
       return;
     }
-    this.dualWrap.style.setProperty('--inv-mobile-scale', '1');
     const w = this.dualWrap.offsetWidth;
     const h = this.dualWrap.offsetHeight;
     if (w <= 0 || h <= 0) return;
-    const padX = 16;
-    const padTop = 40;
-    const padBottom = 150;
-    const maxW = window.innerWidth - padX * 2;
-    const maxH = window.innerHeight - padTop - padBottom;
-    const scale = Math.min(1, maxW / w, maxH / h);
-    this.dualWrap.style.setProperty('--inv-mobile-scale', String(Math.max(0.32, scale)));
-    if (this.craftOpen) this._syncCraftPickerLayout();
+    const viewport = window.visualViewport;
+    const padding = getComputedStyle(this.root);
+    const maxW = (viewport?.width ?? window.innerWidth)
+      - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
+    const maxH = (viewport?.height ?? window.innerHeight)
+      - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
+    const scale = Math.max(0, Math.min(1, maxW / w, maxH / h));
+    this.dualWrap.style.setProperty('--inv-mobile-scale', String(scale));
   }
 
   _syncMobilePanelScaleSoon() {
