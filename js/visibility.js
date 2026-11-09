@@ -264,7 +264,7 @@ export function computeVisibilityPolygon(
     angles.push((i / VIEW_RAY_COUNT) * TAU);
   }
 
-  const sorted = dedupeAngles(angles.slice().sort((a, b) => a - b));
+  const sorted = dedupeAngles(angles.sort((a, b) => a - b));
 
   const points = [];
   for (const a of sorted) {

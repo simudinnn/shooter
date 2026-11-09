@@ -1166,28 +1166,14 @@ export class SpriteBank {
     return this._pathImages[path] ?? null;
   }
 
-  getIconDataUrl(path) {
+  getIconUrl(path) {
     if (this._iconDataUrlCache.has(path)) return this._iconDataUrlCache.get(path);
     const img = this._pathImages[path];
-    if (!img?.complete || !img.naturalWidth) return null;
-    const c = document.createElement('canvas');
-    c.width = img.naturalWidth;
-    c.height = img.naturalHeight;
-    const ctx = c.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, 0);
-    const url = c.toDataURL('image/png');
+    if (!img) return null;
+    if (img.src) return img.naturalWidth ? img.src : null;
+    const url = img.toDataURL('image/png');
     this._iconDataUrlCache.set(path, url);
     return url;
-  }
-
-  async decodePaths(paths) {
-    const list = paths instanceof Set ? [...paths] : paths;
-    await Promise.all(list.map((path) => {
-      const img = this._pathImages[path];
-      if (!img?.decode) return Promise.resolve();
-      return img.decode().catch(() => {});
-    }));
   }
 
   _loadPathOnly(path) {
@@ -1210,27 +1196,11 @@ export class SpriteBank {
     const list = paths instanceof Set ? [...paths] : paths;
     const missing = list.filter((p) => !this._pathImages[p]);
     if (missing.length) await Promise.all(missing.map((p) => this._loadPathOnly(p)));
-    await this.decodePaths(list);
-    for (const p of list) this.getIconDataUrl(p);
-  }
-
-  /** Pre-decode inventory + UI icons for instant DOM slots on mobile. */
-  async decodeItemIcons() {
-    const paths = Object.values(ASSET_PATHS).filter((p) =>
-      p.startsWith('assets/items/') || p.startsWith('assets/ui/'),
-    );
-    await this.ensurePaths(paths);
-  }
-
-  async warmInventoryIcons() {
-    await this.decodeItemIcons();
   }
 
   preloadAll() {
     if (!this._preloadPromise) {
-      this._preloadPromise = this.loadAll()
-        .then(() => this.warmInventoryIcons())
-        .catch(() => {});
+      this._preloadPromise = this.loadAll();
     }
     return this._preloadPromise;
   }

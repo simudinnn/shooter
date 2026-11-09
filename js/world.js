@@ -47,10 +47,12 @@ export const BULLET_RADIUS = 0.15;
 
 const BAKE_VERSION = 101;
 const MAX_CACHED_CHUNKS = 256;
+const MAX_GROUND_OVERLAYS = 32;
 
 export class World {
   constructor() {
     this.chunks = new Map();
+    this._groundOverlays = new Map();
     this._oobChunks = new Map();
     this.obstacles = [];
     this.decor = [];
@@ -105,6 +107,7 @@ export class World {
 
   async build() {
     this.chunks.clear();
+    this._groundOverlays.clear();
     this._oobChunks.clear();
     this.obstacles = [];
     this.decor = [];
@@ -185,7 +188,7 @@ export class World {
         if (chunk.foliage.length !== before) foliageDirty = true;
       }
     }
-    if (dirty) chunk.bakedLayer = null;
+    if (dirty) this._invalidateGround(chunk);
     if (foliageDirty) this.syncFoliageObstacles();
   }
 
@@ -460,7 +463,10 @@ export class World {
 
   _evictOldestChunk() {
     const oldest = this.chunks.keys().next().value;
-    if (oldest != null) this.chunks.delete(oldest);
+    if (oldest != null) {
+      this._groundOverlays.delete(this.chunks.get(oldest));
+      this.chunks.delete(oldest);
+    }
   }
 
   _outOfBoundsChunk(cx, cz) {
@@ -540,7 +546,7 @@ export class World {
     }
     for (const key of touched) {
       const chunk = this.chunks.get(key);
-      if (chunk) chunk.bakedLayer = null;
+      if (chunk) this._invalidateGround(chunk);
     }
   }
 
@@ -571,7 +577,7 @@ export class World {
     for (const key of touched) {
       const chunk = this.chunks.get(key);
       if (chunk) {
-        chunk.bakedLayer = null;
+        this._invalidateGround(chunk);
         if (kind !== FLOOR_KIND) chunk.hasOverlayFloors = true;
       }
     }
@@ -591,7 +597,7 @@ export class World {
       if (dropObs.size) {
         chunk.obstacles = chunk.obstacles.filter((obs) => !dropObs.has(obs));
       }
-      chunk.bakedLayer = null;
+      this._invalidateGround(chunk);
     }
   }
 
@@ -604,7 +610,7 @@ export class World {
         if (!obs._foliage) return true;
         return live.has(obs._foliage);
       });
-      if (chunk.obstacles.length !== before) chunk.bakedLayer = null;
+      if (chunk.obstacles.length !== before) this._invalidateGround(chunk);
     }
   }
 
@@ -636,7 +642,7 @@ export class World {
           );
         });
         if (chunk.foliage.length !== before) {
-          chunk.bakedLayer = null;
+          this._invalidateGround(chunk);
         }
       }
     }
@@ -657,6 +663,11 @@ export class World {
     const minX = tx * TILE;
     const minZ = tz * TILE;
     this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE, { markBlocked });
+  }
+
+  _invalidateGround(chunk) {
+    chunk.bakedLayer = null;
+    this._groundOverlays.delete(chunk);
   }
 
   _bakeChunkGround(chunk, sprites, tilePx) {
@@ -776,6 +787,7 @@ export class World {
     }
 
     const drawOpts = { loadMissing: this._fullyPrewarmed, touchLru: false };
+    let canBakeOverlay = !this._fullyPrewarmed;
     this.forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, (chunk) => {
       if (
         chunk.bakedLayer
@@ -788,25 +800,50 @@ export class World {
         return;
       }
 
-      const half = tilePx * 0.5;
-      for (const tile of chunk.tiles) {
-        if (tile.floorKind === FLOOR_KIND) continue;
-        const px = Math.round(tile.tx * TILE * ppu);
-        const pz = Math.round(tile.tz * TILE * ppu);
-        sprites.stampTile(ctx, getFloorSpriteName(tile.floorKind), px, pz, tilePx);
+      const x = Math.round(chunk.cx * CHUNK_WORLD * ppu) - tilePx;
+      const z = Math.round(chunk.cz * CHUNK_WORLD * ppu) - tilePx;
+      let overlay = this._groundOverlays.get(chunk);
+      if (!overlay && canBakeOverlay && chunk.foliagePopulated) {
+        canBakeOverlay = false;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = (CHUNK_TILES + 2) * tilePx;
+        const layer = canvas.getContext('2d');
+        if (layer) {
+          layer.imageSmoothingEnabled = false;
+          layer.translate(-x, -z);
+          this._drawGroundOverlay(layer, chunk, sprites, ppu, tilePx);
+          overlay = canvas;
+        }
       }
-      if (!chunk.foliage?.length) return;
-      for (const f of chunk.foliage) {
-        if (isYsortFoliage(f.kind)) continue;
-        if (f.x < minWX - TILE || f.x > maxWX + TILE || f.z < minWZ - TILE || f.z > maxWZ + TILE) continue;
-        const fTint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
-        const fx = Math.round(f.x * ppu - half);
-        const fz = Math.round(f.z * ppu - half);
-        sprites.stampTile(ctx, f.sprite, fx, fz, tilePx, fTint);
+      if (overlay) {
+        this._groundOverlays.delete(chunk);
+        this._groundOverlays.set(chunk, overlay);
+        if (this._groundOverlays.size > MAX_GROUND_OVERLAYS) {
+          this._groundOverlays.delete(this._groundOverlays.keys().next().value);
+        }
+        ctx.drawImage(overlay, x, z);
+      } else {
+        this._drawGroundOverlay(ctx, chunk, sprites, ppu, tilePx);
       }
     }, drawOpts);
 
     ctx.restore();
+  }
+
+  _drawGroundOverlay(ctx, chunk, sprites, ppu, tilePx) {
+    for (const tile of chunk.tiles) {
+      if (tile.floorKind === FLOOR_KIND) continue;
+      const px = Math.round(tile.tx * TILE * ppu);
+      const pz = Math.round(tile.tz * TILE * ppu);
+      sprites.stampTile(ctx, getFloorSpriteName(tile.floorKind), px, pz, tilePx);
+    }
+    for (const f of chunk.foliage) {
+      if (isYsortFoliage(f.kind)) continue;
+      const tint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
+      const x = Math.round(f.x * ppu - tilePx * 0.5);
+      const z = Math.round(f.z * ppu - tilePx * 0.5);
+      sprites.stampTile(ctx, f.sprite, x, z, tilePx, tint);
+    }
   }
 
   forEachChunkInRect(minTX, maxTX, minTZ, maxTZ, fn, { loadMissing = true, touchLru = true } = {}) {

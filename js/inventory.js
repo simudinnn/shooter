@@ -539,14 +539,14 @@ export class InventoryUI {
 
   _slotIcon(src) {
     const bank = this.game.sprites;
-    const dataUrl = bank?.getIconDataUrl?.(src);
+    const iconUrl = bank?.getIconUrl(src);
     const img = document.createElement('img');
     img.className = 'inv-slot-icon';
     img.alt = '';
     img.draggable = false;
     img.loading = 'eager';
-    img.decoding = 'sync';
-    img.src = dataUrl || src;
+    img.decoding = 'async';
+    img.src = iconUrl || src;
     img.onerror = () => { img.style.visibility = 'hidden'; };
     return img;
   }

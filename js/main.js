@@ -140,6 +140,8 @@ class Game {
     this._visPz = null;
     this._visTick = 0;
     this._drawListScratch = [];
+    this._mobileSlotIcons = new WeakMap();
+    this._frameRequest = null;
     this.debugCollision = false;
     this.touchMove = { x: 0, z: 0 };
     this.autoLock = false;
@@ -322,6 +324,10 @@ class Game {
     this.el.pauseMenu?.classList.add('hidden');
     this._disableMenuCursor();
     this.canvas.focus();
+    if (this.running && this._frameRequest === null) {
+      this.lastTime = performance.now();
+      this._scheduleFrame();
+    }
   }
 
   _ensureMenuCursor() {
@@ -434,9 +440,9 @@ class Game {
     this._spawnReveal = {
       phase: 'foliage',
       opacity: 1,
-      fadeOutDuration: 2.4,
+      fadeOutDuration: 0.65,
       holdElapsed: 0,
-      minHold: 2.75,
+      minHold: 0.25,
       maxHold: 10,
       radiusChunks: 5,
     };
@@ -1079,6 +1085,15 @@ class Game {
       viewMaxZ,
       insideBuilding,
     );
+    const previous = this._aimVisInputs;
+    if (this._aimVisPoly && previous?.x === origin.x && previous.z === origin.z
+      && previous.camX === cam.x && previous.camZ === cam.z
+      && previous.segments.length === segments.length
+      && segments.every((seg, i) => {
+        const old = previous.segments[i];
+        return seg.x1 === old.x1 && seg.z1 === old.z1 && seg.x2 === old.x2 && seg.z2 === old.z2;
+      })) return;
+    this._aimVisInputs = { x: origin.x, z: origin.z, camX: cam.x, camZ: cam.z, segments };
     this._aimVisPoly = computeVisibilityPolygon(
       origin.x,
       origin.z,
@@ -1402,7 +1417,7 @@ class Game {
       this.lan?.disconnect();
       this.lan = null;
     }
-    this.audio.init();
+    this.audio.init().catch(() => {});
     this.audio.resume();
 
     await this._spritePreload;
@@ -1416,6 +1431,8 @@ class Game {
     }
 
     this.world = new World();
+    this._aimVisPoly = null;
+    this._aimVisInputs = null;
     this.world.setSpriteBank(this.sprites);
     await this.world.build();
     this.bullets = new BulletPool();
@@ -1477,7 +1494,7 @@ class Game {
     this.lastTime = performance.now();
     if (this.lan?.isOnline) clearNetEntities(this);
 
-    this._loop();
+    this._scheduleFrame();
   }
 
   _applySaveState(data) {
@@ -3160,24 +3177,21 @@ class Game {
   _setMobileSlotBtn(id, item, fallbackLabel) {
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.replaceChildren();
-    if (!item) {
-      this._setPixelText(btn, fallbackLabel, PIXEL_TEXT_SCALE_SM);
-      return;
-    }
-    const src = getItemIconSrc(item);
+    const src = item && getItemIconSrc(item);
     if (!src) {
       this._setPixelText(btn, fallbackLabel, PIXEL_TEXT_SCALE_SM);
       return;
     }
+    const previous = this._mobileSlotIcons.get(btn);
+    if (previous?.src === src && btn.firstChild === previous.img) return;
     const img = document.createElement('img');
     img.className = 'mb-btn-icon';
     img.alt = '';
     img.draggable = false;
-    img.decoding = 'sync';
-    const dataUrl = this.sprites?.getIconDataUrl?.(src);
-    img.src = dataUrl || src;
-    btn.appendChild(img);
+    img.decoding = 'async';
+    img.src = this.sprites.getIconUrl(src) || src;
+    btn.replaceChildren(img);
+    this._mobileSlotIcons.set(btn, { src, img });
   }
 
   _syncMobileQuickBar() {
@@ -3209,10 +3223,12 @@ class Game {
     const spriteName = AMMO_TYPES[ammoType]?.sprite ?? 'pistol_ammo';
     const img = this.sprites?.images[spriteName];
     if (!img) return;
+    if (this._lastAmmoHudImage === img) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, outPx, outPx);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(img, 0, 0, srcPx, srcPx, 0, 0, outPx, outPx);
+    this._lastAmmoHudImage = img;
   }
 
   _updateHUD() {
@@ -3278,10 +3294,10 @@ class Game {
     this.el.powerupStatus.classList.toggle('active', !!power);
     this._syncMobileQuickBar();
 
-    const hoveredChest = this._getHoveredChest();
-    const nearbyChest = this._getNearbyChest();
-    const hoveredCorpse = this._getHoveredCorpse();
-    const nearbyCorpse = this._getNearbyCorpse();
+    const hoveredChest = this.mobile ? null : this._getHoveredChest();
+    const nearbyChest = this.mobile ? this._getNearbyChest() : null;
+    const hoveredCorpse = this.mobile ? null : this._getHoveredCorpse();
+    const nearbyCorpse = this.mobile ? this._getNearbyCorpse() : null;
     const interactDoor = this._getInteractDoor();
     const canOpenChestDesktop = !this.inventoryUI.open
       && !this.mobile
@@ -3295,8 +3311,8 @@ class Game {
       && this.corpses.isInInteractRange(this.player, hoveredCorpse);
     const canOpenCorpseMobile = !this.inventoryUI.open && this.mobile && nearbyCorpse && !interactDoor && !canOpenChest;
     const canOpenCorpse = canOpenCorpseDesktop || canOpenCorpseMobile;
-    const hoveredDrop = this._getHoveredGroundDrop();
-    const nearbyDrop = this._getNearbyGroundDrop();
+    const hoveredDrop = this.mobile ? null : this._getHoveredGroundDrop();
+    const nearbyDrop = this.mobile ? this._getNearbyGroundDrop() : null;
     const canPickupDropDesktop = !this.inventoryUI.open
       && !this.mobile
       && hoveredDrop
@@ -3363,21 +3379,27 @@ class Game {
     this._showMainMenu(`You died — Kills: ${this.kills} · Time: ${elapsed}s`);
   }
 
-  _loop() {
-    if (!this.running) return;
-    const now = performance.now();
-    const dt = Math.min((now - this.lastTime) / 1000, 0.05);
+  _scheduleFrame() {
+    if (this._frameRequest !== null) return;
+    this._frameRequest = requestAnimationFrame((now) => {
+      this._frameRequest = null;
+      this._loop(now);
+    });
+  }
+
+  _loop(now) {
+    if (!this.running || this.paused) return;
+    const dt = Math.max(0, Math.min((now - this.lastTime) / 1000, 0.05));
     this.lastTime = now;
     const time = now / 1000;
 
     this._frameDt = dt;
-    if (!this.paused) {
     this._update(dt, time);
-      this._checkGameOver();
-    }
+    this._checkGameOver();
+    if (!this.running || this.paused) return;
     this._draw();
     this._updateHUD();
-    requestAnimationFrame(() => this._loop());
+    this._scheduleFrame();
   }
 }
 

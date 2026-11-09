@@ -16,6 +16,7 @@ let atlas = null;
 let atlasPromise = null;
 /** @type {Map<number, number> | null} */
 let advances = null;
+const renderedLabels = new WeakMap();
 
 function isInk(r, g, b, a) {
   if (a < 32) return false;
@@ -218,12 +219,16 @@ export function createPixelTextImg(text, scale = PIXEL_TEXT_SCALE) {
 /** Replace element contents with colored atlas text. */
 export function setElementPixelText(el, text, scale = PIXEL_TEXT_SCALE) {
   if (!el) return;
+  const previous = renderedLabels.get(el);
+  if (previous?.text === text && previous.scale === scale && previous.atlas === atlas
+    && el.firstChild === previous.node && el.lastChild === previous.node) return;
   el.textContent = '';
   el.style.color = 'transparent';
   el.style.fontSize = '0';
   el.style.lineHeight = '0';
   if (!text) return;
   el.appendChild(createPixelTextImg(text, scale));
+  renderedLabels.set(el, { text, scale, atlas, node: el.firstChild });
 }
 
 /** Draw atlas text on a 2D canvas (world/HUD). */

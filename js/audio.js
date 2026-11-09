@@ -14,7 +14,9 @@ export class SoundManager {
   async init() {
     if (this.ctx) return;
 
-    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.45;
     this.master.connect(this.ctx.destination);
@@ -24,7 +26,7 @@ export class SoundManager {
   }
 
   resume() {
-    if (this.ctx?.state === 'suspended') this.ctx.resume();
+    if (this.ctx?.state === 'suspended') this.ctx.resume().catch(() => {});
   }
 
   async loadSounds() {
@@ -42,9 +44,6 @@ export class SoundManager {
       enemyShot: [
         'sounds/guns/enemy-shot.ogg'
       ],
-      reload: [
-        'sounds/guns/reload.ogg'
-      ],
       weaponSwitch: [
         'sounds/player/weapon-switch-1.ogg'
       ],
@@ -58,19 +57,6 @@ export class SoundManager {
         'sounds/world/explosion-2.ogg',
         'sounds/world/explosion-3.ogg',
       ],
-      playerHurt: [
-        'sounds/player/player-hurt-1.ogg',
-        'sounds/player/player-hurt-2.ogg',
-        'sounds/player/player-hurt-3.ogg',
-      ],
-      pickup: [
-        'sounds/ui/pickup.ogg'
-      ],
-      chestOpen: [
-        'sounds/world/chest-open-1.ogg',
-        'sounds/world/chest-open-2.ogg',
-        'sounds/world/chest-open-3.ogg',
-      ],
       doorOpen: [
         'sounds/world/door-open-1.ogg',
         'sounds/world/door-open-2.ogg',
@@ -80,21 +66,6 @@ export class SoundManager {
         'sounds/world/door-close-1.ogg',
         'sounds/world/door-close-2.ogg',
         'sounds/world/door-close-3.ogg',
-      ],
-      inventoryMove: [
-        'sounds/ui/inventory-move-1.ogg',
-        'sounds/ui/inventory-move-2.ogg',
-        'sounds/ui/inventory-move-3.ogg',
-      ],
-      inventoryPlace: [
-        'sounds/ui/inventory-place-1.ogg',
-        'sounds/ui/inventory-place-2.ogg',
-        'sounds/ui/inventory-place-3.ogg',
-      ],
-      inventoryEquip: [
-        'sounds/ui/inventory-equip-1.ogg',
-        'sounds/ui/inventory-equip-2.ogg',
-        'sounds/ui/inventory-equip-3.ogg',
       ],
       footstep: [
         'sounds/player/footstep-1.ogg',
@@ -120,14 +91,6 @@ export class SoundManager {
         'sounds/guns/casing-eject-1.ogg',
         'sounds/guns/casing-eject-2.ogg',
         'sounds/guns/casing-eject-3.ogg'
-      ],
-      casingLand: [
-      ],
-      regenStart: [
-        'sounds/player/regen-start.ogg'
-      ],
-      win: [
-        'sounds/ui/win.ogg'
       ],
       lose: [
         'sounds/ui/lose.ogg'
