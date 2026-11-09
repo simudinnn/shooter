@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v362';
+const CACHE = 'robot-ruins-v363';
 
 function buildingKitSprites() {
   return [
@@ -53,9 +53,11 @@ function weaponSprites() {
   for (const base of guns) {
     paths.push(`./assets/weapons/${base}.png`);
     paths.push(`./assets/weapons/${base}_shot.png`);
+    paths.push(`./assets/weapons/${base}_reload.png`);
   }
+  paths.push('./assets/weapons/m870_cycle.png', './assets/weapons/m24_cycle.png');
   for (const base of melees) paths.push(`./assets/weapons/${base}.png`);
-  for (const base of [...guns, ...melees]) paths.push(`./assets/items/weapons/${base}.png`);
+  for (const base of [...guns, ...melees.filter((name) => name !== 'hand')]) paths.push(`./assets/items/weapons/${base}.png`);
   return paths;
 }
 
@@ -92,6 +94,21 @@ const SHELL = [
   './js/gameConfig.js',
   './js/rooms.js',
   './js/main.js',
+  './js/consumables.js',
+  './js/crafting.js',
+  './js/equipment.js',
+  './js/highwayGen.js',
+  './js/imageMap.js',
+  './js/minimap.js',
+  './js/pixelText.js',
+  './js/register-sw.js',
+  './js/roadPaint.js',
+  './js/textures.js',
+  './js/throwables.js',
+  './js/townGen.js',
+  './js/waves.js',
+  './js/workbench.js',
+  './js/worldMap.js',
   './js/player.js',
   './js/bulletCollision.js',
   './js/enemies.js',
@@ -191,6 +208,8 @@ const ASSETS = [
   './assets/items/particles/particle_smoke.png',
   './assets/items/particles/particle_fire.png',
   './assets/ui/cursor.png',
+  './assets/ui/cursor_melee.png',
+  './assets/ui/cursor_shotgun.png',
   './assets/ui/enemy_aggro.png',
   './assets/ui/enemy_search.png',
   './icons/icon-192.png',
@@ -199,7 +218,7 @@ const ASSETS = [
 
 async function cacheUrl(cache, url) {
   try {
-    const res = await fetch(url, { cache: 'reload' });
+    const res = await fetch(url);
     if (res.ok) await cache.put(url, res);
   } catch {
     /* optional file — skip */
@@ -208,7 +227,10 @@ async function cacheUrl(cache, url) {
 
 async function precache() {
   const cache = await caches.open(CACHE);
-  await Promise.all([...SHELL, ...ASSETS].map((url) => cacheUrl(cache, url)));
+  const urls = [...SHELL, ...ASSETS];
+  for (let i = 0; i < urls.length; i += 8) {
+    await Promise.all(urls.slice(i, i + 8).map((url) => cacheUrl(cache, url)));
+  }
 }
 
 self.addEventListener('install', (event) => {
@@ -218,55 +240,40 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
+      Promise.all(keys.filter((k) => k.startsWith('robot-ruins-') && k !== CACHE).map((k) => caches.delete(k))),
     ).then(() => self.clients.claim()),
   );
 });
 
-function isSameOrigin(url) {
-  return url.origin === self.location.origin;
-}
+async function serve(request, url) {
+  const cache = await caches.open(CACHE);
+  const navigation = request.mode === 'navigate';
+  const code = navigation || /\.(?:js|css|html|webmanifest)$/.test(url.pathname);
+  const cached = await cache.match(request);
+  if (!code && cached) return cached;
 
-async function matchCached(request) {
-  const hit = await caches.match(request);
-  if (hit) return hit;
-  if (request.mode !== 'navigate') return null;
-  for (const url of ['./index.html', './', '/index.html', '/']) {
-    const nav = await caches.match(url);
-    if (nav) return nav;
+  try {
+    const response = await fetch(request);
+    if (response.ok && response.status === 200) {
+      try {
+        await cache.put(navigation ? './index.html' : request, response.clone());
+      } catch {
+        // The browser can deny storage when its cache is full.
+      }
+    }
+    return response;
+  } catch {
+    return cached
+      ?? (navigation ? await cache.match('./index.html') : undefined)
+      ?? new Response('Offline resource unavailable.', { status: 503 });
   }
-  return null;
 }
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-  const url = new URL(event.request.url);
-  if (!isSameOrigin(url)) return;
-
-  event.respondWith(
-    (async () => {
-      const cache = await caches.open(CACHE);
-      const cached = await matchCached(event.request);
-
-      if (cached) {
-        fetch(event.request)
-          .then((res) => { if (res.ok) cache.put(event.request, res.clone()); })
-          .catch(() => {});
-        return cached;
-      }
-
-      try {
-        const res = await fetch(event.request);
-        if (res.ok) await cache.put(event.request, res.clone());
-        return res;
-      } catch {
-        const fallback = await matchCached(event.request);
-        if (fallback) return fallback;
-        return new Response('Offline — open this page once while online to cache it.', {
-          status: 503,
-          headers: { 'Content-Type': 'text/plain' },
-        });
-      }
-    })(),
-  );
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin || request.headers.has('range')) return;
+  if (request.mode !== 'navigate' && !/\/(?:js|assets|icons|sounds)\//.test(url.pathname)
+    && !/\/(?:style\.css|manifest\.webmanifest)$/.test(url.pathname)) return;
+  event.respondWith(serve(request, url));
 });
