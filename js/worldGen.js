@@ -360,7 +360,7 @@ export function populateChunkFoliage(chunk, shouldSkipTile = null) {
     for (let lx = 0; lx < CHUNK_TILES; lx++) {
       const tx = chunk.cx * CHUNK_TILES + lx;
       const tz = chunk.cz * CHUNK_TILES + lz;
-      if (shouldSkipTile?.(tx, tz)) continue;
+      if (shouldSkipTile?.(tx, tz, chunk.tiles[lz * CHUNK_TILES + lx])) continue;
       const wx = tx * TILE + TILE * 0.5;
       const wz = tz * TILE + TILE * 0.5;
       pickFoliageForTile(tx, tz, chunk.foliage, chunk.obstacles, reserved, wx, wz);

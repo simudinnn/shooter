@@ -1,3 +1,4 @@
+import { customWeapons } from './customContent.js';
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
 import { bulletOwnerFeetZ } from './bulletCollision.js';
 import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX } from './sprites.js';
@@ -160,6 +161,16 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
 };
+
+for (const [key, weapon] of Object.entries(customWeapons)) {
+  WEAPONS[key] = {
+    ...WEAPONS.glock,
+    ...weapon,
+    sprite: key,
+    shotSprite: `${key}_shot`,
+    automatic: weapon.fireRate > 0,
+  };
+}
 
 export const WEAPON_KEYS = Object.keys(WEAPONS);
 
@@ -1821,3 +1832,4 @@ export class BulletPool {
     }
   }
 }
+

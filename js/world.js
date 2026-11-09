@@ -123,11 +123,11 @@ export class World {
     this._touchChunk(0, 0);
   }
 
-  _foliageSkipTile(tx, tz) {
+  _foliageSkipTile(tx, tz, tile) {
     if (this._foliageBlocked.has(`${tx},${tz}`)) return true;
     if (this._townFloorTiles.has(`${tx},${tz}`)) return true;
     if (isHighwayTile(tx, tz)) return true;
-    const tile = this.getTile(tx, tz);
+    tile ??= this.getTile(tx, tz);
     if (tile?.floorKind === 'road' || tile?.floorKind === 'path') return true;
     return false;
   }
@@ -171,7 +171,6 @@ export class World {
   _applyTownFloorToChunk(chunk) {
     if (!chunk || chunk.outOfBounds || this._townFloorTiles.size === 0) return;
     let dirty = false;
-    let foliageDirty = false;
     for (const tile of chunk.tiles) {
       const kind = this._townFloorTiles.get(`${tile.tx},${tile.tz}`);
       if (!kind) continue;
@@ -183,18 +182,15 @@ export class World {
       if (chunk.foliagePopulated && kind !== FLOOR_KIND) {
         const minX = tile.tx * TILE;
         const minZ = tile.tz * TILE;
-        const before = chunk.foliage.length;
         this.clearFoliageInRect(minX, minX + TILE, minZ, minZ + TILE, { markBlocked: false });
-        if (chunk.foliage.length !== before) foliageDirty = true;
       }
     }
     if (dirty) this._invalidateGround(chunk);
-    if (foliageDirty) this.syncFoliageObstacles();
   }
 
   populateFoliageForChunk(chunk) {
     if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
-    populateChunkFoliage(chunk, (tx, tz) => this._foliageSkipTile(tx, tz));
+    populateChunkFoliage(chunk, (tx, tz, tile) => this._foliageSkipTile(tx, tz, tile));
     this._pruneFoliageWithoutSprites(chunk);
     this._onFoliagePopulated?.(chunk);
   }
@@ -388,7 +384,7 @@ export class World {
       }
     }
     toLoad.sort((a, b) => a.d - b.d);
-    const budget = eager ? toLoad.length : 4;
+    const budget = eager ? toLoad.length : (opts.budget ?? 4);
     for (let i = 0; i < Math.min(budget, toLoad.length); i++) {
       this.getChunk(toLoad[i].cx, toLoad[i].cz);
     }

@@ -1,3 +1,4 @@
+import { customItems } from './customContent.js';
 export const MATERIAL_STACK_MAX = 50;
 
 export const MATERIAL_KEYS = [
@@ -7,6 +8,7 @@ export const MATERIAL_KEYS = [
   'microchip', 'military_comp', 'nails', 'plank', 'plastic', 'repair_kit', 'rope',
   'rubber', 'sewing_kit', 'splint_kit', 'spring', 'stick', 'tape', 'upgrade_kit',
   'wires', 'wood',
+  ...Object.keys(customItems),
 ];
 
 const DISPLAY_NAMES = {
@@ -47,11 +49,11 @@ const DISPLAY_NAMES = {
 };
 
 export function materialSpritePath(key) {
-  return `assets/items/materials/${key}.png`;
+  return customItems[key]?.icon ?? `assets/items/materials/${key}.png`;
 }
 
 export function getMaterialDisplayName(key, amount = 1) {
-  const name = DISPLAY_NAMES[key] ?? key;
+  const name = customItems[key]?.name ?? DISPLAY_NAMES[key] ?? key;
   return amount > 1 ? `${name} x${amount}` : name;
 }
 
@@ -81,3 +83,5 @@ export function mergeMaterialStacks(a, b) {
     overflow: { kind: 'material', key: left.key, amount: total - MATERIAL_STACK_MAX },
   };
 }
+
+

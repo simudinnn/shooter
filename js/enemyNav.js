@@ -1,4 +1,5 @@
 import { TILE } from './worldGen.js';
+import { INTERNAL_W, INTERNAL_H, PPU } from './renderConfig.js';
 import {
   CELL_DOOR,
   CELL_EMPTY,
@@ -46,8 +47,8 @@ export const ENEMY_ALERT_DETECT_MULT = 1.2;
 export const ENEMY_ALERT_WANDER_SPEED = 0.82;
 export const ENEMY_IDLE_FORGET_TIME = 5.0;
 
-export const SPIDER_DETECT_RANGE = 28;
-export const SCOUT_DETECT_RANGE = 36;
+export const SPIDER_DETECT_RANGE = 24;
+export const SCOUT_DETECT_RANGE = 30;
 
 const _flow = {
   active: false,
@@ -591,6 +592,7 @@ export function tickTileFlowField(time, world, buildings, player, robots) {
 
   for (const r of robots ?? []) {
     if (!r.alive || (!r.chasing && !r.aggroByHit)) continue;
+    if (Math.hypot(r.x - player.x, r.z - player.z) > FLOW_ACTIVATE_RANGE) continue;
     const rtx = Math.floor(r.x / TILE);
     const rtz = Math.floor(r.z / TILE);
     minTx = Math.min(minTx, rtx - 4);
@@ -1048,7 +1050,7 @@ export function getChaseGoal(robot, player, buildings, world) {
 }
 
 function getMindGoal(robot, player, buildings, world) {
-  if (robot.searchPhase === 'search' && robot.hasLastKnown) {
+  if ((robot.searchPhase === 'search' || robot.searchPhase === 'investigate') && robot.hasLastKnown) {
     const playerBld = getPlayerBuilding(buildings, player);
     const enemyBld = buildings?.getEntityBuildingAt?.(robot) ?? null;
     if (playerBld && playerBld !== enemyBld && !playerBld.doorOpen) {
@@ -1063,9 +1065,15 @@ function getMindGoal(robot, player, buildings, world) {
 
 // ─── Combat mind ────────────────────────────────────────────────────────────
 
+export function isEnemyOnPlayerScreen(robot, player) {
+  if (player.canSeeEnemyOnScreen) return player.canSeeEnemyOnScreen(robot);
+  return Math.abs(robot.x - player.x) <= INTERNAL_W / (2 * PPU)
+    && Math.abs(robot.z - player.z) <= INTERNAL_H / (2 * PPU);
+}
+
 export function canEnemySeePlayer(robot, player, world, buildings, detectRange) {
   const dist = Math.hypot(player.x - robot.x, player.z - robot.z);
-  if (dist >= detectRange) return false;
+  if (dist >= detectRange || !isEnemyOnPlayerScreen(robot, player)) return false;
 
   const robotFeetZ = entityFeetZ(robot);
   const playerFeetZ = entityFeetZ(player);
@@ -1291,7 +1299,7 @@ export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 6
     }
   }
 
-  const flowDir = readChaseFlowDir(robot.x, robot.z, buildings, robot, world, dt);
+  const flowDir = goal.kind === 'last_known' ? null : readChaseFlowDir(robot.x, robot.z, buildings, robot, world, dt);
   if (flowDir) {
     return { dirX: flowDir.dirX, dirZ: flowDir.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
   }

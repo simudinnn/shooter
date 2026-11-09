@@ -1,3 +1,4 @@
+import { customEnemies, customWeapons } from './customContent.js';
 /**
  * Sprite loader — assets/{player,enemies,weapons,world,items,ui}/
  */
@@ -186,6 +187,17 @@ export const ASSET_PATHS = {
   ...CORE_ASSETS,
 };
 
+for (const [key, enemy] of Object.entries(customEnemies)) {
+  ASSET_PATHS[key] = enemy.idle;
+  ASSET_PATHS[`${key}_walk`] = enemy.walk;
+  ASSET_PATHS[`${key}_dead`] = enemy.dead;
+}
+for (const [key, weapon] of Object.entries(customWeapons)) {
+  ASSET_PATHS[key] = weapon.sprite;
+  ASSET_PATHS[`${key}_shot`] = weapon.shot;
+  ASSET_PATHS[`item_${key}`] = weapon.icon;
+}
+
 export const FLOOR_VARIANTS = ['floor', 'floor2', 'floor3', 'floor4'];
 export const CRATE_VARIANTS = ['crate', 'crate2', 'crate3', 'crate4'];
 export const ITEM_NATIVE_PX = 16;
@@ -199,11 +211,11 @@ export const ENEMY_DRAW_SCALE = {
 };
 
 export function getEnemyNativePx(type) {
-  return type === 'scout' ? SCOUT_NATIVE_PX : CHAR_NATIVE_PX;
+  return customEnemies[type]?.frameSize ?? (type === 'scout' ? SCOUT_NATIVE_PX : CHAR_NATIVE_PX);
 }
 
 export function getEnemyDrawScale(type) {
-  return ENEMY_DRAW_SCALE[type] ?? 1.45;
+  return customEnemies[type] ? CHAR_NATIVE_PX * 1.45 / customEnemies[type].frameSize : (ENEMY_DRAW_SCALE[type] ?? 1.45);
 }
 export const WEAPON_NATIVE_PX = 24;
 export const PARTICLE_FX_NATIVE_PX = 15;
@@ -233,7 +245,7 @@ export function weaponHoldSpritePath(sprite) {
 
 /** 16×16 item icon for inventory / GUI / back-carry (no hands). */
 export function weaponItemSpritePath(sprite) {
-  return `assets/items/weapons/${sprite}.png`;
+  return customWeapons[sprite]?.icon ?? `assets/items/weapons/${sprite}.png`;
 }
 
 /** SpriteBank key for a weapon item icon. */
@@ -266,6 +278,14 @@ const RUN_LEGS = [
 const PLAYER_ANIM_RE = /^player_(walk|run)_(\d+)$/;
 
 function getAnimSpec(name) {
+  if (name.startsWith('custom_enemies_')) {
+    const enemy = customEnemies[name.replace(/_(walk|dead)$/, '')];
+    if (enemy) {
+      const moving = name.endsWith('_walk');
+      return { frameW: enemy.frameSize, frameH: enemy.frameSize, axis: enemy.axis, fps: enemy.fps, loop: moving,
+        ...(moving ? {} : { frames: 1 }) };
+    }
+  }
   return SPRITE_ANIM.sheets[name] || {};
 }
 
@@ -1119,6 +1139,7 @@ export function getEnemyBodySheet(type, moving, shootPhase = null) {
 
 /** Flipbook timing for enemy body sheets — scout walk uses elapsed walkPhase at sheet fps. */
 export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null, opts = {}) {
+  if (customEnemies[type] && moving) return { time };
   if (type === 'scout' && (shootPhase === 'charging' || shootPhase === 'firing')) {
     const elapsed = chargeAnimStart != null ? Math.max(0, time - chargeAnimStart) : 0;
     return { elapsed };

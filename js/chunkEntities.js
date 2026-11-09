@@ -2,6 +2,21 @@ import { Robot, Scout, createGroundErupt, SCOUT_SPAWN_SHARE } from './enemies.js
 import { CHUNK_WORLD, TILE, hash01, isInBase } from './worldGen.js';
 import { getNearbyTownAnchors } from './highwayGen.js';
 import { BUILDING_CHUNK_SPAWN_RATE } from './buildings.js';
+import { customEnemies } from './customContent.js';
+
+const customSpawnEntries = Object.entries(customEnemies).filter(([, entry]) => entry.spawnWeight > 0);
+const totalSpawnWeight = 100 + customSpawnEntries.reduce((sum, [, entry]) => sum + entry.spawnWeight, 0);
+
+function pickEnemyType(roll) {
+  let weight = roll * totalSpawnWeight;
+  if (weight < 100) return weight < SCOUT_SPAWN_SHARE * 100 ? 'scout' : 'spider';
+  weight -= 100;
+  for (const [type, entry] of customSpawnEntries) {
+    weight -= entry.spawnWeight;
+    if (weight < 0) return type;
+  }
+  return 'spider';
+}
 
 /** Chunks around the player that stay populated with spiders/chests. */
 export const ENTITY_CHUNK_RADIUS = 4;
@@ -24,14 +39,20 @@ export class ChunkEntityManager {
   constructor(world, game) {
     this.world = world;
     this.game = game;
+    this.reset();
   }
 
-  reset() {}
+  reset() {
+    this._nextUpdate = 0;
+  }
 
-  update(player) {
+  update(player, time = 0) {
     if (this.game.lan?.isOnline) return;
+    if (time < this._nextUpdate) return;
+    this._nextUpdate = time + 0.2;
     this._despawnFar(player);
-    this._populateNearby(player);
+    this._populateBuildingsOnly(player, ENTITY_CHUNK_RADIUS, true);
+    this._populateEnemiesOnly(player, true);
   }
 
   _playerChunk(player) {
@@ -256,23 +277,19 @@ export class ChunkEntityManager {
     }).length;
   }
 
-  _populateNearby(player) {
-    this._populateBuildingsOnly(player);
-    this._populateEnemiesOnly(player);
-  }
-
   _chunkAt(cx, cz) {
     return this.world.getChunk(cx, cz);
   }
 
-  _populateEnemiesOnly(player) {
+  _populateEnemiesOnly(player, cachedOnly = false) {
     const { fx, fz } = this._getPlayerForward(player);
     const { cx: pcx, cz: pcz } = this._playerChunk(player);
     const chunks = [];
     for (let cz = pcz - ENTITY_CHUNK_RADIUS; cz <= pcz + ENTITY_CHUNK_RADIUS; cz++) {
       for (let cx = pcx - ENTITY_CHUNK_RADIUS; cx <= pcx + ENTITY_CHUNK_RADIUS; cx++) {
-        const chunk = this._chunkAt(cx, cz);
+        const chunk = cachedOnly ? this.world.chunks.get(`${cx},${cz}`) : this._chunkAt(cx, cz);
         if (!chunk || chunk.outOfBounds) continue;
+        if (chunk.spidersSpawned) continue;
         if (!this._shouldPopulateChunk(chunk, player, fx, fz)) continue;
         const center = this._chunkCenter(cx, cz);
         const ahead = (center.x - player.x) * fx + (center.z - player.z) * fz;
@@ -325,12 +342,12 @@ export class ChunkEntityManager {
     }
   }
 
-  _populateBuildingsOnly(player, radiusChunks = ENTITY_CHUNK_RADIUS) {
+  _populateBuildingsOnly(player, radiusChunks = ENTITY_CHUNK_RADIUS, cachedOnly = false) {
     const { fx, fz } = this._getPlayerForward(player);
     const { cx: pcx, cz: pcz } = this._playerChunk(player);
     for (let cz = pcz - radiusChunks; cz <= pcz + radiusChunks; cz++) {
       for (let cx = pcx - radiusChunks; cx <= pcx + radiusChunks; cx++) {
-        const chunk = this._chunkAt(cx, cz);
+        const chunk = cachedOnly ? this.world.chunks.get(`${cx},${cz}`) : this._chunkAt(cx, cz);
         if (!chunk || chunk.outOfBounds) continue;
         if (!chunk.buildingsSpawned) this._spawnChunkBuildings(chunk, player, fx, fz);
       }
@@ -368,7 +385,8 @@ export class ChunkEntityManager {
     if (this._countNearbySpiders(player) >= MAX_NEARBY_SPIDERS) return;
 
     const typeRoll = hash01(chunk.cx * 31 + 47, chunk.cz * 41 + 53);
-    const useScout = typeRoll < SCOUT_SPAWN_SHARE;
+    const type = pickEnemyType(typeRoll);
+    const useScout = type === 'scout';
     const spawnR = useScout ? 1.0 : 0.85;
 
     const pos = this._findChunkPoint(chunk, 3, player, this._livingRobots(), fx, fz, spawnR, center);
@@ -376,11 +394,13 @@ export class ChunkEntityManager {
 
     const robot = useScout
       ? Scout.createEmerging(pos.x, pos.z, 1, this.world)
-      : Robot.createEmerging(pos.x, pos.z, 1, this.world, 'spider');
+      : type === 'spider'
+        ? Robot.createEmerging(pos.x, pos.z, 1, this.world, type)
+        : new Robot(pos.x, pos.z, 1, type);
     robot.homeCx = chunk.cx;
     robot.homeCz = chunk.cz;
     this.game.robots.push(robot);
-    this.game.particles.push(...createGroundErupt(pos.x, pos.z));
+    if (robot.emerging) this.game.particles.push(...createGroundErupt(pos.x, pos.z));
     chunk.spidersSpawned = true;
   }
 

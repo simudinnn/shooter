@@ -1,4 +1,5 @@
 /** Typed ammo items, weapon mapping, and stack helpers. */
+import { customWeapons } from './customContent.js';
 
 export const AMMO_STACK_MAX = 9999;
 
@@ -24,7 +25,7 @@ export const WEAPON_AMMO_TYPE = {
 };
 
 export function getWeaponAmmoType(weaponKey) {
-  return WEAPON_AMMO_TYPE[weaponKey] ?? 'pistol';
+  return customWeapons[weaponKey]?.ammoType ?? WEAPON_AMMO_TYPE[weaponKey] ?? 'pistol';
 }
 
 export function ammoSpritePath(ammoType) {

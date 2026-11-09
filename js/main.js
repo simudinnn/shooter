@@ -1,4 +1,4 @@
-import { setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
+import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
@@ -177,6 +177,8 @@ class Game {
     const vw = window.visualViewport?.width ?? window.innerWidth;
     const vh = window.visualViewport?.height ?? window.innerHeight;
     const scale = Math.max(vw / bufW, vh / bufH);
+    this._visibleHalfWidth = Math.min(INTERNAL_W, vw / (scale * this.renderScale)) / 2;
+    this._visibleHalfHeight = Math.min(INTERNAL_H, vh / (scale * this.renderScale)) / 2;
     this.displayScale = scale;
     this.canvas.style.width = `${bufW * scale}px`;
     this.canvas.style.height = `${bufH * scale}px`;
@@ -1461,6 +1463,12 @@ class Game {
       this.player.z = spawn.z;
     }
     this.world.prewarmGround(this.player.x, this.player.z, 4);
+    this.player.canSeeEnemyOnScreen = (robot) => {
+      const point = this._worldToScreen(robot.x, robot.z);
+      return Math.abs(point.x - (INTERNAL_W >> 1)) <= this._visibleHalfWidth
+        && Math.abs(point.y - (INTERNAL_H >> 1)) <= this._visibleHalfHeight;
+    };
+    this._nextTerrainWarmup = 0;
 
     this._disableMenuCursor();
     this._hideGameCursor();
@@ -1570,8 +1578,9 @@ class Game {
 
     const inventoryOpen = this._panelOpen();
     if (!online) this.dayNight?.update(dt);
-    if (this.player?.alive && this.world) {
-      this.world.touchChunksAround(this.player.x, this.player.z, 5);
+    if (this.player?.alive && this.world && time >= this._nextTerrainWarmup) {
+      this._nextTerrainWarmup = time + 0.08;
+      this.world.touchChunksAround(this.player.x, this.player.z, 5, { budget: 1 });
     }
     this.buildings?.update(this.player, dt);
 
@@ -1776,7 +1785,8 @@ class Game {
     this.player.updateGunKick(dt);
 
     this.items.update(dt);
-    this.chunkEntities.update(this.player);
+    this.chunkEntities.update(this.player, time);
+    this._syncCamPixels();
     this.bullets.update(dt, this.world, (b) => this._onBulletHit(b), this.player);
     tickTileFlowField(time, this.world, this.buildings, this.player, this.robots);
     const simView = this.getViewBoundsWorld();
@@ -1850,7 +1860,7 @@ class Game {
       }
     }
     } else if (!this._isSpawnRevealActive()) {
-      this.chunkEntities.update(this.player);
+      this.chunkEntities.update(this.player, time);
     }
     const breathTarget = getPlayerIdleBreathY(this.player, time);
     this._weaponBreathY += (breathTarget - this._weaponBreathY) * Math.min(1, dt * 18);
@@ -1877,7 +1887,10 @@ class Game {
   }
 
   _damageRobot(robot, damage, fromX, fromZ, bullet = null) {
-    if (!robot.applyHit(damage, fromX, fromZ, this.world, { fromBullet: !!bullet })) return;
+    if (!robot.applyHit(damage, fromX, fromZ, this.world, {
+      fromBullet: !!bullet,
+      alert: this.player.canSeeEnemyOnScreen(robot),
+    })) return;
     this.audio.hitEnemy();
     this.particles.push(...createRobotHitSparks(robot.x, robot.z, fromX, fromZ, damage));
     if (bullet) bullet.active = false;
@@ -2941,6 +2954,10 @@ class Game {
             false,
             'center',
           );
+        }
+        if (robot.name) {
+          ctx.globalAlpha = visMul;
+          drawPixelText(ctx, robot.name, drawX, drawY - 34, 1, 'center');
         }
         ctx.globalAlpha = 1;
       }});

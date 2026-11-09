@@ -1,4 +1,5 @@
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, didDisplace, MOTION_IDLE_EPS, entityPushRadius } from './collision.js';
+import { customEnemies } from './customContent.js';
 import {
   updateChaseNav,
   canMeleeTarget,
@@ -87,6 +88,17 @@ export class Robot {
     this.jumpCooldown = 0;
     this.jumpTryTimer = 0;
     this._stuckTimer = 0;
+    const custom = customEnemies[type];
+    if (custom) {
+      this.name = custom.name;
+      this.passive = custom.behavior === 'passive';
+      this.health = this.maxHealth = Math.floor(custom.health * waveScale);
+      this.speed = this.baseSpeed = custom.speed;
+      this.meleeDamage = custom.damage;
+      this.meleeRange = custom.attackRange;
+      this.attackRate = custom.attackRate;
+      this.detectRange = custom.detectRange;
+    }
   }
 
   get healthRatio() {
@@ -184,7 +196,7 @@ export class Robot {
       this.alive = false;
       this.jump.active = false;
       this.jump.charging = false;
-    } else {
+    } else if (!this.passive && opts.alert !== false) {
       this.chasing = true;
       this.aggroByHit = true;
     }
@@ -491,6 +503,12 @@ export class Robot {
     const prevZ = this.z;
     let moving = false;
 
+    if (this.passive) {
+      moving = this._updateWander(dt, world, player, robots, 0.45);
+      this._applyLocomotion(prevX, prevZ, dt, moving ? 6 : 0);
+      return;
+    }
+
     if (!player.alive) {
       this.chasing = false;
       this.aggroByHit = false;
@@ -503,7 +521,7 @@ export class Robot {
     const dz = player.z - this.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     const chaseRange = 58 * (player.getStealthMult?.() ?? 1);
-    const detectRange = getEnemyDetectRange(this, player, SPIDER_DETECT_RANGE);
+    const detectRange = getEnemyDetectRange(this, player, this.detectRange ?? SPIDER_DETECT_RANGE);
     const canSee = canEnemySeePlayer(this, player, world, buildings, detectRange);
     updateEnemySpotTimer(this, canSee, dt);
     updateEnemyLastKnown(this, player, canSee);
@@ -519,7 +537,7 @@ export class Robot {
 
       const jumpMin = 2.6;
       const jumpMax = 7.2;
-      if (!isEnemyAlert(this) && this.type === 'spider' && dist < jumpMax && dist > jumpMin && this.jumpCooldown <= 0 && !this.jump.charging && !this.jump.active) {
+      if (canSee && !isEnemyAlert(this) && this.type === 'spider' && dist < jumpMax && dist > jumpMin && this.jumpCooldown <= 0 && !this.jump.charging && !this.jump.active) {
         this.jumpTryTimer -= dt;
         if (this.jumpTryTimer <= 0) {
           this.jumpTryTimer = 0.38 + Math.random() * 0.32;
@@ -698,6 +716,7 @@ export class Scout extends Robot {
     const chaseRange = 58 * (player.getStealthMult?.() ?? 1);
     const detectRange = getEnemyDetectRange(this, player, SCOUT_DETECT_RANGE);
     const canSee = canEnemySeePlayer(this, player, world, buildings, detectRange);
+    if (!canSee) this._abortShoot(true);
     updateEnemySpotTimer(this, canSee, dt);
     updateEnemyLastKnown(this, player, canSee);
 

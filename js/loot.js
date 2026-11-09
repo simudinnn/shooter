@@ -1,3 +1,4 @@
+import { content, contentKey, customWeapons } from './customContent.js';
 import { WEAPONS, MELEE_WEAPONS } from './player.js';
 import { weaponItemSpritePath } from './sprites.js';
 import {
@@ -92,7 +93,7 @@ const LOOT_ENTRIES = [
 
 const LOOT_ENTRY_BY_KEY = Object.fromEntries(LOOT_ENTRIES.map((e) => [e.key, e]));
 
-const GUN_KEYS = Object.keys(WEAPONS);
+const GUN_KEYS = Object.keys(WEAPONS).filter((key) => !customWeapons[key]);
 const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 
 /** Chest gear category weights (compete with materials + empty). */
@@ -142,6 +143,15 @@ function buildChestLootOptions() {
   options.push({ weight: CHEST_GEAR_WEIGHT.bandage, roll: rollChestBandageItem });
   options.push({ weight: CHEST_GEAR_WEIGHT.melee, roll: rollChestMeleeItem });
   options.push({ weight: CHEST_GEAR_WEIGHT.weapon, roll: rollChestWeaponItem });
+  for (const entry of content.loot) {
+    const key = contentKey(entry.group, entry.target);
+    options.push({
+      weight: entry.weight,
+      roll: () => entry.group === 'weapons'
+        ? { kind: 'weapon', key, ammo: WEAPONS[key].magSize }
+        : { kind: 'material', key, amount: entry.amount },
+    });
+  }
   return options;
 }
 
@@ -356,3 +366,4 @@ export function getItemSpriteName(item) {
 export function chestSpriteName(variant) {
   return CHEST_VARIANTS.includes(variant) ? variant : CHEST_VARIANTS[0];
 }
+

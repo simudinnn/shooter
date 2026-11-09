@@ -603,7 +603,7 @@ export class InventoryUI {
 
   _appendStackCount(slot, amount) {
     if (!amount || amount <= 1) return;
-    const label = createPixelTextImg(String(amount), PIXEL_TEXT_SCALE);
+    const label = createPixelTextImg(String(amount), this.game.mobile ? PIXEL_TEXT_SCALE_SM : PIXEL_TEXT_SCALE);
     label.className = 'inv-stack-count inv-pixel-text-img';
     slot.appendChild(label);
   }
