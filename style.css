@@ -3153,3 +3153,18 @@ body.mobile-ui #raid-extract-hud {
 @media (hover: none) and (pointer: coarse) and (orientation: portrait) {
   #raid-base .raid-base-overview { grid-template-rows: auto minmax(0, 1fr); }
 }
+
+@media (hover: none) and (pointer: coarse) {
+  #overlay .raid-base-frame #raid-base-exit.ui-slice-button {
+    min-height: 26px;
+    padding: 2px 5px;
+    font-size: 10px;
+  }
+  #raid-base .raid-base-mission {
+    align-self: center;
+    text-align: center;
+    width: 100%;
+  }
+  #overlay #raid-base .raid-base-mission #raid-deploy { align-self: center; }
+  #raid-shop .raid-base-slot[data-locked="true"] img { opacity: .38; }
+}
