@@ -7,7 +7,7 @@ import { normalizeThrowableItem } from './throwables.js';
 
 export const CRAFT_MAX_MATERIALS = 4;
 
-export const CRAFT_RECIPES = [
+const RECIPES = [
   {
     id: 'bandage',
     output: { kind: 'consumable', key: 'bandage', amount: 1 },
@@ -225,6 +225,15 @@ const RECYCLE_TABLE = {
     wires: [{ key: 'metal', amount: 1 }],
   },
 };
+
+const SHOP_PRICES = {
+  revolver: 140, uzi: 180, m870: 220, m16: 280, famas: 300, fal: 340, m24: 380,
+  hunting_vest: 135, police_vest: 180, military_vest: 260, backpack2: 180, backpack3: 270,
+  upgrade_kit: 125, grenade: 55, molotov: 45, flare: 35,
+};
+export const SHOP_RECIPES = RECIPES.filter(({ id }) => Object.hasOwn(SHOP_PRICES, id))
+  .map(({ id, output }) => ({ item: output, price: SHOP_PRICES[id], level: 20 }));
+export const CRAFT_RECIPES = RECIPES.filter(({ id }) => !Object.hasOwn(SHOP_PRICES, id));
 
 export function getCraftableRecipes(player) {
   return CRAFT_RECIPES.filter((recipe) => isRecipeUnlocked(player, recipe));

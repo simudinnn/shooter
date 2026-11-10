@@ -13,8 +13,8 @@ export const WORLD_HALF_TILES = WORLD_SIZE_TILES / 2;
 export const WORLD_MARGIN_TILES = 6;
 
 /** Coarse grid cell for procedural town placement (infinite world). */
-export const TOWN_REGION_TILES = 80;
-export const TOWN_REGION_CHANCE = 0.78;
+export const TOWN_REGION_TILES = 72;
+export const TOWN_REGION_CHANCE = 0.98;
 export const TOWN_SITE_MIN_DIST_TILES = 180;
 /** Default stub half-length when a town has no rolled size. */
 export const TOWN_HIGHWAY_HALF_TILES = 24;
@@ -1617,8 +1617,8 @@ export function getTownAnchorAtRegion(gx, gz) {
   }
   if (hash01(seed, gx * 919 + gz * 733) > TOWN_REGION_CHANCE) return null;
 
-  const jitterX = (hash01(seed, gx * 17 + gz * 31 + 100) - 0.5) * TOWN_REGION_TILES * 0.44;
-  const jitterZ = (hash01(seed, gx * 23 + gz * 37 + 100) - 0.5) * TOWN_REGION_TILES * 0.44;
+  const jitterX = (hash01(seed, gx * 17 + gz * 31 + 100) - 0.5) * TOWN_REGION_TILES * 0.18;
+  const jitterZ = (hash01(seed, gx * 23 + gz * 37 + 100) - 0.5) * TOWN_REGION_TILES * 0.18;
   const tx = Math.round(gx * TOWN_REGION_TILES + TOWN_REGION_TILES * 0.5 + jitterX);
   const tz = Math.round(gz * TOWN_REGION_TILES + TOWN_REGION_TILES * 0.5 + jitterZ);
 
@@ -1845,7 +1845,8 @@ export function getTownsInChunk(cx, cz) {
   for (let gz = minGz; gz <= maxGz; gz++) {
     for (let gx = minGx; gx <= maxGx; gx++) {
       const anchor = getTownAnchorAtRegion(gx, gz);
-      if (anchor) towns.push(anchor);
+      if (anchor && anchor.tx >= minTx - pad && anchor.tx <= maxTx + pad
+        && anchor.tz >= minTz - pad && anchor.tz <= maxTz + pad) towns.push(anchor);
     }
   }
   return towns;

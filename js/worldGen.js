@@ -8,7 +8,7 @@ export const CHUNK_TILES = 8;
 export const CHUNK_WORLD = TILE * CHUNK_TILES;
 export const BASE_RADIUS = 22;
 /** Keep towns/buildings away from the player spawn. */
-export const PLAYER_SPAWN_TOWN_CLEARANCE_TILES = 36;
+export const PLAYER_SPAWN_TOWN_CLEARANCE_TILES = 9;
 
 export const WORLD_SEED = 90210;
 

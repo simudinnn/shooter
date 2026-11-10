@@ -1,3 +1,4 @@
+import { RaidBase, challengeProgress, newRaidProfile, deployProfile, extractProfile, loseRaidProfile, normalizeRaidProfile, EXTRACT_RADIUS, EXTRACT_SECONDS, raidLevel } from './raidBase.js';
 import { collectWallOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
 import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { World, TILE } from './world.js';
@@ -7,8 +8,6 @@ import { Robot, Scout, createGroundSpew, updateParticles, createExplosion } from
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
 import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
 import {
-  captureGameState,
-  deleteSave,
   hasSavedGame,
   readSave,
   writeSave,
@@ -128,6 +127,11 @@ class Game {
     this._initCanvas();
     this._initUI();
     this._bindEvents();
+    this.raidBase = new RaidBase(document.getElementById('raid-base'), {
+      save: (profile) => this._writeRaidProfile(profile),
+      deploy: () => this._deployRaid(),
+      exit: () => this._showMainMenu(),
+    });
     this._showMainMenu();
   }
 
@@ -181,7 +185,6 @@ class Game {
       newGameBtn: document.getElementById('new-game-btn'),
       loadGameBtn: document.getElementById('load-game-btn'),
       resumeBtn: document.getElementById('resume-btn'),
-      saveGameBtn: document.getElementById('save-game-btn'),
       backToMenuBtn: document.getElementById('back-to-menu-btn'),
       confirmYesBtn: document.getElementById('confirm-yes-btn'),
       confirmNoBtn: document.getElementById('confirm-no-btn'),
@@ -242,6 +245,7 @@ class Game {
   }
 
   _showMainMenu(deathStats = null) {
+    this.raidBase?.hide();
     this._refreshMainMenuButtons();
     this.el.mainMenu?.classList.remove('hidden');
     this.el.pauseMenu?.classList.add('hidden');
@@ -268,6 +272,15 @@ class Game {
 
   _showPauseMenu() {
     this.paused = true;
+    const challenges = document.getElementById('raid-pause-challenges');
+    challenges.replaceChildren();
+    if (this.raidProfile) {
+      for (const challenge of challengeProgress(this.raidProfile, this.kills)) {
+        const row = document.createElement('p');
+        row.textContent = `${challenge.title} · ${challenge.progress}/${challenge.goal} · ${challenge.description}`;
+        challenges.appendChild(row);
+      }
+    }
     this.el.pauseMenu?.classList.remove('hidden');
     this._hideGameCursor();
     this._enableMenuCursor();
@@ -511,75 +524,126 @@ class Game {
     }
   }
 
-  _saveCurrentGame() {
-    const ok = writeSave(captureGameState(this));
-    if (ok) this._refreshMainMenuButtons();
-    return ok;
+  _writeRaidProfile(profile) {
+    if (!writeSave({ profile })) return false;
+    this.raidProfile = profile;
+    return true;
+  }
+
+  _showRaidBase(profile, message = '') {
+    this.running = false;
+    this.paused = false;
+    this.inventoryUI.forceClose();
+    this._clearKeyboardInput();
+    this._showMainMenu();
+    this._hideMainMenu();
+    this._disableMenuCursor();
+    this.raidBase.show(profile, message);
   }
 
   _requestBackToMenu() {
-    this._showConfirm(
-      'Save before exiting?',
-      () => {
-        this._closeConfirm();
-        this._saveCurrentGame();
-        this._quitToMainMenu();
-      },
-      () => {
-        this._closeConfirm();
-        this._quitToMainMenu();
-      },
-    );
-  }
-
-  _quitToMainMenu() {
-    this.running = false;
-    this.paused = false;
-    this._hidePauseMenu();
-    this._clearKeyboardInput();
-    this.touchMove = { x: 0, z: 0 };
-    this.moveJoystick?.reset();
-    this.aimJoystick?.reset();
-    this.inventoryUI?.forceClose();
-    this._showMainMenu();
+    this._showConfirm('Abandon this raid? You will lose all carried gear and loot.', () => {
+      this._closeConfirm();
+      this._finishRaid(false, 'Raid abandoned. Carried gear and loot were lost.');
+    }, () => this._closeConfirm());
   }
 
   _requestNewGame() {
-    if (hasSavedGame()) {
-      this._showConfirm(
-        'Are you sure you want to play a new game? Your old save will be removed.',
-        () => {
-          this._closeConfirm();
-          deleteSave();
-          this._refreshMainMenuButtons();
-          this._startNewGame();
-        },
-        () => this._closeConfirm(),
-      );
-      return;
-    }
-    this._startNewGame();
-  }
-
-  _startNewGame() {
-    this._hideMainMenu();
-    this._bootGame(null).catch((err) => {
-      console.error('New game failed:', err);
-      this._showMainMenu();
-    });
+    const start = () => {
+      this._closeConfirm();
+      const profile = newRaidProfile();
+      if (this._writeRaidProfile(profile)) this._showRaidBase(profile, 'Prepare your loadout and deploy.');
+      else this._showMainMenu('Could not save the new profile.');
+    };
+    if (hasSavedGame()) this._showConfirm('Start a new profile and replace your existing save?', start, () => this._closeConfirm());
+    else start();
   }
 
   _startLoadGame() {
-    const data = readSave();
-    if (!data) {
+    const save = readSave();
+    if (!save) {
       this._refreshMainMenuButtons();
       return;
     }
-    this._hideMainMenu();
-    this._bootGame(data).catch((err) => {
-      console.error('Load failed:', err);
-      this._showMainMenu();
-    });
+    let profile = save.profile ? normalizeRaidProfile(save.profile) : newRaidProfile(save);
+    const message = profile.deployed ? 'Previous raid abandoned. Your stash is safe.' : '';
+    if (profile.deployed) profile = loseRaidProfile(profile);
+    if (!this._writeRaidProfile(profile)) {
+      this._showMainMenu('Could not save the profile.');
+      return;
+    }
+    this._showRaidBase(profile, message);
+  }
+
+  async _deployRaid() {
+    if (this._deploying || this.running) return;
+    const previous = this.raidProfile;
+    if (!this._writeRaidProfile(deployProfile(previous))) {
+      this.raidBase.show(previous, 'Could not save your raid checkpoint.');
+      return;
+    }
+    this._deploying = true;
+    this.raidBase.hide();
+    try {
+      await this._bootGame(null, previous.kit);
+    } catch (error) {
+      console.error('Deploy failed:', error);
+      const restored = this._writeRaidProfile(previous);
+      this.raidProfile = previous;
+      this._showRaidBase(previous, restored ? 'Deploy failed. Your loadout was restored.' : 'Deploy failed. Loadout restored for this session only.');
+    } finally {
+      this._deploying = false;
+    }
+  }
+
+  _pickExtractionPoint() {
+    const { x, z } = this.player;
+    const startAngle = Math.random() * Math.PI * 2;
+    for (let i = 0; i < 12; i++) {
+      const angle = startAngle + i * Math.PI / 6;
+      const wx = x + Math.sin(angle) * 105;
+      const wz = z + Math.cos(angle) * 105;
+      this.world.prewarmGround(wx, wz, 1);
+      const point = this.world.ensureClearSpawnPosition(wx, wz, 2);
+      if (!this.world.checkCollision(point.x, point.z, 2)) return point;
+    }
+    return { x, z };
+  }
+
+  _updateExtraction(dt) {
+    if (!this.raidExit || this._isSpawnRevealActive()) return;
+    const dx = this.raidExit.x - this.player.x;
+    const dz = this.raidExit.z - this.player.z;
+    const distance = Math.hypot(dx, dz);
+    const label = document.getElementById('raid-extract-hud');
+    if (distance <= EXTRACT_RADIUS) {
+      this._extractElapsed += dt;
+      this._setPixelText(label, `Extracting · ${Math.max(1, Math.ceil(EXTRACT_SECONDS - this._extractElapsed))}s`, PIXEL_TEXT_SCALE_SM);
+      if (this._extractElapsed >= EXTRACT_SECONDS) this._finishRaid(true);
+    } else {
+      this._extractElapsed = 0;
+      const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      const direction = directions[(Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) + 8) % 8];
+      this._setPixelText(label, `Lv ${raidLevel(this.raidProfile)} · Extract ${direction} ${Math.ceil(distance)}m`, PIXEL_TEXT_SCALE_SM);
+    }
+  }
+
+  _finishRaid(extracted, message = '') {
+    this.inventoryUI.forceClose();
+    const previous = this.raidProfile;
+    const next = extracted ? extractProfile(previous, this.player, this.kills) : loseRaidProfile(previous);
+    let report = extracted
+      ? `Extracted · +${next.xp - previous.xp} XP · +${next.cash - previous.cash} Cash. Move your loot to the stash before redeploying.`
+      : message;
+    if (extracted) {
+      const completed = challengeProgress(next).filter((challenge) =>
+        challenge.progress >= challenge.goal && previous[challenge.metric] < challenge.goal);
+      if (completed.length) report += ` Challenge complete · ${completed.map((challenge) => challenge.title).join(', ')}.`;
+    }
+    const saved = this._writeRaidProfile(next);
+    this.raidProfile = next;
+    this.raidExit = null;
+    this._showRaidBase(next, saved ? report : `${report} Save failed. Progress is available for this session only.`);
   }
 
   showWaveBanner(text, duration = 2) {
@@ -691,10 +755,6 @@ class Game {
     this.el.newGameBtn?.addEventListener('click', () => this._requestNewGame());
     this.el.loadGameBtn?.addEventListener('click', () => this._startLoadGame());
     this.el.resumeBtn?.addEventListener('click', () => this._hidePauseMenu());
-    this.el.saveGameBtn?.addEventListener('click', () => {
-      this._saveCurrentGame();
-      this._hidePauseMenu();
-    });
     this.el.backToMenuBtn?.addEventListener('click', () => this._requestBackToMenu());
     this.el.confirmYesBtn?.addEventListener('click', () => this._confirmYes?.());
     this.el.confirmNoBtn?.addEventListener('click', () => this._confirmNo?.());
@@ -1072,7 +1132,7 @@ class Game {
     return z + 0.04;
   }
 
-  async _bootGame(saveData = null) {
+  async _bootGame(saveData = null, raidKit = null) {
     const isSaveLoad = !!saveData;
     if (!isSaveLoad) {
       this._beginSpawnReveal();
@@ -1117,6 +1177,9 @@ class Game {
     } else {
       this.player = new Player();
       const spawn = this.world.getPlayerSpawn();
+      if (raidKit) {
+        this.player.applySaveData({ ...raidKit, x: spawn.x, z: spawn.z, health: 100, maxHealth: 100, shield: 0, alive: true, powerUps: {} });
+      }
       this.player.x = spawn.x;
       this.player.z = spawn.z;
     }
@@ -1127,6 +1190,9 @@ class Game {
         && Math.abs(point.y - (INTERNAL_H >> 1)) <= this._visibleHalfHeight;
     };
     this._nextTerrainWarmup = 0;
+    this.raidExit = raidKit ? this._pickExtractionPoint() : null;
+    this._extractElapsed = 0;
+    this._setPixelText(document.getElementById('raid-extract-hud'), '', PIXEL_TEXT_SCALE_SM);
 
     this._disableMenuCursor();
     this._hideGameCursor();
@@ -1550,6 +1616,11 @@ class Game {
     if (bullet) bullet.active = false;
     if (!robot.alive) {
       this.kills++;
+      if (this.raidProfile) {
+        const reached = challengeProgress(this.raidProfile, this.kills).find((challenge) =>
+          challenge.metric === 'extractedKills' && this.raidProfile.extractedKills + this.kills === challenge.goal);
+        if (reached) this.showWaveBanner(`${reached.title} · Extract to complete`, 3);
+      }
       const time = performance.now() / 1000;
       this.corpses.spawnFromRobot(robot, time);
       const idx = this.robots.indexOf(robot);
@@ -2311,6 +2382,17 @@ class Game {
       drawBuildingFloors(ctx, building, worldToScreen, tilePx, this.sprites);
     }
 
+    if (this.raidExit && inView(this.raidExit.x, this.raidExit.z, EXTRACT_RADIUS)) {
+      const exit = worldToScreen(this.raidExit.x, this.raidExit.z);
+      ctx.beginPath();
+      ctx.arc(exit.x, exit.y, EXTRACT_RADIUS * PPU, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(65, 170, 108, 0.18)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#85d79c';
+      ctx.stroke();
+    }
+
     const playerSortZ = this._playerSortZ();
     const playerX = this.player.x;
     const playerZ = this.player.z;
@@ -2973,19 +3055,8 @@ class Game {
   }
 
   _endGame() {
-    this.running = false;
-    this.paused = false;
-    const elapsed = (((this.playTimeBase ?? 0) + performance.now() - this.startTime) / 1000).toFixed(1);
     this.audio.lose();
-    deleteSave();
-    this._refreshMainMenuButtons();
-    this._clearKeyboardInput();
-    this.prevMouseDown = false;
-    this.touchMove = { x: 0, z: 0 };
-    this.moveJoystick?.reset();
-    this.aimJoystick?.reset();
-    this.inventoryUI?.forceClose();
-    this._showMainMenu(`You died — Kills: ${this.kills} · Time: ${elapsed}s`);
+    this._finishRaid(false, 'KIA. Carried gear and loot were lost. Your stash is safe.');
   }
 
   _scheduleFrame() {
@@ -3011,6 +3082,7 @@ class Game {
       if (this.inventoryUI?.isOpen()) this.inventoryUI.render();
     }
     this._checkGameOver();
+    if (this.running) this._updateExtraction(dt);
     if (!this.running || this.paused) return;
     this._draw();
     this._updateHUD();

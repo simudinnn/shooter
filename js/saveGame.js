@@ -125,33 +125,37 @@ export function captureGameState(game) {
       timeMinutes: dayNight?.timeMinutes ?? 0,
       day: dayNight?.day ?? 1,
     },
-    player: {
-      x: player.x,
-      z: player.z,
-      angle: player.angle,
-      health: player.health,
-      maxHealth: player.maxHealth,
-      shield: player.shield ?? 0,
-      alive: !!player.alive,
-      weaponKey: player.weaponKey,
-      weaponSlot: player.weaponSlot,
-      meleeKey: player.meleeKey,
-      weaponAmmo: player.weapon?.ammo ?? 0,
-      handSlots: player.handSlots.map((_, index) => player.getHandSlotItem(index)),
-      activeHandSlot: player.activeHandSlot ?? 0,
-      itemSlots: cloneSlots(player.itemSlots),
-      equipmentSlots: cloneSlots(player.equipmentSlots),
-      learnedBlueprints: [...(player.learnedBlueprints ?? [])],
-      powerUps: {
-        speed: { until: player.powerUps?.speed?.until ?? 0 },
-        damage: {
-          mult: player.powerUps?.damage?.mult ?? 1.5,
-          until: player.powerUps?.damage?.until ?? 0,
-        },
-      },
-    },
+    player: capturePlayerState(player),
     buildings: buildingSaves,
     robots: robotSaves,
     chunkFlags,
+  };
+}
+
+export function capturePlayerState(player) {
+  return {
+  x: player.x,
+  z: player.z,
+  angle: player.angle,
+  health: player.health,
+  maxHealth: player.maxHealth,
+  shield: player.shield ?? 0,
+  alive: !!player.alive,
+  weaponKey: player.weaponKey,
+  weaponSlot: player.weaponSlot,
+  meleeKey: player.meleeKey,
+  weaponAmmo: player.weapon?.ammo ?? 0,
+  handSlots: player.handSlots.map((_, index) => player.getHandSlotItem(index)),
+  activeHandSlot: player.activeHandSlot ?? 0,
+  itemSlots: cloneSlots(player.itemSlots),
+  equipmentSlots: cloneSlots(player.equipmentSlots),
+  learnedBlueprints: [...(player.learnedBlueprints ?? [])],
+  powerUps: {
+    speed: { until: player.powerUps?.speed?.until ?? 0 },
+    damage: {
+      mult: player.powerUps?.damage?.mult ?? 1.5,
+      until: player.powerUps?.damage?.until ?? 0,
+    },
+  },
   };
 }

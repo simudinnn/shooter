@@ -40,13 +40,62 @@
         </div>
       </div>
     </div>
+    <div id="raid-base" class="hidden">
+      <section class="raid-base-frame" aria-label="Safe base">
+        <header class="raid-base-top">
+          <div><small>ROBOT RUINS</small><h1>Safe Base</h1></div>
+          <nav aria-label="Base stations">
+            <button type="button" data-station="deploy">Deploy</button>
+            <button type="button" data-station="stash">Stash</button>
+            <button type="button" data-station="craft">Crafting</button>
+            <button type="button" data-station="shop">Shop</button>
+          </nav>
+          <div class="raid-base-balance"><img src="assets/items/misc/cash.png" alt=""><span id="raid-cash"></span></div>
+        </header>
+        <div class="raid-base-strip"><span id="raid-stats"></span><span role="status"></span></div>
+        <main class="raid-base-workspace">
+          <section data-base-panel="deploy" class="raid-base-overview">
+            <div class="raid-base-section"><h2>Challenges</h2><div id="raid-challenges"></div></div>
+            <div class="raid-base-mission">
+              <p>FIELD OPERATIONS</p><h2>Deploy to the Ruins</h2>
+              <p>Scout nearby towns, gather supplies and return through the marked extraction zone.</p>
+              <button type="button" id="raid-deploy" class="ui-slice-button">Deploy</button>
+            </div>
+          </section>
+          <section data-base-panel="stash" class="raid-base-columns hidden">
+            <div class="raid-base-section"><h2>Loadout</h2><p class="raid-transfer-hint">Drag or Shift-click to transfer. Right-click for details.</p>
+              <div class="raid-loadout-layout">
+                <div id="raid-gear" class="raid-base-grid" aria-label="Equipment and weapons"></div>
+                <div id="raid-kit" class="raid-base-grid" aria-label="Backpack inventory"></div>
+              </div>
+            </div>
+            <div class="raid-base-section"><h2 id="raid-stash-title">Stash</h2><div id="raid-stash" class="raid-base-grid"></div></div>
+          </section>
+          <section data-base-panel="craft" class="raid-base-section hidden"><h2>Crafting station</h2><p>Ready recipes appear first. Select a recipe to compare your stash with its requirements.</p><div id="raid-recipes" class="raid-recipe-grid"></div></section>
+          <section data-base-panel="shop" class="raid-base-section hidden"><h2>Quartermaster</h2><p>Purchases go straight to your stash.</p><div id="raid-shop" class="raid-base-grid"></div></section>
+          <aside id="raid-selection" class="inv-context-menu raid-base-selection hidden" aria-label="Selected item"></aside>
+        </main>
+        <dialog id="raid-deploy-dialog" aria-labelledby="raid-deploy-title">
+          <header><h2 id="raid-deploy-title">Check your loadout</h2><p>Only the items in your loadout go into the raid.</p><p id="raid-deploy-status" role="status"></p></header>
+          <div class="raid-deploy-review"></div>
+          <footer>
+            <button type="button" id="raid-deploy-cancel" class="ui-slice-button">Back</button>
+            <button type="button" id="raid-deploy-confirm" class="ui-slice-button">Deploy now</button>
+          </footer>
+        </dialog>
+        <footer>
+          <button type="button" id="raid-base-exit" class="ui-slice-button">Main Menu</button>
+          <span>SAFE ZONE</span>
+        </footer>
+      </section>
+    </div>
     <div id="pause-menu" class="hidden">
       <div class="menu-frame ui-slice-panel">
         <h2 class="menu-heading pixel-text-host">Paused</h2>
+        <section id="raid-pause-challenges" aria-label="Raid challenges"></section>
         <div class="menu-btn-stack">
           <button type="button" id="resume-btn" class="ui-slice-button">Resume</button>
-          <button type="button" id="save-game-btn" class="ui-slice-button">Save Game</button>
-          <button type="button" id="back-to-menu-btn" class="ui-slice-button">Back to Menu</button>
+          <button type="button" id="back-to-menu-btn" class="ui-slice-button">Abandon Raid</button>
         </div>
       </div>
     </div>
@@ -62,6 +111,7 @@
   </div>
 
   <div id="hud" class="hidden">
+    <div id="raid-extract-hud" class="pixel-text-host"></div>
     <div id="hud-time">
       <span id="game-day" class="pixel-text-host">Day 1</span>
       <span id="game-clock" class="pixel-text-host">12:00</span>

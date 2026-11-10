@@ -2472,3 +2472,533 @@ body.game-active.mobile-ui .inv-context-btn {
 body.game-active.mobile-ui .inv-combine-btn {
   touch-action: manipulation;
 }
+
+#raid-base {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  color: #efe5d3;
+  background: #141615;
+  touch-action: pan-y;
+}
+
+.raid-base-frame {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  overflow: auto;
+  font: 14px/1.45 system-ui, sans-serif;
+  background: radial-gradient(ellipse at 90% 8%, #343229, transparent 60%), #151817;
+}
+
+.raid-base-top,
+.raid-base-strip,
+.raid-base-frame footer {
+  padding: 12px clamp(12px, 4vw, 64px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.raid-base-top {
+  flex-wrap: wrap;
+  background: #101211;
+  border-bottom: 2px solid #524735;
+}
+
+.raid-base-frame h1,
+.raid-base-frame h2,
+.raid-base-frame h3 {
+  font-family: var(--pixel-font), monospace;
+  margin: 0 0 8px;
+}
+
+.raid-base-top h1 { margin: 0; font-size: 20px; }
+.raid-base-top small,
+.raid-base-mission > p:first-child,
+.raid-base-frame footer span { color: #d5ad69; letter-spacing: 0.15em; }
+.raid-base-top nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.raid-base-top nav button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #c6c1b3;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.raid-base-top nav button[aria-pressed="true"] {
+  border-color: #c9a465;
+  background: #322a20;
+  color: #fff0cf;
+}
+
+.raid-base-balance { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.raid-base-balance img { width: 27px; height: 27px; image-rendering: pixelated; }
+.raid-base-strip { flex-wrap: wrap; background: #222520; color: #ddd4c3; }
+.raid-base-strip [role="status"] { color: #e7bf78; }
+.raid-base-workspace { flex: 1; padding: clamp(12px, 3vw, 46px) clamp(12px, 4vw, 64px); }
+.raid-base-overview,
+.raid-base-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.raid-base-section,
+.raid-base-mission {
+  padding: clamp(12px, 2vw, 24px);
+  min-width: 0;
+  border: 1px solid #555344;
+  background: #242621;
+}
+.raid-base-mission {
+  background: linear-gradient(145deg, #38352a, #232721);
+  align-self: end;
+}
+.raid-base-mission h2 { font-size: clamp(16px, 2.5vw, 32px); }
+.raid-base-section h2 { font-size: 16px; }
+#raid-challenges { display: grid; gap: 8px; }
+#raid-challenges article { border-bottom: 1px solid #555344; padding: 8px 0; }
+#raid-challenges article:last-child { border-bottom: 0; }
+#raid-challenges h3 { font-size: 12px; }
+#raid-challenges p { margin: 4px 0; }
+#raid-challenges progress { width: min(100%, 360px); accent-color: #c9a465; }
+
+.raid-base-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, clamp(64px, 6.6vw, 112px)), 1fr));
+  gap: 8px;
+}
+.raid-base-grid .raid-base-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  aspect-ratio: 1;
+  color: #fff0cf;
+}
+.raid-base-slot img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.raid-base-slot span {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  font: 11px var(--pixel-font), monospace;
+  text-shadow: 1px 1px #000;
+}
+.raid-base-slot:disabled { opacity: 0.55; cursor: default; }
+.raid-transfer-slot { touch-action: none; cursor: grab; }
+.raid-transfer-slot.raid-dragging { opacity: 0.45; cursor: grabbing; }
+.raid-base-section.raid-drop-target { outline: 2px solid #d5ad69; outline-offset: -2px; }
+
+.raid-recipe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 154px), 1fr));
+  gap: 10px;
+}
+.raid-recipe-card {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 5px;
+  padding: 10px 6px;
+  text-align: center;
+  border: 1px solid #524735;
+  background: #1a1c18;
+}
+.raid-recipe-card[data-ready="true"] { border-color: #8caa72; }
+.raid-recipe-card .raid-base-slot {
+  display: grid;
+  place-items: center;
+  width: min(100%, 82px);
+  aspect-ratio: 1;
+}
+.raid-recipe-card small,
+.raid-recipe-materials [data-enough="false"] { color: #e7a17d; }
+.raid-recipe-card[data-ready="true"] small,
+.raid-recipe-materials [data-enough="true"] { color: #b7db9d; }
+.raid-recipe-materials { padding: 0; list-style: none; }
+.raid-recipe-materials li { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.raid-recipe-materials img { width: 23px; height: 23px; image-rendering: pixelated; }
+.raid-base-frame footer { border-top: 1px solid #524735; background: #101211; }
+#overlay .raid-base-frame button.ui-slice-button {
+  color: #fff4df;
+  font-size: 12px;
+  line-height: 1.2;
+  min-width: 0;
+  padding: 5px 10px;
+}
+#overlay .raid-base-frame button:disabled { opacity: 0.45; }
+#overlay #raid-deploy { min-width: min(100%, 220px); min-height: 46px; font-size: 16px; }
+
+@media (max-width: 620px) {
+  .raid-base-overview, .raid-base-columns { grid-template-columns: 1fr; }
+  .raid-base-mission { grid-row: 1; }
+  .raid-base-top nav { order: 3; width: 100%; }
+  .raid-base-top nav button { padding: 7px 5px; }
+}
+
+#raid-extract-hud {
+  position: fixed;
+  top: max(64px, calc(env(safe-area-inset-top) + 56px));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 8px;
+  background: var(--tooltip-bg);
+  border: 1px solid var(--tooltip-border);
+  pointer-events: none;
+}
+
+#raid-extract-hud:empty {
+  display: none;
+}
+
+body.mobile-ui #raid-extract-hud {
+  top: max(48px, calc(env(safe-area-inset-top) + 40px));
+}
+
+.raid-base-frame {
+  font: clamp(15px, 1.15vw, 21px)/1.55 var(--pixel-font), monospace;
+}
+
+.raid-base-top h1 { font-size: clamp(24px, 2.1vw, 38px); }
+.raid-base-top nav button { font-size: clamp(15px, 1.25vw, 22px); padding: 11px 14px; }
+.raid-base-balance { font-size: clamp(18px, 1.4vw, 26px); }
+.raid-base-balance img { width: 36px; height: 36px; }
+.raid-base-section h2 { font-size: clamp(19px, 1.5vw, 28px); }
+#raid-challenges h3 { font-size: clamp(16px, 1.3vw, 24px); }
+#raid-challenges progress { width: 100%; height: 14px; }
+
+.raid-base-workspace:has(.raid-base-overview:not(.hidden)) { display: flex; }
+.raid-base-overview { flex: 1; align-items: stretch; }
+.raid-base-overview > .raid-base-section { display: flex; flex-direction: column; }
+#raid-challenges { flex: 1; grid-auto-rows: minmax(min-content, 1fr); }
+.raid-base-mission { display: flex; flex-direction: column; align-self: stretch; }
+#overlay #raid-deploy,
+#overlay #raid-deploy-confirm {
+  min-height: 58px;
+  min-width: min(100%, 245px);
+  font-size: clamp(18px, 1.6vw, 28px);
+}
+#overlay #raid-deploy { align-self: flex-end; margin-top: auto; }
+#overlay .raid-base-frame button.ui-slice-button:not(#raid-deploy, #raid-deploy-confirm) { font-size: clamp(14px, 1.1vw, 20px); }
+
+.raid-base-columns { grid-template-columns: minmax(0, 0.84fr) minmax(0, 1.16fr); }
+.raid-loadout-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 5fr); gap: 9px; align-items: start; }
+#raid-gear { grid-template-columns: minmax(0, 1fr); }
+#raid-kit { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+#raid-stash { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+.raid-base-slot span {
+  font-size: clamp(13px, 1.3vw, 24px);
+  pointer-events: none;
+}
+#raid-gear .raid-base-slot span { font-size: clamp(10px, 0.95vw, 17px); }
+.raid-recipe-card[data-ready="false"] .raid-base-slot { opacity: 0.42; }
+.raid-split { display: grid; gap: 6px; margin: 8px 0; }
+.raid-split input { width: 100%; accent-color: #c73930; touch-action: none; }
+
+#raid-deploy-dialog {
+  width: min(calc(100% - 24px), 1600px);
+  max-height: calc(100% - 24px);
+  padding: 0;
+  color: #efe5d3;
+  background: #151817;
+  border: 2px solid #79674b;
+  overflow: auto;
+}
+#raid-deploy-dialog::backdrop { background: rgba(0, 0, 0, 0.76); }
+#raid-deploy-dialog > header { padding: 16px 20px 0; }
+.raid-deploy-review { padding: 16px 20px; }
+#raid-deploy-dialog footer { position: sticky; bottom: 0; z-index: 2; }
+.raid-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+@media (max-width: 850px) {
+  .raid-base-columns { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .raid-base-top nav button { padding: 8px 7px; }
+  .raid-base-overview { display: grid; }
+  .raid-base-mission { grid-row: auto; gap: 6px; }
+  #overlay #raid-deploy { margin-top: 8px; }
+  #raid-stash { gap: 3px; }
+  #raid-stash .raid-base-slot span { font-size: 12px; right: 1px; bottom: 1px; }
+  .raid-deploy-review { padding: 8px; }
+}
+
+/* The base owns its viewport. Only the stash grid scrolls. */
+.raid-base-frame {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.raid-base-frame > header,
+.raid-base-frame > footer,
+.raid-base-strip { flex: 0 0 auto; }
+.raid-base-workspace {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  padding-block: clamp(8px, 2dvh, 28px);
+}
+.raid-base-workspace > [data-base-panel] { min-height: 0; }
+.raid-base-workspace > .raid-base-columns { height: 100%; }
+.raid-base-workspace .raid-base-columns > .raid-base-section {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#raid-stash {
+  min-height: 0;
+  overflow: auto;
+  align-content: start;
+  overscroll-behavior: contain;
+}
+.raid-loadout-layout {
+  width: min(100%, max(132px, calc((100dvh - 245px) * 1.17)));
+  margin-inline: auto;
+}
+.raid-base-slot img { width: 66%; height: 66%; transform: translateY(-4%); }
+.raid-base-slot span {
+  font-size: clamp(17px, 1.8vw, 35px);
+  right: 7%;
+  bottom: 5%;
+  line-height: 1;
+}
+#raid-gear .raid-base-slot span { font-size: clamp(12px, 1.1vw, 23px); }
+
+.raid-catalog-active #raid-shop,
+.raid-catalog-active #raid-recipes {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+}
+.raid-catalog-active #raid-shop .raid-base-slot { max-width: 120px; width: 100%; }
+.raid-catalog-pages { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.raid-catalog-active .raid-recipe-card { min-width: 0; overflow-wrap: anywhere; }
+
+#raid-deploy-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  max-height: calc(100dvh - 24px);
+  box-sizing: border-box;
+}
+
+#raid-pause-challenges {
+  text-align: left;
+  width: min(100%, 520px);
+  margin: 0 auto 12px;
+  font: clamp(10px, 1.25vw, 16px)/1.5 var(--pixel-font), monospace;
+}
+#raid-pause-challenges p { margin: 4px 0; color: #efe5d3; }
+#pause-menu .menu-frame { max-height: calc(100dvh - 12px); overflow: auto; box-sizing: border-box; }
+
+@media (max-width: 850px) {
+  .raid-base-workspace > .raid-base-columns { grid-template-rows: auto minmax(0, 1fr); }
+  .raid-loadout-layout { width: min(100%, max(130px, calc((100dvh - 385px) * 1.05))); }
+  #raid-stash .raid-base-slot span { font-size: clamp(13px, 2.4vw, 20px); }
+  .raid-base-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .raid-base-overview .raid-base-mission { grid-row: auto; }
+  #raid-challenges p { font-size: 12px; }
+  #raid-challenges h3 { font-size: 13px; }
+}
+@media (max-width: 620px) {
+  .raid-catalog-active .raid-recipe-card { font-size: 11px; padding: 4px 2px; }
+  .raid-base-overview > .raid-base-section, .raid-base-mission { padding: 6px; }
+  .raid-base-overview { gap: 6px; font-size: 12px; }
+  #overlay #raid-deploy { min-height: 42px; }
+}
+@media (max-height: 440px) {
+  .raid-base-frame { font-size: 12px; }
+  .raid-base-top, .raid-base-strip, .raid-base-frame footer { padding-block: 4px; }
+  .raid-base-top h1 { font-size: 18px; }
+  .raid-base-top nav button { padding-block: 4px; font-size: 12px; }
+  .raid-base-balance img { width: 24px; height: 24px; }
+  .raid-base-section, .raid-base-mission { padding: 6px; }
+  #raid-challenges { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  #raid-challenges article { padding: 0; }
+  #raid-challenges p { margin: 1px 0; font-size: 10px; }
+  #raid-challenges h3 { font-size: 11px; margin: 0; }
+  #raid-challenges progress { height: 7px; }
+  .raid-base-workspace > .raid-base-columns { grid-template-columns: minmax(0, .84fr) minmax(0, 1.16fr); grid-template-rows: minmax(0, 1fr); }
+  .raid-loadout-layout { width: min(100%, max(115px, calc((100dvh - 152px) * 1.08))); }
+  .raid-recipe-card .raid-base-slot { max-width: 45px; }
+  .raid-catalog-active #raid-shop .raid-base-slot { max-width: 65px; }
+}
+
+#raid-deploy-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 24px);
+  overflow: hidden;
+}
+#raid-deploy-dialog > header,
+#raid-deploy-dialog > footer { flex: 0 0 auto; }
+#raid-deploy-status {
+  block-size: 1.5em;
+  line-height: 1.5;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.raid-deploy-review {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+.raid-deploy-review > .raid-base-columns { height: 100%; }
+.raid-deploy-review .raid-base-columns > .raid-base-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+@media (max-width: 850px) {
+  .raid-deploy-review > .raid-base-columns { grid-template-rows: auto minmax(0, 1fr); }
+}
+@media (max-height: 440px) {
+  .raid-deploy-review > .raid-base-columns {
+    grid-template-columns: minmax(0, .84fr) minmax(0, 1.16fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #raid-deploy-dialog > header { padding: 6px 12px 0; }
+  #overlay #raid-deploy-confirm { min-height: 40px; }
+}
+
+/* Safe-base grids follow the space available inside each panel. */
+.raid-loadout-layout {
+  --raid-slot-gap: 5px;
+  --raid-load-cell: min(96px, calc((100cqh - 4 * var(--raid-slot-gap)) / 5), calc((100cqw - 5.25 * var(--raid-slot-gap)) / 6.25));
+  --raid-gear-cell: calc((5 * var(--raid-load-cell) + var(--raid-slot-gap)) / 4);
+  container-type: size;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  gap: var(--raid-slot-gap);
+}
+#raid-gear {
+  grid-template-columns: var(--raid-gear-cell);
+  grid-template-rows: repeat(4, var(--raid-gear-cell));
+}
+#raid-kit {
+  grid-template-columns: repeat(5, var(--raid-load-cell));
+  grid-template-rows: repeat(5, var(--raid-load-cell));
+}
+#raid-gear .raid-base-slot,
+#raid-kit .raid-base-slot { width: 100%; height: 100%; aspect-ratio: auto; }
+#raid-kit, #raid-gear { gap: var(--raid-slot-gap); }
+#raid-stash {
+  width: min(100%, max(280px, calc((100dvh - 235px) * 1.9)), 1000px);
+  scrollbar-width: thin;
+}
+#raid-deploy-dialog #raid-stash {
+  --raid-review-stash-gap: 5px;
+  flex: 1;
+  max-width: 810px;
+  container-type: size;
+  column-gap: var(--raid-review-stash-gap);
+  row-gap: 0;
+  grid-template-rows: repeat(var(--raid-stash-rows, 4), max-content);
+}
+#raid-deploy-dialog #raid-stash .raid-base-slot {
+  justify-self: start;
+  width: min(100%, calc(100cqh / var(--raid-stash-rows, 4)));
+}
+#raid-deploy-dialog .raid-transfer-hint { display: none; }
+.raid-base-slot:not(.raid-drag-ghost) { position: relative; }
+.raid-base-slot img {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 73%;
+  height: 73%;
+  max-width: 100%;
+  max-height: 100%;
+  transform: translate(-50%, -50%);
+  object-fit: contain;
+}
+.raid-base-slot img.raid-gear-placeholder { opacity: .72; }
+.raid-base-slot span {
+  font-size: clamp(17px, 1.8vw, 35px);
+  color: #fff0cf;
+  right: 5%;
+  bottom: 4%;
+  text-shadow: 2px 2px #000, -1px -1px #000;
+}
+
+.raid-base-workspace.raid-catalog-active { display: block; }
+.raid-catalog-active #raid-shop,
+.raid-catalog-active #raid-recipes {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, clamp(58px, 6.1vw, 105px)), 1fr));
+  gap: 6px;
+}
+.raid-catalog-active #raid-shop { justify-items: start; }
+.raid-catalog-active #raid-shop .raid-base-slot { max-width: 100px; }
+.raid-catalog-active .raid-recipe-card { font-size: clamp(10px, .85vw, 15px); padding: 5px 2px; gap: 3px; }
+.raid-catalog-active .raid-recipe-card .raid-base-slot { width: min(100%, 68px); }
+
+#raid-base #raid-selection.inv-context-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 1200;
+  width: min(340px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+}
+#raid-base #raid-selection .inv-context-title { font-size: 19px; }
+#raid-base #raid-selection .inv-context-desc { font-size: 14px; }
+#raid-base #raid-selection :is(.inv-context-title, .inv-context-desc) {
+  color: #f4e8d8;
+  line-height: 1.35;
+}
+#raid-base #raid-selection .inv-context-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+#raid-base #raid-selection button { margin: 0; white-space: normal; }
+
+@media (prefers-reduced-motion: no-preference) {
+  #raid-deploy-dialog[open] { animation: raid-deploy-enter 180ms ease-out; }
+  #raid-base button:enabled:active { filter: brightness(1.2); }
+  @keyframes raid-deploy-enter {
+    from { opacity: 0; scale: .98; }
+  }
+}
+
+.raid-base-overview { align-items: start; }
+.raid-base-overview > .raid-base-section { display: block; }
+#raid-challenges { grid-auto-rows: auto; }
+#raid-challenges h3 { font-size: clamp(13px, 1.05vw, 18px); }
+#raid-challenges progress { width: min(100%, 360px); height: 8px; }
+.raid-base-mission { align-self: end; }
+#overlay #raid-deploy { margin-top: 12px; min-height: 68px; min-width: min(100%, 270px); }
+
+@media (max-width: 850px) and (min-height: 441px) {
+  .raid-base-workspace > .raid-base-columns,
+  .raid-deploy-review > .raid-base-columns { grid-template-rows: minmax(0, .9fr) minmax(0, 1.1fr); }
+}
+@media (max-width: 620px) {
+  #raid-stash .raid-base-slot span { font-size: clamp(11px, 2.8vw, 17px); }
+  #raid-base #raid-selection button { font-size: 12px; }
+}
+@media (max-height: 440px) {
+  .raid-catalog-active #raid-shop, .raid-catalog-active #raid-recipes {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 53px), 1fr));
+  }
+  .raid-catalog-active .raid-recipe-card .raid-base-slot { max-width: 34px; }
+  .raid-catalog-active .raid-recipe-card { font-size: 9px; }
+  #overlay #raid-deploy { min-height: 40px; }
+}

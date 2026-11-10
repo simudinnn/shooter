@@ -944,7 +944,7 @@ export class World {
     for (const anchor of anchors) {
       const ax = anchor.tx * TILE + TILE * 0.5;
       const az = anchor.tz * TILE + TILE * 0.5;
-      const extent = (townHalf(anchor) * 2 + 24) * TILE + pad;
+      const extent = townHalf(anchor) * TILE + pad;
       const dx = Math.abs(x - ax);
       const dz = Math.abs(z - az);
       if (dx < extent && dz < extent) return true;

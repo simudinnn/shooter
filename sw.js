@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v371';
+const CACHE = 'robot-ruins-v380';
 
 function buildingKitSprites() {
   return [
@@ -89,6 +89,7 @@ const SHELL = [
   './js/dayNight.js',
   './js/gameConfig.js',
   './js/main.js',
+  './js/raidBase.js',
   './js/wallShadows.js',
   './js/customContent.js',
   './js/custom-content-data.js',
@@ -157,6 +158,7 @@ const SHELL = [
   './assets/ui/ui_button_9slice.png',
   './assets/ui/craft_toggle.png',
   './assets/items/misc/lock.png',
+  './assets/items/misc/cash.png',
 ];
 
 const ASSETS = [
@@ -286,5 +288,10 @@ self.addEventListener('fetch', (event) => {
     && !/\/(?:style\.css|manifest\.webmanifest)$/.test(url.pathname)) return;
   event.respondWith(serve(request, url));
 });
+
+
+
+
+
 
 
