@@ -658,6 +658,7 @@ export class RaidBase {
         }, !unlocked || this.profile.cash < offer.price]], price, anchor, keepPosition);
       };
       const slot = this.slot(grid, offer.item, select, unlocked ? '' : `Lv ${offer.level}`);
+      slot.dataset.locked = String(!unlocked);
       if (index === this.catalogSelection) select(slot, true);
     }
   }
