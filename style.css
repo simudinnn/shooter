@@ -3002,3 +3002,154 @@ body.mobile-ui #raid-extract-hud {
   .raid-catalog-active .raid-recipe-card { font-size: 9px; }
   #overlay #raid-deploy { min-height: 40px; }
 }
+
+@media (hover: none) and (pointer: coarse) {
+  body.mobile-ui #game-canvas {
+    clip-path: inset(
+      max(0px, calc((100% - 100dvh) / 2 + env(safe-area-inset-top, 0px)))
+      max(0px, calc((100% - 100dvw) / 2 + env(safe-area-inset-right, 0px)))
+      max(0px, calc((100% - 100dvh) / 2 + env(safe-area-inset-bottom, 0px)))
+      max(0px, calc((100% - 100dvw) / 2 + env(safe-area-inset-left, 0px)))
+    );
+  }
+
+  #raid-base {
+    --raid-safe-left: max(8px, env(safe-area-inset-left, 0px));
+    --raid-safe-right: max(8px, env(safe-area-inset-right, 0px));
+    box-sizing: border-box;
+    padding: env(safe-area-inset-top, 0px) var(--raid-safe-right)
+      env(safe-area-inset-bottom, 0px) var(--raid-safe-left);
+  }
+
+  #raid-base .raid-base-top,
+  #raid-base .raid-base-strip,
+  #raid-base .raid-base-workspace,
+  #raid-base .raid-base-frame > footer { padding: 5px 8px; }
+
+  #raid-base .raid-base-overview {
+    min-height: 0;
+    gap: 8px;
+    align-items: start;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #raid-base .raid-base-overview > .raid-base-section {
+    max-height: 100%;
+    box-sizing: border-box;
+    overflow-y: auto;
+  }
+  #raid-base .raid-base-mission {
+    align-self: start;
+    padding: 6px;
+    gap: 4px;
+  }
+  #raid-base .raid-base-mission p { margin: 0; }
+  #raid-base .raid-base-overview h2 { font-size: 16px; margin-bottom: 4px; }
+  #raid-challenges { gap: 4px 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #raid-challenges article { padding: 2px 0; }
+  #raid-challenges h3 { font-size: 11px; margin: 0; }
+  #raid-challenges p { font-size: 10px; line-height: 1.25; margin: 2px 0; }
+  #raid-challenges progress { height: 5px; display: block; }
+  #overlay .raid-base-frame #raid-challenges button.ui-slice-button,
+  #overlay .raid-base-frame #raid-base-exit.ui-slice-button {
+    font-size: 11px;
+    min-height: 30px;
+    padding: 3px 7px;
+    margin: 0;
+  }
+  #overlay #raid-deploy { align-self: start; margin: 2px 0 0; min-height: 40px; }
+
+  #raid-base .raid-transfer-hint { display: none; }
+  #raid-base .raid-base-workspace #raid-stash { width: 100%; gap: 4px; }
+  #raid-base .raid-base-workspace [data-base-panel="stash"] .raid-base-slot img { width: 82%; height: 82%; }
+  #raid-base .raid-base-workspace [data-base-panel="stash"] .raid-base-slot span {
+    font-size: clamp(10px, 1.7vw, 16px);
+  }
+  #raid-deploy-dialog {
+    width: min(1600px, calc(100dvw - var(--raid-safe-left) - var(--raid-safe-right)));
+    inset: env(safe-area-inset-top, 0px) var(--raid-safe-right)
+      env(safe-area-inset-bottom, 0px) var(--raid-safe-left);
+  }
+  #raid-deploy-dialog[open] {
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 12px);
+    max-height: none;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) and (orientation: portrait) {
+  #raid-base .raid-base-overview {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  #raid-base .raid-base-overview .raid-base-mission { grid-row: 1; }
+}
+
+.raid-base-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#raid-base .raid-base-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+#raid-base .raid-base-top nav { justify-content: center; }
+#raid-base .raid-base-top .raid-base-balance { justify-self: end; }
+#overlay .raid-base-frame #raid-base-exit.ui-slice-button {
+  min-height: 30px;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+#overlay #raid-base .raid-base-mission #raid-deploy {
+  flex: 0 0 auto;
+  margin: 4px 0 0;
+  min-height: clamp(36px, 6dvh, 54px);
+  font-size: clamp(14px, 2.5dvh, 24px);
+}
+#raid-base .raid-base-overview {
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: start;
+}
+#raid-base .raid-base-overview > .raid-base-section {
+  box-sizing: border-box;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: clamp(6px, 1.4dvh, 14px);
+}
+#raid-base .raid-base-mission {
+  align-self: start;
+  box-sizing: border-box;
+  max-height: 100%;
+  overflow: hidden;
+}
+#raid-base .raid-base-mission p:last-of-type {
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+}
+#raid-base #raid-challenges {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+#raid-base #raid-challenges article { padding: 3px 0; }
+#raid-base #raid-challenges h3 { margin: 0; font-size: clamp(11px, 1.7dvh, 17px); }
+#raid-base #raid-challenges p { margin: 2px 0; font-size: clamp(10px, 1.5dvh, 15px); line-height: 1.3; }
+#raid-base #raid-challenges progress { display: block; height: 5px; }
+#overlay #raid-base #raid-challenges button.ui-slice-button {
+  margin: 0;
+  padding: 3px 8px;
+  min-height: clamp(28px, 4dvh, 38px);
+  font-size: clamp(11px, 1.5dvh, 15px);
+}
+@media (max-width: 700px) {
+  #raid-base .raid-base-top { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; }
+  #raid-base .raid-base-top nav { grid-column: 1 / -1; order: 3; }
+}
+@media (max-width: 620px) {
+  #raid-base .raid-base-overview { grid-template-rows: auto minmax(0, 1fr); }
+}
+@media (hover: none) and (pointer: coarse) and (orientation: portrait) {
+  #raid-base .raid-base-overview { grid-template-rows: auto minmax(0, 1fr); }
+}

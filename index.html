@@ -43,7 +43,9 @@
     <div id="raid-base" class="hidden">
       <section class="raid-base-frame" aria-label="Safe base">
         <header class="raid-base-top">
-          <div><small>ROBOT RUINS</small><h1>Safe Base</h1></div>
+          <div class="raid-base-header-actions">
+            <button type="button" id="raid-base-exit" class="ui-slice-button">Main Menu</button>
+          </div>
           <nav aria-label="Base stations">
             <button type="button" data-station="deploy">Deploy</button>
             <button type="button" data-station="stash">Stash</button>
@@ -83,10 +85,6 @@
             <button type="button" id="raid-deploy-confirm" class="ui-slice-button">Deploy now</button>
           </footer>
         </dialog>
-        <footer>
-          <button type="button" id="raid-base-exit" class="ui-slice-button">Main Menu</button>
-          <span>SAFE ZONE</span>
-        </footer>
       </section>
     </div>
     <div id="pause-menu" class="hidden">
