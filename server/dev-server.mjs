@@ -1,13 +1,12 @@
 /**
- * All-in-one dev server: serves the game + authoritative multiplayer on one port.
  * Run: npm start
  */
 import { createServer } from 'http';
+import { spawn } from 'child_process';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { join, extname, normalize } from 'path';
 import { fileURLToPath } from 'url';
-import { attachGameServer } from './gameServer.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const START_PORT = Number(process.env.PORT) || 3000;
@@ -103,8 +102,16 @@ const httpServer = createServer((req, res) => {
   });
 });
 
-attachGameServer(httpServer);
 
 const port = await listenWithFallback(httpServer, START_PORT);
 console.log(`\nRobot Ruins → http://localhost:${port}`);
-console.log('Share that link with friends. Multiplayer uses the same URL automatically.\n');
+
+if (process.argv.includes('--content-editor')) {
+  const url = `http://localhost:${port}/tools/content-editor.html`;
+  console.log(`Content editor → ${url}`);
+  if (process.platform === 'win32') {
+    const browser = spawn('explorer.exe', [url], { stdio: 'ignore', windowsHide: true });
+    browser.on('error', () => {});
+    browser.unref();
+  }
+}
