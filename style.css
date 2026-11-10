@@ -3155,6 +3155,36 @@ body.mobile-ui #raid-extract-hud {
 }
 
 @media (hover: none) and (pointer: coarse) {
+  #raid-deploy-dialog > header { padding: 6px 10px 0; }
+  #raid-deploy-dialog > header :is(h2, p) { margin: 0 0 4px; }
+  #raid-deploy-dialog :is(header, .raid-base-section > h2) .inv-pixel-text-img {
+    display: block;
+    max-width: 100%;
+    image-rendering: pixelated;
+  }
+  #raid-deploy-dialog .raid-deploy-review { padding: 4px 8px 6px; }
+  #raid-deploy-dialog .raid-base-columns { gap: 6px; }
+  #raid-deploy-dialog .raid-base-columns > .raid-base-section {
+    border: 0;
+    padding: 0;
+    background: none;
+  }
+  #raid-deploy-dialog .raid-base-section > h2 { margin: 0 0 4px; }
+  #raid-deploy-dialog :is(.raid-loadout-layout, #raid-stash) {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 3px;
+    border: 1px solid #555344;
+    background: #242621;
+  }
+  #raid-deploy-dialog .raid-loadout-layout { --raid-slot-gap: 3px; }
+  #raid-deploy-dialog #raid-stash { --raid-review-stash-gap: 3px; }
+  #raid-deploy-dialog footer { padding: 4px 8px; }
+  #overlay #raid-deploy-dialog footer .ui-slice-button {
+    min-height: 36px;
+    padding: 4px 10px;
+  }
+
   #overlay .raid-base-frame #raid-base-exit.ui-slice-button {
     min-height: 26px;
     padding: 2px 5px;

@@ -3,6 +3,7 @@ import { capturePlayerState } from './saveGame.js';
 import { getItemDescription, getItemDisplayName, getItemIconSrc } from './loot.js';
 import { INV_LOCK_SRC } from './inventory.js';
 import { equipmentSlotFor } from './equipment.js';
+import { setElementPixelText, setElementWrappedPixelText, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { applyRecycleYields, canCraftRecipe, canRecycleItem, craftRecipe, getCraftableRecipes, getRecycleYields, SHOP_RECIPES } from './crafting.js';
 
 export const EXTRACT_RADIUS = 5;
@@ -198,6 +199,15 @@ export class RaidBase {
       review.append(this.stashPanel, this.selection);
       this.dialogStatus.textContent = '';
       this.deployDialog.showModal();
+      if (matchMedia('(hover: none) and (pointer: coarse)').matches) {
+        const title = this.deployDialog.querySelector('h2');
+        const intro = this.deployDialog.querySelector('header p');
+        const text = intro.getAttribute('aria-label') || intro.textContent;
+        title.setAttribute('aria-label', 'Check your loadout');
+        intro.setAttribute('aria-label', text);
+        setElementPixelText(title, 'Check your loadout', PIXEL_TEXT_SCALE_SM);
+        setElementWrappedPixelText(intro, text, intro.clientWidth, PIXEL_TEXT_SCALE_SM);
+      }
       this.render();
     });
     root.querySelector('#raid-deploy-cancel').addEventListener('click', () => this.deployDialog.close());
@@ -482,7 +492,23 @@ export class RaidBase {
   renderStash() {
     const { kit, stash } = this.profile;
     const limit = stashLimit(this.profile);
-    this.root.querySelector('#raid-stash-title').textContent = `Stash · ${stash.filter(Boolean).length}/${limit}`;
+    const stashTitle = this.root.querySelector('#raid-stash-title');
+    const stashLabel = `Stash · ${stash.filter(Boolean).length}/${limit}`;
+    const loadoutTitle = this.stashPanel.querySelector('h2');
+    if (this.deployDialog.open && matchMedia('(hover: none) and (pointer: coarse)').matches) {
+      stashTitle.setAttribute('aria-label', stashLabel);
+      loadoutTitle.setAttribute('aria-label', 'Loadout');
+      setElementPixelText(stashTitle, stashLabel, PIXEL_TEXT_SCALE_SM);
+      setElementPixelText(loadoutTitle, 'Loadout', PIXEL_TEXT_SCALE_SM);
+    } else {
+      stashTitle.removeAttribute('aria-label');
+      loadoutTitle.removeAttribute('aria-label');
+      for (const title of [stashTitle, loadoutTitle]) {
+        for (const property of ['color', 'font-size', 'line-height']) title.style.removeProperty(property);
+      }
+      stashTitle.textContent = stashLabel;
+      loadoutTitle.textContent = 'Loadout';
+    }
     const kitGrid = this.root.querySelector('#raid-kit');
     const gearGrid = this.root.querySelector('#raid-gear');
     const stashGrid = this.root.querySelector('#raid-stash');
