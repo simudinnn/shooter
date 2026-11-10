@@ -7,12 +7,11 @@ import { MATERIAL_STACK_MAX, mergeMaterialStacks, normalizeMaterialItem } from '
 import {
   CONSUMABLE_STACK_MAX,
   getConsumableHealAmount,
-  isQuickEquipItem,
   mergeConsumableStacks,
   normalizeConsumableItem,
 } from './consumables.js';
-import { isEquipmentItem, normalizeEquipmentItem } from './equipment.js';
-import { isThrowableItem, normalizeThrowableItem } from './throwables.js';
+import { BACKPACK_CAPACITY, EQUIPMENT_SLOTS, VEST_RESISTANCE, equipmentSlotFor, isEquipmentItem, itemDurability, normalizeEquipmentItem } from './equipment.js';
+import { normalizeThrowableItem } from './throwables.js';
 
 export const GUN_HOLD_OFFSET = 1.1;
 /** Extra distance from gun hold point to barrel tip (world units). */
@@ -30,12 +29,13 @@ export const PLAYER_SPRITE_SCALE = 1.5;
 const SCREEN_PPU = 5.5;
 
 export const ITEM_STORAGE_SIZE = 25;
-export const UNLOCKED_ITEM_SLOTS = 25;
-export const EQUIPMENT_SLOT_COUNT = 4;
+export const UNLOCKED_ITEM_SLOTS = 10;
+export const EQUIPMENT_SLOT_COUNT = EQUIPMENT_SLOTS.length;
 export const HAND_SLOT_COUNT = 2;
 
 export const WEAPONS = {
   glock: {
+    durabilityShots: 650,
     name: 'Glock',
     magSize: 12,
     damage: 10,
@@ -51,6 +51,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   m16: {
+    durabilityShots: 850,
     name: 'M16',
     magSize: 30,
     damage: 12,
@@ -67,6 +68,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   m870: {
+    durabilityShots: 320,
     name: '870',
     magSize: 6,
     damage: 12,
@@ -83,6 +85,7 @@ export const WEAPONS = {
     casingColor: 'red',
   },
   m24: {
+    durabilityShots: 420,
     name: 'M24',
     magSize: 5,
     damage: 85,
@@ -99,6 +102,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   uzi: {
+    durabilityShots: 1050,
     name: 'Uzi',
     magSize: 32,
     damage: 8,
@@ -115,6 +119,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   revolver: {
+    durabilityShots: 500,
     name: 'Revolver',
     magSize: 6,
     damage: 30,
@@ -129,6 +134,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   famas: {
+    durabilityShots: 800,
     name: 'Famas',
     magSize: 25,
     damage: 10,
@@ -145,6 +151,7 @@ export const WEAPONS = {
     casingColor: 'yellow',
   },
   fal: {
+    durabilityShots: 700,
     name: 'FAL',
     magSize: 20,
     damage: 18,
@@ -312,10 +319,9 @@ export class Player {
     this.powerUps = { speed: { until: 0 }, damage: { mult: 1.5, until: 0 } };
     this.itemSlots = Array(ITEM_STORAGE_SIZE).fill(null);
     this.equipmentSlots = Array(EQUIPMENT_SLOT_COUNT).fill(null);
+    this._legacyEquipmentDrops = [];
     this.handSlots = [null, null];
     this.activeHandSlot = 0;
-    this.quickSlot = null;
-    this.throwableSlot = null;
     this.handSlots[0] = { kind: 'weapon', key: 'glock', ammo: WEAPONS.glock.magSize };
     this.handSlots[1] = { kind: 'melee', key: 'wooden_bat' };
     this.weaponKey = null;
@@ -336,9 +342,16 @@ export class Player {
     this.shield = data.shield ?? 0;
     this.alive = data.alive !== false;
     this.itemSlots = data.itemSlots.map((s) => (s ? { ...s } : null));
-    this.equipmentSlots = data.equipmentSlots.map((s) => (s ? { ...s } : null));
-    this.quickSlot = data.quickSlot ? { ...data.quickSlot } : null;
-    this.throwableSlot = data.throwableSlot ? { ...data.throwableSlot } : null;
+    this.equipmentSlots = Array(EQUIPMENT_SLOT_COUNT).fill(null);
+    for (const saved of data.equipmentSlots ?? []) {
+      if (!saved) continue;
+      const item = normalizeEquipmentItem(saved);
+      const target = equipmentSlotFor(item);
+      if (target >= 0 && !this.equipmentSlots[target]) this.equipmentSlots[target] = item;
+      else this._legacyEquipmentDrops.push({ ...saved });
+    }
+    if (data.quickSlot) this._legacyEquipmentDrops.push({ ...data.quickSlot });
+    if (data.throwableSlot) this._legacyEquipmentDrops.push({ ...data.throwableSlot });
     if (Array.isArray(data.handSlots)) {
       this.handSlots = data.handSlots.map((s) => (s ? { ...s } : null));
       this.activeHandSlot = data.activeHandSlot === 1 ? 1 : 0;
@@ -379,12 +392,12 @@ export class Player {
     const cfg = WEAPONS[item.key];
     if (!cfg) return item;
     const ammo = item.ammo ?? cfg.magSize;
-    return { kind: 'weapon', key: item.key, ammo: Math.min(cfg.magSize, Math.max(0, ammo)) };
+    return { ...item, durability: itemDurability(item), ammo: Math.min(cfg.magSize, Math.max(0, ammo)) };
   }
 
   _weaponItemFromEquipped() {
     if (!this.weaponKey || !this.weapon) return null;
-    return { kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo };
+    return { ...this.handSlots[this.activeHandSlot], kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo };
   }
 
   /** @deprecated equipped gun ammo is kept on this.weapon until slot swap */
@@ -432,22 +445,22 @@ export class Player {
 
   _meleeItemFromEquipped() {
     if (!this.meleeKey) return null;
-    return { kind: 'melee', key: this.meleeKey };
+    return { ...this.handSlots[this.activeHandSlot], kind: 'melee', key: this.meleeKey };
   }
 
   _normalizeHandItem(item) {
     if (!item) return null;
     if (item.kind === 'weapon') return this._normalizeWeaponItem(item);
-    if (item.kind === 'melee' && MELEE_WEAPONS[item.key]) return { kind: 'melee', key: item.key };
+    if (item.kind === 'melee' && MELEE_WEAPONS[item.key]) return { ...item, durability: itemDurability(item) };
     return null;
   }
 
   _persistActiveHand() {
     const i = this.activeHandSlot;
     if (this.weaponSlot === 'gun' && this.weaponKey && this.weapon) {
-      this.handSlots[i] = { kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo ?? 0 };
+      this.handSlots[i] = { ...this.handSlots[i], kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo ?? 0 };
     } else if (this.weaponSlot === 'melee' && this.meleeKey) {
-      this.handSlots[i] = { kind: 'melee', key: this.meleeKey };
+      this.handSlots[i] = { ...this.handSlots[i], kind: 'melee', key: this.meleeKey };
     } else {
       this.handSlots[i] = null;
     }
@@ -482,9 +495,9 @@ export class Player {
     const item = this.handSlots[index];
     if (!item) return null;
     if (item.kind === 'weapon') {
-      return { kind: 'weapon', key: item.key, ammo: item.ammo ?? 0 };
+      return { ...item, ammo: index === this.activeHandSlot ? (this.weapon?.ammo ?? item.ammo ?? 0) : (item.ammo ?? 0) };
     }
-    if (item.kind === 'melee') return { kind: 'melee', key: item.key };
+    if (item.kind === 'melee') return { ...item, durability: itemDurability(item) };
     return null;
   }
 
@@ -524,12 +537,11 @@ export class Player {
     }
     if (incoming.kind === 'weapon') {
       this.handSlots[handIndex] = {
-        kind: 'weapon',
-        key: incoming.key,
+        ...incoming,
         ammo: incoming.ammo ?? WEAPONS[incoming.key].magSize,
       };
     } else {
-      this.handSlots[handIndex] = { kind: 'melee', key: incoming.key };
+      this.handSlots[handIndex] = incoming;
     }
     if (inventorySlotIndex != null) {
       this.itemSlots[inventorySlotIndex] = outgoing;
@@ -567,72 +579,13 @@ export class Player {
     if (!normalized) return;
     if (normalized.kind === 'weapon') {
       this.handSlots[handIndex] = {
-        kind: 'weapon',
-        key: normalized.key,
+        ...normalized,
         ammo: normalized.ammo ?? WEAPONS[normalized.key]?.magSize ?? 0,
       };
     } else {
-      this.handSlots[handIndex] = { kind: 'melee', key: normalized.key };
+      this.handSlots[handIndex] = normalized;
     }
     if (handIndex === this.activeHandSlot) this._applyActiveHand();
-  }
-
-  canPlaceQuickItem(item) {
-    return isQuickEquipItem(item);
-  }
-
-  equipQuickFromInventory(slotIndex) {
-    if (!this.isItemSlotUnlocked(slotIndex)) return false;
-    const item = this.itemSlots[slotIndex];
-    const incoming = normalizeConsumableItem(item);
-    if (!incoming) return false;
-    const outgoing = this.quickSlot ? normalizeConsumableItem(this.quickSlot) : null;
-    this.quickSlot = { ...incoming };
-    this.itemSlots[slotIndex] = outgoing;
-    return true;
-  }
-
-  suspendQuickSlotForDrag() {
-    const item = this.quickSlot ? normalizeConsumableItem(this.quickSlot) : null;
-    this.quickSlot = null;
-    return item;
-  }
-
-  restoreQuickSlot(item) {
-    const normalized = normalizeConsumableItem(item);
-    if (!normalized) return;
-    this.quickSlot = { ...normalized };
-  }
-
-  canPlaceThrowableItem(item) {
-    return isThrowableItem(item);
-  }
-
-  equipThrowableFromInventory(slotIndex) {
-    if (!this.isItemSlotUnlocked(slotIndex)) return false;
-    const item = this.itemSlots[slotIndex];
-    const incoming = normalizeThrowableItem(item);
-    if (!incoming) return false;
-    const outgoing = this.throwableSlot ? normalizeThrowableItem(this.throwableSlot) : null;
-    this.throwableSlot = { ...incoming };
-    this.itemSlots[slotIndex] = outgoing;
-    return true;
-  }
-
-  suspendThrowableSlotForDrag() {
-    const item = this.throwableSlot ? normalizeThrowableItem(this.throwableSlot) : null;
-    this.throwableSlot = null;
-    return item;
-  }
-
-  restoreThrowableSlot(item) {
-    const normalized = normalizeThrowableItem(item);
-    if (!normalized) return;
-    this.throwableSlot = { ...normalized };
-  }
-
-  canPlaceEquipmentItem(item) {
-    return isEquipmentItem(item);
   }
 
   equipEquipmentFromInventory(slotIndex, equipmentIndex) {
@@ -640,7 +593,7 @@ export class Player {
     if (equipmentIndex < 0 || equipmentIndex >= EQUIPMENT_SLOT_COUNT) return false;
     const item = this.itemSlots[slotIndex];
     const incoming = normalizeEquipmentItem(item);
-    if (!incoming) return false;
+    if (equipmentSlotFor(incoming) !== equipmentIndex) return false;
     const outgoing = this.equipmentSlots[equipmentIndex];
     this.equipmentSlots[equipmentIndex] = { ...incoming };
     this.itemSlots[slotIndex] = outgoing;
@@ -657,27 +610,8 @@ export class Player {
 
   restoreEquipmentSlot(equipmentIndex, item) {
     const normalized = normalizeEquipmentItem(item);
-    if (!normalized || equipmentIndex < 0 || equipmentIndex >= EQUIPMENT_SLOT_COUNT) return;
+    if (equipmentIndex < 0 || equipmentSlotFor(normalized) !== equipmentIndex) return;
     this.equipmentSlots[equipmentIndex] = { ...normalized };
-  }
-
-  useQuickSlot() {
-    const item = normalizeConsumableItem(this.quickSlot);
-    if (!item) return false;
-    const heal = getConsumableHealAmount(item.key);
-    if (heal > 0) {
-      if (this.health >= this.maxHealth) return false;
-      if (!this.heal(heal)) return false;
-      const left = (item.amount ?? 1) - 1;
-      if (left <= 0) this.quickSlot = null;
-      else this.quickSlot = { kind: 'consumable', key: item.key, amount: left };
-      return true;
-    }
-    return false;
-  }
-
-  useThrowableSlot() {
-    return false;
   }
 
   _buildWeaponRuntime(key, ammo = null) {
@@ -718,13 +652,12 @@ export class Player {
   /** Equip a gun from a chest slot; previous hand item goes into that chest slot. */
   equipWeaponFromChest(chestSlots, chestIndex, item, handIndex = null) {
     const incoming = this._normalizeWeaponItem(item);
-    if (!WEAPONS[incoming.key]) return false;
+    if (!incoming) return false;
     const targetHand = handIndex ?? this._preferredHandSlotForItem(incoming);
     const outgoing = this.getHandSlotItem(targetHand);
     if (targetHand === this.activeHandSlot) this._cancelActiveReload();
     this.handSlots[targetHand] = {
-      kind: 'weapon',
-      key: incoming.key,
+      ...incoming,
       ammo: incoming.ammo ?? WEAPONS[incoming.key].magSize,
     };
     chestSlots[chestIndex] = outgoing;
@@ -737,7 +670,30 @@ export class Player {
   }
 
   isItemSlotUnlocked(index) {
-    return index < UNLOCKED_ITEM_SLOTS;
+    return Number.isInteger(index) && index >= 0 && index < this.inventoryCapacity;
+  }
+
+  get inventoryCapacity() {
+    return UNLOCKED_ITEM_SLOTS + (BACKPACK_CAPACITY[this.equipmentSlots[1]?.key] ?? 0);
+  }
+
+  drainLockedInventory() {
+    const drops = this._legacyEquipmentDrops.splice(0);
+    for (let index = this.inventoryCapacity; index < this.itemSlots.length; index++) {
+      if (this.itemSlots[index]) drops.push(this.itemSlots[index]);
+      this.itemSlots[index] = null;
+    }
+    return drops;
+  }
+
+  wearActiveHand(amount) {
+    const item = this.handSlots[this.activeHandSlot];
+    if (!item) return;
+    item.durability = Math.max(0, itemDurability(item) - amount);
+    if (item.durability <= 1e-8) {
+      this.handSlots[this.activeHandSlot] = null;
+      this._applyActiveHand();
+    }
   }
 
   /** Swap equipped melee with a melee item in an inventory slot. */
@@ -757,7 +713,7 @@ export class Player {
     const targetHand = handIndex ?? this._preferredHandSlotForItem(item);
     const outgoing = this.getHandSlotItem(targetHand);
     if (targetHand === this.activeHandSlot) this._abortReloadForMeleeSwitch();
-    this.handSlots[targetHand] = { kind: 'melee', key: item.key };
+    this.handSlots[targetHand] = this._normalizeHandItem(item);
     chestSlots[chestIndex] = outgoing;
     if (targetHand === this.activeHandSlot) {
       this._applyActiveHand();
@@ -992,6 +948,19 @@ export class Player {
   }
 
   /** Move an item into inventory, merging stacks when possible. */
+  tryLootItem(item) {
+    const equipmentIndex = equipmentSlotFor(item);
+    if (equipmentIndex >= 0 && !this.equipmentSlots[equipmentIndex]) {
+      this.restoreEquipmentSlot(equipmentIndex, item);
+      return { ok: true, remainder: null };
+    }
+    const handIndex = this.handSlots.indexOf(null);
+    if (handIndex >= 0 && this.equipIntoHandSlot(handIndex, item)) {
+      return { ok: true, remainder: null };
+    }
+    return this.tryStoreItem(item);
+  }
+
   tryStoreItem(item) {
     if (!item) return { ok: false, remainder: null };
     if (item.kind === 'ammo') {
@@ -1056,7 +1025,7 @@ export class Player {
       if (!MELEE_WEAPONS[item.key]) return { ok: false, remainder: item };
       const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
       if (idx < 0) return { ok: false, remainder: item };
-      this.itemSlots[idx] = { kind: 'melee', key: item.key };
+      this.itemSlots[idx] = this._normalizeHandItem(item);
       return { ok: true, remainder: null };
     }
     const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
@@ -1714,6 +1683,18 @@ export class Player {
     if (remaining <= 0) {
       if (!opts.perBullet) this.invulnTimer = time + 0.25;
       return true;
+    }
+    const vest = this.equipmentSlots[0];
+    if (vest) {
+      const resisted = Math.min(itemDurability(vest), remaining * (VEST_RESISTANCE[vest.key] ?? 0));
+      remaining -= resisted;
+      vest.durability = Math.max(0, itemDurability(vest) - resisted);
+      if (vest.durability === 0) this.equipmentSlots[0] = null;
+    }
+    const backpack = this.equipmentSlots[1];
+    if (backpack) {
+      backpack.durability = Math.max(0, itemDurability(backpack) - remaining * 0.25);
+      if (backpack.durability === 0) this.equipmentSlots[1] = null;
     }
     this.health = Math.max(0, this.health - remaining);
     if (!opts.perBullet) this.invulnTimer = time + 0.4;

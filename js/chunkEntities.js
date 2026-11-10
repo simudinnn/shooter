@@ -47,7 +47,6 @@ export class ChunkEntityManager {
   }
 
   update(player, time = 0) {
-    if (this.game.lan?.isOnline) return;
     if (time < this._nextUpdate) return;
     this._nextUpdate = time + 0.2;
     this._despawnFar(player);

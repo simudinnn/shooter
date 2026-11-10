@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v364';
+const CACHE = 'robot-ruins-v371';
 
 function buildingKitSprites() {
   return [
@@ -87,13 +87,11 @@ const SHELL = [
   './js/font-load.js',
   './js/renderConfig.js',
   './js/dayNight.js',
-  './js/lanSession.js',
-  './js/netProtocol.js',
-  './js/netState.js',
-  './js/supabaseConfig.js',
   './js/gameConfig.js',
-  './js/rooms.js',
   './js/main.js',
+  './js/wallShadows.js',
+  './js/customContent.js',
+  './js/custom-content-data.js',
   './js/consumables.js',
   './js/crafting.js',
   './js/equipment.js',
@@ -133,13 +131,24 @@ const SHELL = [
   './js/world.js',
   './js/worldGen.js',
   './js/saveGame.js',
-  './js/visibility.js',
   './js/viewCull.js',
   './js/collisionDebug.js',
   './assets/fonts/game-pixel.woff2',
   './assets/fonts/game-pixel.ttf',
   './assets/fonts/ascii.png',
   './assets/ui/inventory.png',
+  './assets/ui/vest.png',
+  './assets/ui/backpack.png',
+  './assets/items/clothes/backpack2.png',
+  './assets/items/clothes/backpack3.png',
+  './assets/items/clothes/backpack_1.png',
+  './assets/items/clothes/hunting_vest.png',
+  './assets/items/clothes/military_vest.png',
+  './assets/items/clothes/police_vest.png',
+  './assets/items/clothes/tool_belt.png',
+  './assets/items/clothes/vest.png',
+  './assets/ui/weapon1.png',
+  './assets/ui/weapon2.png',
   './assets/ui/crafting.png',
   './assets/ui/inv_slot.png',
   './assets/ui/inv_cursor.png',
@@ -277,3 +286,5 @@ self.addEventListener('fetch', (event) => {
     && !/\/(?:style\.css|manifest\.webmanifest)$/.test(url.pathname)) return;
   event.respondWith(serve(request, url));
 });
+
+

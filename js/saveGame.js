@@ -44,29 +44,6 @@ function cloneSlots(slots) {
   return slots.map((s) => (s ? { ...s } : null));
 }
 
-/** Snapshot live game state for localStorage. */
-export function captureBuildingsForNet(buildings) {
-  return (buildings?.buildings ?? []).map((b) => ({
-    originX: b.originX,
-    originZ: b.originZ,
-    w: b.w,
-    h: b.h,
-    cells: [...b.cells],
-    doorTx: b.doorTx,
-    doorTz: b.doorTz ?? b.h - 1,
-    doorOpen: !!b.doorOpen,
-    shape: b.shape ?? 'rect',
-    style: { ...b.style },
-    homeCx: b.homeCx,
-    homeCz: b.homeCz,
-    townId: b.townId ?? null,
-    townAnchorId: b.townAnchorId ?? null,
-    townAnchorTx: b.townAnchorTx ?? null,
-    townAnchorTz: b.townAnchorTz ?? null,
-    buildingRole: b.buildingRole ?? null,
-  }));
-}
-
 export function captureBuildings(buildings) {
   return (buildings?.buildings ?? []).map((b) => ({
     originX: b.originX,
@@ -142,6 +119,7 @@ export function captureGameState(game) {
     v: SAVE_VERSION,
     worldSeed: getWorldSeed(),
     kills: game.kills ?? 0,
+    groundDrops: game.groundDrops?.drops.map(({ x, z, item, preserve }) => ({ x, z, item: { ...item }, preserve })) ?? [],
     playTimeMs: (game.playTimeBase ?? 0) + (performance.now() - (game.startTime ?? performance.now())),
     dayNight: {
       timeMinutes: dayNight?.timeMinutes ?? 0,
@@ -159,10 +137,8 @@ export function captureGameState(game) {
       weaponSlot: player.weaponSlot,
       meleeKey: player.meleeKey,
       weaponAmmo: player.weapon?.ammo ?? 0,
-      handSlots: cloneSlots(player.handSlots),
+      handSlots: player.handSlots.map((_, index) => player.getHandSlotItem(index)),
       activeHandSlot: player.activeHandSlot ?? 0,
-      quickSlot: player.quickSlot ? { ...player.quickSlot } : null,
-      throwableSlot: player.throwableSlot ? { ...player.throwableSlot } : null,
       itemSlots: cloneSlots(player.itemSlots),
       equipmentSlots: cloneSlots(player.equipmentSlots),
       learnedBlueprints: [...(player.learnedBlueprints ?? [])],

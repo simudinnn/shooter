@@ -1071,6 +1071,21 @@ export function isEnemyOnPlayerScreen(robot, player) {
     && Math.abs(robot.z - player.z) <= INTERNAL_H / (2 * PPU);
 }
 
+export function hearPlayerGunshot(robot, player) {
+  if (!robot.alive || robot.emerging || robot.passive || robot.chasing || robot.aggroByHit) return;
+  const baseRange = robot.detectRange ?? (robot.type === 'scout' ? SCOUT_DETECT_RANGE : SPIDER_DETECT_RANGE);
+  const distance = Math.hypot(robot.x - player.x, robot.z - player.z);
+  if (distance < getEnemyDetectRange(robot, player, baseRange) || distance > 48
+    || !isEnemyOnPlayerScreen(robot, player)) return;
+  robot.chasing = true;
+  robot.heardNoise = true;
+  robot.searchPhase = 'investigate';
+  robot.investigateTimer = 0;
+  robot.lastKnownX = player.x;
+  robot.lastKnownZ = player.z;
+  robot.hasLastKnown = true;
+}
+
 export function canEnemySeePlayer(robot, player, world, buildings, detectRange) {
   const dist = Math.hypot(player.x - robot.x, player.z - robot.z);
   if (dist >= detectRange || !isEnemyOnPlayerScreen(robot, player)) return false;
@@ -1121,7 +1136,7 @@ export function getEnemyDetectRange(robot, player, baseRange) {
 
 export function getEnemyStatusIcon(robot) {
   if (!robot.chasing && !robot.aggroByHit) return null;
-  if (isEnemyAlert(robot)) return 'enemy_search';
+  if (isEnemyAlert(robot) || robot.heardNoise) return 'enemy_search';
   return 'enemy_aggro';
 }
 
@@ -1169,6 +1184,7 @@ export function resetEnemySearchCycle(robot) {
 }
 
 export function clearEnemyCombatState(robot) {
+  robot.heardNoise = false;
   robot.chasing = false;
   robot.aggroByHit = false;
   robot.spotTimer = 0;
@@ -1249,7 +1265,7 @@ export function advanceEnemySearchPhase(robot, canSee, dt, player, buildings) {
 
   if (robot.searchPhase === 'investigate') {
     robot.investigateTimer = (robot.investigateTimer ?? 0) + dt;
-    if (isAtLastKnown(robot) && robot.investigateTimer >= ENEMY_INVESTIGATE_MIN) {
+    if (robot.investigateTimer >= 6 || (isAtLastKnown(robot) && robot.investigateTimer >= ENEMY_INVESTIGATE_MIN)) {
       robot.searchPhase = 'search';
       robot.searchTimer = 0;
     }
@@ -1265,6 +1281,7 @@ export function advanceEnemySearchPhase(robot, canSee, dt, player, buildings) {
 
 export function updateEnemyLastKnown(robot, player, canSee) {
   if (!canSee) return;
+  robot.heardNoise = false;
   const center = getEntityMoveGoalCenter(player, 8);
   robot.lastKnownX = center.x;
   robot.lastKnownZ = center.z;

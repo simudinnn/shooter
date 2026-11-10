@@ -1,4 +1,5 @@
 import { customEnemies, customWeapons } from './customContent.js';
+import { EQUIPMENT_ITEM_KEYS, equipmentSpritePath } from './equipment.js';
 /**
  * Sprite loader — assets/{player,enemies,weapons,world,items,ui}/
  */
@@ -181,6 +182,7 @@ export const SPRITE_ANIM = {
 export const loadedSheetMeta = {};
 
 export const ASSET_PATHS = {
+  ...Object.fromEntries(EQUIPMENT_ITEM_KEYS.map((key) => [`equip_${key}`, equipmentSpritePath(key)])),
   ...PLAYER_ASSET_PATHS,
   ...WEAPON_ASSET_PATHS,
   ...ITEM_WEAPON_ASSET_PATHS,
@@ -220,8 +222,6 @@ export function getEnemyDrawScale(type) {
 export const WEAPON_NATIVE_PX = 24;
 export const PARTICLE_FX_NATIVE_PX = 15;
 export const CURSOR_NATIVE_PX = 15;
-/** Draw scale for ~21px on-screen cursor (15px art × 1.4). */
-export const CURSOR_DRAW_SCALE = 1.4;
 
 export function getParticleFxSprite(kind) {
   if (kind === 'smoke') return 'particle_smoke';
@@ -1138,16 +1138,12 @@ export function getEnemyBodySheet(type, moving, shootPhase = null) {
 }
 
 /** Flipbook timing for enemy body sheets — scout walk uses elapsed walkPhase at sheet fps. */
-export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null, opts = {}) {
-  if (customEnemies[type] && moving) return { time };
+export function getEnemyBodyAnim(type, moving, shootPhase, time = 0, chargeAnimStart = null) {
   if (type === 'scout' && (shootPhase === 'charging' || shootPhase === 'firing')) {
     const elapsed = chargeAnimStart != null ? Math.max(0, time - chargeAnimStart) : 0;
     return { elapsed };
   }
-  if (type === 'scout' && moving) {
-    return { time };
-  }
-  return getWalkAnim(moving, time, opts.walkPhase ?? 0);
+  return getWalkAnim(moving, time);
 }
 
 /** Time-based flipbook anim for walk sheets (respects SPRITE_ANIM fps). */

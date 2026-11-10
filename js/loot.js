@@ -17,20 +17,18 @@ import {
   consumableSpritePath,
   getConsumableDescription,
   getConsumableDisplayName,
-  isQuickEquipItem,
   normalizeConsumableItem,
 } from './consumables.js';
 import {
   equipmentSpritePath,
   getEquipmentDescription,
   getEquipmentDisplayName,
-  isEquipmentItem,
+  itemDurability,
   normalizeEquipmentItem,
 } from './equipment.js';
 import {
   getThrowableDescription,
   getThrowableDisplayName,
-  isThrowableItem,
   normalizeThrowableItem,
   throwableSpritePath,
 } from './throwables.js';
@@ -104,6 +102,11 @@ const CHEST_GEAR_WEIGHT = {
   weapon: 8,
 };
 
+const EQUIPMENT_LOOT_WEIGHTS = {
+  backpack_1: 12, backpack2: 5, backpack3: 2,
+  vest: 9, hunting_vest: 7, police_vest: 5, military_vest: 3,
+};
+
 function rollMaterialAmount(entry) {
   return entry.min + Math.floor(Math.random() * (entry.max - entry.min + 1));
 }
@@ -143,6 +146,9 @@ function buildChestLootOptions() {
   options.push({ weight: CHEST_GEAR_WEIGHT.bandage, roll: rollChestBandageItem });
   options.push({ weight: CHEST_GEAR_WEIGHT.melee, roll: rollChestMeleeItem });
   options.push({ weight: CHEST_GEAR_WEIGHT.weapon, roll: rollChestWeaponItem });
+  for (const [key, weight] of Object.entries(EQUIPMENT_LOOT_WEIGHTS)) {
+    options.push({ weight, roll: () => ({ kind: 'equipment', key }) });
+  }
   for (const entry of content.loot) {
     const key = contentKey(entry.group, entry.target);
     options.push({
@@ -271,12 +277,12 @@ export function getItemDescription(item) {
     if (!w) return item.key;
     const mode = w.automatic ? 'Automatic' : 'Semi-auto';
     const ammo = item.ammo ?? w.magSize;
-    return `${w.name} — ${mode}, ${w.damage} damage, ${ammo}/${w.magSize} in mag.`;
+    return `${w.name} — ${mode}, ${w.damage} damage, ${ammo}/${w.magSize} in mag. Durability ${Math.ceil(itemDurability(item))}%.`;
   }
   if (item.kind === 'melee') {
     const m = MELEE_WEAPONS[item.key];
     if (!m) return item.key;
-    return `${m.name} — melee weapon, ${m.damage ?? '?'} damage.`;
+    return `${m.name} — melee weapon, ${m.damage ?? '?'} damage. Durability ${Math.ceil(itemDurability(item))}%.`;
   }
   if (item.kind === 'ammo') {
     const normalized = normalizeAmmoItem(item);
@@ -290,7 +296,7 @@ export function getItemDescription(item) {
   if (item.kind === 'equipment') {
     const normalized = normalizeEquipmentItem(item);
     if (!normalized) return item.key;
-    return getEquipmentDescription(normalized.key);
+    return `${getEquipmentDescription(normalized.key)} Durability ${Math.ceil(itemDurability(normalized))}%.`;
   }
   if (item.kind === 'throwable') {
     const normalized = normalizeThrowableItem(item);
@@ -306,7 +312,7 @@ export function getItemDescription(item) {
   return '';
 }
 
-export { isQuickEquipItem, isThrowableItem };
+
 
 export function getItemIconSrc(item) {
   if (!item) return '';

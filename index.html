@@ -43,7 +43,6 @@
     <div id="pause-menu" class="hidden">
       <div class="menu-frame ui-slice-panel">
         <h2 class="menu-heading pixel-text-host">Paused</h2>
-        <p id="pause-room-code" class="pause-room-code pixel-text-host hidden"></p>
         <div class="menu-btn-stack">
           <button type="button" id="resume-btn" class="ui-slice-button">Resume</button>
           <button type="button" id="save-game-btn" class="ui-slice-button">Save Game</button>
@@ -149,15 +148,17 @@
       <div id="mobile-hotbar" class="mb-slot-group">
         <button type="button" class="mb-btn mb-hotbar ui-slice-button" id="mb-hand-0" title="Weapon 1">1</button>
         <button type="button" class="mb-btn mb-hotbar ui-slice-button" id="mb-hand-1" title="Weapon 2">2</button>
-        <button type="button" class="mb-btn mb-hotbar ui-slice-button" id="mb-quick" title="Quick equip">3</button>
-        <button type="button" class="mb-btn mb-hotbar ui-slice-button" id="mb-throw" title="Throwable">4</button>
       </div>
       <div id="mobile-actions">
         <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-reload" title="Reload">R</button>
         <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-interact" title="Interact">E</button>
         <button type="button" class="mb-btn mb-small ui-slice-button" id="mb-inventory" title="Inventory">INV</button>
         <div class="mobile-fire-cluster">
-          <button type="button" class="mb-btn mb-small mb-autolock ui-slice-button" id="mb-autolock" title="Toggle enemy autolock">LK</button>
+          <div id="mobile-aim" class="joystick-wrap">
+            <div class="joystick-base" id="aim-joystick-base" aria-label="Aim">
+              <div class="joystick-knob" id="aim-joystick-knob"></div>
+            </div>
+          </div>
           <button type="button" class="mb-btn mb-fire ui-slice-button" id="mb-fire">FIRE</button>
         </div>
       </div>

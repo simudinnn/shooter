@@ -329,20 +329,22 @@ export function canStoreItem(player, item) {
 }
 
 export function canCraftRecipe(player, recipe) {
-  if (!player || !recipe) return false;
-  return player.hasMaterials(recipe.costs) && canStoreItem(player, recipe.output);
+  return !!stageCraft(player, recipe);
+}
+
+function stageCraft(player, recipe) {
+  if (!player || !recipe || !player.hasMaterials(recipe.costs)) return null;
+  const staged = Object.create(player);
+  staged.itemSlots = player.itemSlots.map((slot) => slot && { ...slot });
+  if (!staged.consumeMaterials(recipe.costs)) return null;
+  const stored = staged.tryStoreItem({ ...recipe.output });
+  return stored.ok && !stored.remainder ? staged.itemSlots : null;
 }
 
 export function craftRecipe(player, recipe) {
-  if (!canCraftRecipe(player, recipe)) return false;
-  if (!player.consumeMaterials(recipe.costs)) return false;
-  const stored = player.tryStoreItem({ ...recipe.output });
-  if (!stored.ok || stored.remainder) {
-    for (const [key, amount] of Object.entries(recipe.costs)) {
-      player.addMaterialToInventory(key, amount);
-    }
-    return false;
-  }
+  const slots = stageCraft(player, recipe);
+  if (!slots) return false;
+  player.itemSlots = slots;
   return true;
 }
 
@@ -373,24 +375,17 @@ export function canRecycleItem(item) {
   return getRecycleYields(item) != null;
 }
 
-export function canStoreRecycleYields(player, yields) {
-  if (!player || !yields?.length) return false;
-  const totals = new Map();
-  for (const entry of yields) {
-    totals.set(entry.key, (totals.get(entry.key) ?? 0) + entry.amount);
-  }
-  for (const [key, amount] of totals) {
-    if (!materialRoom(player, key, amount)) return false;
-  }
-  return true;
-}
-
 export function applyRecycleYields(player, yields) {
-  if (!canStoreRecycleYields(player, yields)) return false;
+  const overflow = [];
   for (const entry of yields) {
-    player.addMaterialToInventory(entry.key, entry.amount);
+    let remaining = entry.amount - player.addMaterialToInventory(entry.key, entry.amount);
+    while (remaining > 0) {
+      const amount = Math.min(remaining, MATERIAL_STACK_MAX);
+      overflow.push({ kind: 'material', key: entry.key, amount });
+      remaining -= amount;
+    }
   }
-  return true;
+  return overflow;
 }
 
 export function countMaterialsInSlots(slots) {

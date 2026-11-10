@@ -30,6 +30,8 @@ canvas {
 }
 
 :root {
+  --tooltip-bg: #1a0b0b;
+  --tooltip-border: #898989;
   --pixel-font: 'GamePixel';
   --pixel-text-scale: 3;
   --hud-xs: 16px;
@@ -291,88 +293,6 @@ canvas {
   max-width: 28rem;
 }
 
-.menu-lan-title {
-  margin: 0 0 0.5rem;
-  font-weight: 400;
-}
-
-.menu-lan-hint {
-  margin: 0 0 0.75rem;
-}
-
-.menu-lan {
-  margin-top: 1.75rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid rgba(240, 160, 48, 0.25);
-  max-width: 22rem;
-  text-align: center;
-}
-
-.menu-lan-hint code {
-  color: #d8c8a0;
-  font-size: 10px;
-}
-
-.menu-lan-btn {
-  min-width: 200px;
-  margin-bottom: 10px;
-}
-
-.menu-lan-join {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-  align-items: center;
-}
-
-.menu-lan-input {
-  flex: 1 1 140px;
-  min-width: 140px;
-  max-width: 220px;
-  padding: 10px 12px;
-  font-family: var(--pixel-font);
-  font-size: 11px;
-  background: rgba(10, 16, 14, 0.85);
-  border: 2px solid rgba(240, 160, 48, 0.35);
-  color: #e8e4dc;
-  border-radius: 4px;
-}
-
-.menu-room-code {
-  margin: 0.5rem 0 0;
-  font-size: 0.95rem;
-  color: #b8e986;
-  letter-spacing: 0.08em;
-}
-
-.pause-room-code {
-  margin: 0 0 1rem;
-  font-size: 1.1rem;
-  color: #b8e986;
-  letter-spacing: 0.2em;
-  text-align: center;
-  font-weight: bold;
-}
-
-.menu-lan-advanced {
-  margin-top: 0.75rem;
-  font-size: 0.85rem;
-  color: #9ab;
-}
-
-.menu-lan-advanced summary {
-  cursor: pointer;
-  margin-bottom: 0.5rem;
-}
-
-.menu-lan-status {
-  margin-top: 10px;
-  font-size: 11px;
-  color: #f0a030;
-  line-height: 1.4;
-}
-
 .menu-frame {
   text-align: center;
   padding: 36px 44px;
@@ -457,17 +377,12 @@ canvas {
 }
 
 #menu-subtitle.pixel-text-host,
-.menu-lan-hint.pixel-text-host,
 #confirm-message.pixel-text-host {
   display: flex;
   justify-content: center;
   max-width: 28rem;
   margin-left: auto;
   margin-right: auto;
-}
-
-.menu-lan-hint.pixel-text-host {
-  margin-bottom: 0.75rem;
 }
 
 #overlay button.ui-slice-button,
@@ -626,8 +541,8 @@ body.game-active.mobile-ui #hud-time {
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 12px;
-  background: rgba(10, 14, 18, 0.82);
-  border: 1px solid rgba(240, 160, 48, 0.45);
+  background: var(--tooltip-bg);
+  border: 1px solid var(--tooltip-border);
   border-radius: 4px;
   color: transparent;
   font-size: 0;
@@ -731,6 +646,8 @@ body.game-active.mobile-ui #hud-time {
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  box-sizing: border-box;
+  padding: 10px 12px;
 }
 
 #inventory.hidden {
@@ -783,14 +700,15 @@ body.inv-custom-cursor * {
   gap: 0;
   pointer-events: none;
   --chest-slot-size: clamp(64px, 12vw, 92px);
-  --inv-panel-full-width: min(98vw, 760px);
-  --inv-panel-half-width: calc(var(--inv-panel-full-width) * 0.5);
+  --inv-panel-full-width: min(98vw, 632px);
+  --inv-panel-half-width: min(90vw, 370px);
   --ui-panel-slice: 2;
   --ui-panel-border: 10px;
   --ui-btn-slice: 2;
   --ui-btn-border: 10px;
   --craft-toggle-size: 40px;
   --chest-inner-pad: 18px;
+  --inv-gear-slot-size: clamp(48px, 9vw, 98px);
   --inv-item-slot-size: clamp(42px, 5.4vw, 54px);
   outline: none;
   box-shadow: none;
@@ -1071,6 +989,21 @@ body.inv-custom-cursor * {
   filter: grayscale(0.35) brightness(0.85);
 }
 
+.inv-durability {
+  position: absolute;
+  inset: auto 12% 7%;
+  height: 4%;
+  min-height: 2px;
+  background: linear-gradient(to right, var(--durability-color) var(--durability), #231514 var(--durability));
+  pointer-events: none;
+}
+
+.inv-has-durability > .inv-slot-icon {
+  max-width: 78%;
+  max-height: 78%;
+  transform: translateY(-6%);
+}
+
 .inv-craft-cost-slot .inv-stack-count {
   font-size: 16px;
   right: 5%;
@@ -1126,7 +1059,7 @@ body.inv-custom-cursor * {
   position: relative;
   width: var(--inv-panel-full-width);
   flex: 0 0 auto;
-  aspect-ratio: 260 / 170;
+  height: clamp(270px, 65vw, 498px);
   min-height: 220px;
   pointer-events: auto;
   outline: none;
@@ -1150,6 +1083,49 @@ body.inv-custom-cursor * {
   overflow: hidden;
   pointer-events: auto;
   margin-top: 0;
+}
+
+#inventory-dual-wrap {
+  flex: none;
+  transform: scale(var(--inv-mobile-scale, 1));
+}
+
+#inventory.ground-loot-open #chest-panel-layout {
+  padding: 4px;
+}
+
+#inventory .ground-loot-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: none;
+  align-content: start;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.ground-loot-heading {
+  grid-column: 1 / -1;
+  z-index: 1;
+  position: sticky;
+  top: 0;
+  background: var(--tooltip-bg);
+  color: #f0e1dc;
+  padding: 8px;
+  font-size: 13px;
+}
+
+#inventory .ground-loot-list .inv-chest-slot {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  min-width: 0;
+  touch-action: none;
 }
 
 #chest-panel.hidden {
@@ -1245,7 +1221,9 @@ body.inv-custom-cursor * {
 
 .inv-gear-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: var(--inv-gear-slot-size);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  align-content: center;
   gap: 6px;
   width: auto;
   height: 100%;
@@ -1257,20 +1235,20 @@ body.inv-custom-cursor * {
 .inv-weapons-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 4px;
   width: 100%;
-  height: 100%;
+  height: auto;
   min-height: 0;
 }
 
 .inv-equipment-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 4px;
   width: 100%;
-  height: 100%;
+  height: auto;
   min-height: 0;
 }
 
@@ -1302,6 +1280,12 @@ body.inv-custom-cursor * {
   font-family: var(--pixel-font);
   font-size: 0;
   letter-spacing: 0;
+}
+
+.inv-equip-slot,
+.inv-weapon-slot {
+  width: auto;
+  height: min(100%, var(--inv-gear-slot-size));
 }
 
 .inv-utility-slot {
@@ -1884,8 +1868,8 @@ body.inv-custom-cursor * {
   position: fixed;
   z-index: 300;
   padding: 4px 8px;
-  background: rgba(12, 18, 14, 0.96);
-  border: 1px solid #f0a030;
+  background: var(--tooltip-bg);
+  border: 1px solid var(--tooltip-border);
   color: transparent;
   font-size: 0;
   line-height: 0;
@@ -1911,8 +1895,8 @@ body.inv-custom-cursor * {
   min-width: 220px;
   max-width: 320px;
   padding: 12px 14px;
-  background: rgba(12, 18, 14, 0.98);
-  border: 2px solid #f0a030;
+  background: var(--tooltip-bg);
+  border: 2px solid var(--tooltip-border);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   pointer-events: auto;
   overflow: hidden;
@@ -2005,7 +1989,8 @@ body.mobile-ui .inv-cursor-follow {
 .inv-context-amount-slider {
   width: 100%;
   margin: 0;
-  accent-color: #f0a030;
+  accent-color: #c73930;
+  touch-action: none;
 }
 
 .inv-context-recycle-icons {
@@ -2028,10 +2013,8 @@ body.mobile-ui .inv-cursor-follow {
   pointer-events: none;
 }
 
-.inv-context-btn {
+.inv-context-btn.ui-slice-button {
   padding: 8px 14px;
-  background: #2a3a32;
-  border: 1px solid #f0a030;
   color: transparent;
   font-size: 0;
   line-height: 0;
@@ -2041,11 +2024,6 @@ body.mobile-ui .inv-cursor-follow {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.inv-context-btn:hover {
-  background: #3a5044;
-  border-color: #ffc050;
 }
 
 @keyframes pulse {
@@ -2350,18 +2328,6 @@ body.game-active.mobile-ui #mobile-actions {
   box-sizing: border-box;
 }
 
-.mb-autolock:not(.mb-active) {
-  filter: brightness(0.48);
-}
-
-.mb-autolock.mb-active {
-  filter: brightness(1.15);
-  background: rgba(120, 50, 40, 0.92);
-  border-color: #f08060;
-  color: #ffe0d0;
-  box-shadow: 0 0 10px rgba(240, 120, 80, 0.4);
-}
-
 .mb-fire {
   width: 88px;
   height: 88px;
@@ -2373,24 +2339,39 @@ body.game-active.mobile-ui #mobile-actions {
   color: #fff;
 }
 
-body.game-active.mobile-ui #mobile-actions .mb-btn {
+body.game-active.mobile-ui #mobile-actions > .mb-btn {
   width: 40px;
   height: 40px;
 }
 
-body.game-active.mobile-ui .mb-fire {
-  width: 68px;
-  height: 68px;
+body.game-active.mobile-ui #mobile-controls .mb-fire.ui-slice-button {
+  width: clamp(50px, 14vw, 72px);
+  height: clamp(50px, 14vw, 72px);
+  min-width: 0;
+  flex: none;
 }
 
 body.game-active.mobile-ui .joystick-base {
-  width: 96px;
-  height: 96px;
+  width: clamp(64px, 20vw, 96px);
+  height: clamp(64px, 20vw, 96px);
 }
 
 body.game-active.mobile-ui .joystick-knob {
   width: 40px;
   height: 40px;
+}
+
+@media (orientation: portrait) {
+  body.game-active.mobile-ui #mobile-hotbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    justify-self: center;
+  }
+
+  body.game-active.mobile-ui #mobile-move,
+  body.game-active.mobile-ui #mobile-actions {
+    grid-row: 2;
+  }
 }
 
 body.game-active.mobile-ui #weapon-panel {
@@ -2414,12 +2395,12 @@ body.mobile-ui #inventory {
 }
 
 body.mobile-ui #inventory-dual-wrap {
-  --inv-panel-full-width: 440px;
+  --inv-panel-full-width: 350px;
   --inv-panel-half-width: 300px;
   --chest-slot-size: 44px;
   --chest-inner-pad: 8px;
   --craft-toggle-size: 34px;
-  --inv-gear-slot-size: 56px;
+  --inv-gear-slot-size: 59px;
   flex: none;
   transform: scale(var(--inv-mobile-scale, 1));
   transform-origin: center center;
@@ -2436,17 +2417,6 @@ body.mobile-ui #inventory.open.craft-open #craft-panel {
 
 body.mobile-ui #inventory-layout {
   grid-template-columns: max-content minmax(0, 1fr);
-}
-
-body.mobile-ui .inv-gear-columns {
-  grid-template-columns: repeat(2, var(--inv-gear-slot-size));
-  align-content: center;
-}
-
-body.mobile-ui .inv-equipment-grid,
-body.mobile-ui .inv-weapons-grid {
-  height: auto;
-  grid-template-rows: repeat(4, var(--inv-gear-slot-size));
 }
 
 body.mobile-ui #chest-panel {

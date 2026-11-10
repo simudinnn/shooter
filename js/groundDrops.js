@@ -16,8 +16,6 @@ function cloneItem(item) {
   if (item.kind === 'ammo') return normalizeAmmoItem({ ...item });
   if (item.kind === 'material') return normalizeMaterialItem({ ...item });
   if (item.kind === 'bandage') return { kind: 'bandage', amount: item.amount ?? 1 };
-  if (item.kind === 'weapon') return { kind: 'weapon', key: item.key, ammo: item.ammo };
-  if (item.kind === 'melee') return { kind: 'melee', key: item.key };
   return { ...item };
 }
 
@@ -71,10 +69,10 @@ export class GroundDropManager {
     return { x: player?.x ?? x, z: player?.z ?? z };
   }
 
-  dropAt(x, z, item, player) {
+  dropAt(x, z, item, player, { preserve = false, exact = false } = {}) {
     const cloned = cloneItem(item);
     if (!cloned) return null;
-    const pos = this._resolveDropPoint(x, z, player);
+    const pos = exact ? { x, z } : this._resolveDropPoint(x, z, player);
     const drop = {
       x: pos.x,
       z: pos.z,
@@ -83,9 +81,11 @@ export class GroundDropManager {
       label: getItemDisplayName(cloned),
       sortZ: pos.z + TILE * 0.12,
       bobPhase: Math.random() * Math.PI * 2,
+      preserve,
     };
     this.drops.push(drop);
-    while (this.drops.length > GROUND_DROP_MAX) this.drops.shift();
+    const expendable = this.drops.filter((entry) => !entry.preserve);
+    if (expendable.length > GROUND_DROP_MAX) this.remove(expendable[0]);
     return drop;
   }
 
@@ -109,6 +109,31 @@ export class GroundDropManager {
 
   isInPickupRange(player, drop) {
     return Math.hypot(player.x - drop.x, player.z - drop.z) <= GROUND_DROP_INTERACT_DIST + player.radius;
+  }
+
+  createLootSlots(player, columns) {
+    const nearby = this.drops.filter((drop) => this.isInPickupRange(player, drop));
+    const slots = Array(Math.ceil(nearby.length / columns) * columns).fill(null);
+    for (let i = 0; i < slots.length; i++) {
+      let drop = nearby[i];
+      Object.defineProperty(slots, i, {
+        enumerable: true,
+        get: () => this.drops.includes(drop) ? drop.item : null,
+        set: (item) => {
+          if (!item) {
+            this.remove(drop);
+          } else if (drop) {
+            drop.item = cloneItem(item);
+            drop.sprite = getItemSpriteName(drop.item);
+            drop.label = getItemDisplayName(drop.item);
+            if (!this.drops.includes(drop)) this.drops.push(drop);
+          } else {
+            drop = this.dropAt(player.x, player.z, item, player, { preserve: true });
+          }
+        },
+      });
+    }
+    return slots;
   }
 
   getHovered(mouse, game) {

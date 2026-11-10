@@ -9,6 +9,24 @@ export const EQUIPMENT_ITEM_KEYS = [
   'vest',
 ];
 
+export const EQUIPMENT_SLOTS = ['vest', 'backpack'];
+export const BACKPACK_CAPACITY = { backpack_1: 5, backpack2: 10, backpack3: 15 };
+export const VEST_RESISTANCE = { vest: 0.15, hunting_vest: 0.2, police_vest: 0.3, military_vest: 0.4 };
+export const MAX_DURABILITY = 100;
+
+export function itemDurability(item) {
+  return Number.isFinite(item?.durability)
+    ? Math.max(0, Math.min(MAX_DURABILITY, item.durability))
+    : MAX_DURABILITY;
+}
+
+export function equipmentSlotFor(item) {
+  if (item?.kind !== 'equipment' || itemDurability(item) <= 0) return -1;
+  if (Object.hasOwn(VEST_RESISTANCE, item.key)) return 0;
+  if (Object.hasOwn(BACKPACK_CAPACITY, item.key)) return 1;
+  return -1;
+}
+
 const DISPLAY_NAMES = {
   backpack_1: 'Backpack',
   backpack2: 'Backpack Mk.2',
@@ -46,7 +64,7 @@ export function getEquipmentDescription(key) {
 /** @param {object | null | undefined} item */
 export function normalizeEquipmentItem(item) {
   if (!item || item.kind !== 'equipment' || !EQUIPMENT_ITEM_KEYS.includes(item.key)) return null;
-  return { kind: 'equipment', key: item.key };
+  return { kind: 'equipment', key: item.key, durability: itemDurability(item) };
 }
 
 export function isEquipmentItem(item) {

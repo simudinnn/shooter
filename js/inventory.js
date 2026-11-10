@@ -1,6 +1,6 @@
-import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, UNLOCKED_ITEM_SLOTS, EQUIPMENT_SLOT_COUNT, HAND_SLOT_COUNT } from './player.js';
+import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, EQUIPMENT_SLOT_COUNT, HAND_SLOT_COUNT } from './player.js';
 import { weaponItemSpritePath } from './sprites.js';
-import { CHEST_SLOT_COUNT, getItemDisplayName, getItemDescription, getItemIconSrc, isQuickEquipItem, isThrowableItem } from './loot.js';
+import { CHEST_SLOT_COUNT, getItemDisplayName, getItemDescription, getItemIconSrc } from './loot.js';
 import { mergeMaterialStacks, MATERIAL_STACK_MAX, materialItemsMatch } from './materials.js';
 import {
   AMMO_STACK_MAX,
@@ -15,14 +15,12 @@ import {
   mergeConsumableStacks,
   normalizeConsumableItem,
 } from './consumables.js';
-import { isEquipmentItem, normalizeEquipmentItem } from './equipment.js';
-import { normalizeThrowableItem } from './throwables.js';
+import { equipmentSlotFor, itemDurability, normalizeEquipmentItem } from './equipment.js';
 import { getConsumableHealAmount } from './consumables.js';
 import {
   applyRecycleYields,
   canCraftRecipe,
   canRecycleItem,
-  canStoreRecycleYields,
   craftRecipe,
   getCraftableRecipes,
   getRecipeLabel,
@@ -41,10 +39,9 @@ export const CRAFT_TOGGLE_SRC = 'assets/ui/craft_toggle.png';
 export const INV_LOCK_SRC = 'assets/items/misc/lock.png';
 
 const ANIM_MS = 320;
-const EQUIPMENT_LABELS = ['Head', 'Chest', 'Legs', 'Gear'];
-const HAND_SLOT_LABELS = ['W1', 'W2'];
-const QUICK_SLOT_LABEL = 'Use';
-const THROW_SLOT_LABEL = 'Throw';
+const EQUIPMENT_LABELS = ['Vest', 'Backpack'];
+const EQUIPMENT_ICONS = ['vest.png', 'backpack.png'];
+const HAND_SLOT_ICONS = ['weapon1.png', 'weapon2.png'];
 const CRAFT_PICK_COLS = 5;
 const CRAFT_PICK_GAP_PX = 4;
 
@@ -158,6 +155,7 @@ export class InventoryUI {
   }
 
   _onDocumentPointerDown(e) {
+    if (this._sliderPointerId != null) return;
     if (!this._contextMenuEl || this._contextMenuEl.classList.contains('hidden')) return;
     if (e.target.closest('.inv-context-menu')) return;
     if (e.target.closest('.inv-context-btn')) return;
@@ -294,6 +292,8 @@ export class InventoryUI {
   }
 
   _setChestLayout(chestMode) {
+    this.root?.classList.remove('ground-loot-open');
+    this.chestEl?.classList.remove('ground-loot-list');
     if (chestMode) {
       this.root?.classList.add('chest-mode');
       this.chestPanelRoot?.classList.remove('hidden');
@@ -421,7 +421,7 @@ export class InventoryUI {
   }
 
   _ensureMobileScaleObserver() {
-    if (!this.game.mobile || this._mobileScaleObs) return;
+    if (this._mobileScaleObs) return;
     const onResize = () => this._syncMobilePanelScale();
     this._mobileScaleObs = new ResizeObserver(onResize);
     if (this.dualWrap) this._mobileScaleObs.observe(this.dualWrap);
@@ -430,7 +430,7 @@ export class InventoryUI {
   }
 
   _syncMobilePanelScale() {
-    if (!this.game.mobile || !this.dualWrap) {
+    if (!this.dualWrap) {
       this.dualWrap?.style.removeProperty('--inv-mobile-scale');
       return;
     }
@@ -443,7 +443,7 @@ export class InventoryUI {
       - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
     const maxH = (viewport?.height ?? window.innerHeight)
       - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
-    const scale = Math.max(0, Math.min(1, maxW / w, maxH / h));
+    const scale = Math.max(0, Math.min(this.game.mobile ? 1 : 1.08, maxW / w, maxH / h));
     this.dualWrap.style.setProperty('--inv-mobile-scale', String(scale));
   }
 
@@ -452,12 +452,6 @@ export class InventoryUI {
       this._syncMobilePanelScale();
       requestAnimationFrame(() => this._syncMobilePanelScale());
     });
-  }
-
-  _setSlotLabel(slot, text, scale = PIXEL_TEXT_SCALE_XS) {
-    slot.textContent = '';
-    slot.classList.add('inv-empty-slot');
-    slot.appendChild(createPixelTextImg(text, scale));
   }
 
   _syncCraftBtnLabel() {
@@ -488,9 +482,9 @@ export class InventoryUI {
     return full;
   }
 
-  _canDropOnEquipment() {
+  _canDropOnEquipment(index) {
     const data = this._dragItemData();
-    return isEquipmentItem(data);
+    return equipmentSlotFor(data) === index;
   }
 
   _handZoneName(handIndex) {
@@ -513,8 +507,6 @@ export class InventoryUI {
   _itemForContainer(container, index, player) {
     const hand = this._handIndexFromZone(container);
     if (hand >= 0) return player?.getHandSlotItem(hand);
-    if (container === 'quick') return player?.quickSlot ? normalizeConsumableItem(player.quickSlot) : null;
-    if (container === 'throwable') return player?.throwableSlot ?? null;
     if (container === 'equipment') return player?.equipmentSlots[index] ?? null;
     if (container === 'chest') return this.chest?.slots[index] ?? null;
     return player?.itemSlots[index] ?? null;
@@ -525,16 +517,6 @@ export class InventoryUI {
     return !!(data && (data.kind === 'weapon' || data.kind === 'melee')
       && (data.kind !== 'weapon' || WEAPONS[data.key])
       && (data.kind !== 'melee' || MELEE_WEAPONS[data.key]));
-  }
-
-  _canDropOnQuick() {
-    const data = this._dragItemData();
-    return isQuickEquipItem(data);
-  }
-
-  _canDropOnThrowable() {
-    const data = this._dragItemData();
-    return isThrowableItem(data);
   }
 
   _slotIcon(src) {
@@ -561,14 +543,6 @@ export class InventoryUI {
         const src = getItemIconSrc(handItem);
         if (src) paths.add(src);
       }
-    }
-    if (player.quickSlot) {
-      const src = getItemIconSrc(player.quickSlot);
-      if (src) paths.add(src);
-    }
-    if (player.throwableSlot) {
-      const src = getItemIconSrc(player.throwableSlot);
-      if (src) paths.add(src);
     }
     for (const item of player.itemSlots) {
       if (item) {
@@ -731,7 +705,8 @@ export class InventoryUI {
   }
 
   _onContextMenuPointerLeave(e) {
-    if (this.game.mobile) return;
+    if (this.game.mobile || this._sliderPointerId != null
+      || document.activeElement?.matches('.inv-context-amount-slider')) return;
     if (!this._contextSlot || this._contextMenuEl?.classList.contains('hidden')) return;
     const next = e.relatedTarget;
     if (next && (next === this._contextAnchorEl || this._contextAnchorEl?.contains(next))) return;
@@ -739,7 +714,7 @@ export class InventoryUI {
   }
 
   _onContextSlotPointerLeave(e) {
-    if (this.game.mobile) return;
+    if (this.game.mobile || this._sliderPointerId != null) return;
     if (!this._contextSlot || this._contextAnchorEl !== e.currentTarget) return;
     const next = e.relatedTarget;
     if (next?.closest?.('.inv-context-menu')) return;
@@ -759,6 +734,7 @@ export class InventoryUI {
     if (!btn) return;
     setElementPixelText(btn, text, scale);
     btn.classList.add('inv-pixel-text-btn');
+    if (btn.classList.contains('inv-context-btn')) btn.classList.add('ui-slice-button');
   }
 
   _makeAmountSliderRow(labelPrefix, amount, maxAmount, onAmountChange) {
@@ -775,6 +751,35 @@ export class InventoryUI {
     slider.max = String(maxAmount);
     slider.step = '1';
     slider.value = String(amount);
+    const moveSlider = (e) => {
+      const rect = slider.getBoundingClientRect();
+      const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      slider.value = String(1 + Math.round(progress * (maxAmount - 1)));
+      slider.dispatchEvent(new Event('input'));
+    };
+    slider.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || this._sliderPointerId != null) return;
+      e.preventDefault();
+      this._sliderPointerId = e.pointerId;
+      slider.focus();
+      slider.setPointerCapture(e.pointerId);
+      moveSlider(e);
+      const gesture = new AbortController();
+      this._sliderGesture = gesture;
+      const options = { capture: true, signal: gesture.signal };
+      window.addEventListener('pointermove', (event) => {
+        if (event.pointerId === e.pointerId) moveSlider(event);
+      }, options);
+      const end = (event) => {
+        if (event.pointerId !== e.pointerId) return;
+        if (event.type === 'pointerup') moveSlider(event);
+        this._sliderPointerId = null;
+        this._sliderGesture = null;
+        gesture.abort();
+      };
+      window.addEventListener('pointerup', end, options);
+      window.addEventListener('pointercancel', end, options);
+    });
     slider.addEventListener('input', () => {
       const next = Math.max(1, Math.min(maxAmount, Number(slider.value) | 0));
       slider.value = String(next);
@@ -801,8 +806,6 @@ export class InventoryUI {
     if (hand >= 0) {
       return this.weaponsEl?.querySelector(`[data-drop-zone="${this._handZoneName(hand)}"]`);
     }
-    if (container === 'quick') return this.weaponsEl?.querySelector('[data-drop-zone="quick"]');
-    if (container === 'throwable') return this.weaponsEl?.querySelector('[data-drop-zone="throwable"]');
     if (container === 'equipment') {
       return this.equipmentEl?.querySelector(`.inv-equip-slot[data-slot-index="${index}"]`);
     }
@@ -835,6 +838,9 @@ export class InventoryUI {
   }
 
   _hideContextMenu() {
+    this._sliderGesture?.abort();
+    this._sliderGesture = null;
+    this._sliderPointerId = null;
     this._contextSlot = null;
     this._contextAnchorEl = null;
     if (!this._contextMenuEl) return;
@@ -951,28 +957,33 @@ export class InventoryUI {
         });
         actions.appendChild(btn);
       }
-    } else if (isEquipmentItem(item) && container === 'item') {
+    } else if (equipmentSlotFor(item) >= 0 && container === 'item') {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'inv-context-btn';
       this._setBtnLabel(btn, 'Equip');
       this._bindContextAction(btn, () => {
-        const empty = player.equipmentSlots.findIndex((s) => s == null);
-        const target = empty >= 0 ? empty : 0;
+        const target = equipmentSlotFor(item);
         if (player.equipEquipmentFromInventory(index, target)) this.game.audio?.inventoryEquip();
         this._renderAfterContextAction();
       });
       actions.appendChild(btn);
-    } else if (isQuickEquipItem(item) && container === 'item') {
-      const quickBtn = document.createElement('button');
-      quickBtn.type = 'button';
-      quickBtn.className = 'inv-context-btn';
-      this._setBtnLabel(quickBtn, 'Quick equip');
-      this._bindContextAction(quickBtn, () => {
-        if (player.equipQuickFromInventory(index)) this.game.audio?.inventoryEquip();
+    } else if (container === 'equipment') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'inv-context-btn';
+      this._setBtnLabel(btn, 'Unequip');
+      this._bindContextAction(btn, () => {
+        const equipped = player.suspendEquipmentForDrag(index);
+        if (!equipped) return;
+        const result = player.tryStoreItem(equipped);
+        if (!result.ok) {
+          this.game.groundDrops.dropAt(player.x, player.z, equipped, player, { preserve: true });
+        }
         this._renderAfterContextAction();
       });
-      actions.appendChild(quickBtn);
+      actions.appendChild(btn);
+    } else if (normalizeConsumableItem(item) && container === 'item') {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'inv-context-btn';
@@ -982,16 +993,7 @@ export class InventoryUI {
         this._renderAfterContextAction();
       });
       actions.appendChild(btn);
-    } else if (isThrowableItem(item) && container === 'item') {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'inv-context-btn';
-      this._setBtnLabel(btn, 'Throwable slot');
-      this._bindContextAction(btn, () => {
-        if (player.equipThrowableFromInventory(index)) this.game.audio?.inventoryEquip();
-        this._renderAfterContextAction();
-      });
-      actions.appendChild(btn);
+
     }
 
     if (canRecycleItem(item) && container === 'item') {
@@ -1300,10 +1302,7 @@ export class InventoryUI {
     const maxCount = this._stackAmountForSplit(item);
     const recycleCount = Math.max(1, Math.min(maxCount, Math.floor(count)));
     const yields = getRecycleYields(item, recycleCount);
-    if (!canStoreRecycleYields(player, yields)) {
-      this.game.items?.setPickupMsg?.('Not enough inventory space', { error: true });
-      return false;
-    }
+    if (!yields?.length || !this.game.groundDrops || !player.isItemSlotUnlocked(index)) return false;
     if (item.kind === 'material' || item.kind === 'bandage' || item.kind === 'ammo') {
       const amount = item.amount ?? 1;
       if (amount <= recycleCount) player.itemSlots[index] = null;
@@ -1314,10 +1313,13 @@ export class InventoryUI {
     } else {
       player.itemSlots[index] = null;
     }
-    applyRecycleYields(player, yields);
+    const overflow = applyRecycleYields(player, yields);
+    for (const material of overflow) {
+      this.game.groundDrops.dropAt(player.x, player.z, material, player, { preserve: true });
+    }
     if (this.selectedSlot === index && !player.itemSlots[index]) this.selectedSlot = null;
     this.game.audio?.inventoryPlace();
-    this.game.items?.setPickupMsg?.('Item recycled');
+    this.game.items?.setPickupMsg?.(overflow.length ? 'Recycled. Extra materials dropped.' : 'Item recycled');
     return true;
   }
 
@@ -1384,14 +1386,6 @@ export class InventoryUI {
       const item = player?.suspendHandSlotForDrag(1);
       if (!item) return;
       this.drag.stashedItem = item;
-    } else if (fromType === 'quick') {
-      const item = player?.suspendQuickSlotForDrag();
-      if (!item) return;
-      this.drag.stashedItem = item;
-    } else if (fromType === 'throwable') {
-      const item = player?.suspendThrowableSlotForDrag();
-      if (!item) return;
-      this.drag.stashedItem = item;
     } else if (fromType === 'equipment') {
       const item = player?.suspendEquipmentForDrag(fromIndex);
       if (!item) return;
@@ -1418,10 +1412,6 @@ export class InventoryUI {
       if (!player?.getHandSlotItem(0)) player?.restoreHandSlot(0, stashedItem);
     } else if (fromType === 'hand1' || fromType === 'melee') {
       if (!player?.getHandSlotItem(1)) player?.restoreHandSlot(1, stashedItem);
-    } else if (fromType === 'quick') {
-      if (!player?.quickSlot) player?.restoreQuickSlot(stashedItem);
-    } else if (fromType === 'throwable') {
-      if (!player?.throwableSlot) player?.restoreThrowableSlot(stashedItem);
     } else if (fromType === 'equipment') {
       if (!player?.equipmentSlots[fromIndex]) player?.restoreEquipmentSlot(fromIndex, stashedItem);
     } else if (fromType === 'chest') {
@@ -1437,18 +1427,6 @@ export class InventoryUI {
       if (this._isShiftClick(e)) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (!player.getHandSlotItem(handIndex)) return;
-      e.preventDefault();
-      slot.setPointerCapture?.(e.pointerId);
-      this._beginDrag(e, zone, -1, player, slot);
-    });
-  }
-
-  _bindUtilitySlotDrag(slot, zone, player) {
-    slot.addEventListener('pointerdown', (e) => {
-      if (this._isShiftClick(e)) return;
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      const item = zone === 'quick' ? player.quickSlot : player.throwableSlot;
-      if (!item) return;
       e.preventDefault();
       slot.setPointerCapture?.(e.pointerId);
       this._beginDrag(e, zone, -1, player, slot);
@@ -1583,12 +1561,8 @@ export class InventoryUI {
     if (main && this._canDropOnHand(0)) return main;
     const melee = el.closest('.inv-weapon-slot[data-drop-zone="melee"]');
     if (melee && this._canDropOnHand(1)) return melee;
-    const quick = el.closest('.inv-utility-slot[data-drop-zone="quick"]');
-    if (quick && this._canDropOnQuick()) return quick;
-    const throwable = el.closest('.inv-utility-slot[data-drop-zone="throwable"]');
-    if (throwable && this._canDropOnThrowable()) return throwable;
     const equip = el.closest('.inv-equip-slot[data-slot-index]');
-    if (equip && this._canDropOnEquipment()) return equip;
+    if (equip && this._canDropOnEquipment(Number(equip.dataset.slotIndex))) return equip;
     const item = el.closest('.inv-item-slot[data-slot-index]:not(.inv-locked)');
     if (item) return item;
     const chest = el.closest('.inv-chest-slot[data-slot-index]');
@@ -1770,7 +1744,7 @@ export class InventoryUI {
     if (container === 'chest' && this.chest) {
       const data = this.chest.slots[index];
       if (!data) return;
-      const result = player.tryStoreItem(data);
+      const result = player.tryLootItem(data);
       if (result.ok) {
         this.chest.slots[index] = result.remainder;
         this.game.audio?.pickup();
@@ -1861,6 +1835,7 @@ export class InventoryUI {
       const toIndex = Number(dropTarget.dataset.slotIndex);
       if (!player.isItemSlotUnlocked(toIndex)) return false;
       const displaced = player.itemSlots[toIndex];
+      if (displaced && !player._normalizeHandItem(displaced)) return false;
       player.itemSlots[toIndex] = item.kind === 'weapon' ? player._normalizeWeaponItem(item) : item;
       if (displaced) player.restoreHandSlot(handIndex, displaced);
       else player.handSlots[handIndex] = null;
@@ -1868,57 +1843,11 @@ export class InventoryUI {
     }
     if (dropTarget.classList.contains('inv-chest-slot') && this.chest) {
       const toIndex = Number(dropTarget.dataset.slotIndex);
+      const target = this.chest.slots[toIndex];
+      if (target && !player._normalizeHandItem(target)) return false;
       const displaced = this._placeInSlot('chest', toIndex, item.kind === 'weapon' ? player._normalizeWeaponItem(item) : item);
       if (displaced) player.restoreHandSlot(handIndex, displaced);
       else player.handSlots[handIndex] = null;
-      return true;
-    }
-    return false;
-  }
-
-  _placeDragFromQuick(dropTarget, item, player) {
-    if (dropTarget.dataset.dropZone === 'quick') {
-      player.restoreQuickSlot(item);
-      return true;
-    }
-    if (dropTarget.classList.contains('inv-item-slot')) {
-      const toIndex = Number(dropTarget.dataset.slotIndex);
-      if (!player.isItemSlotUnlocked(toIndex)) return false;
-      const displaced = player.itemSlots[toIndex];
-      player.itemSlots[toIndex] = item;
-      if (displaced && player.canPlaceQuickItem(displaced)) player.quickSlot = displaced;
-      else player.quickSlot = null;
-      return true;
-    }
-    if (dropTarget.classList.contains('inv-chest-slot') && this.chest) {
-      const toIndex = Number(dropTarget.dataset.slotIndex);
-      const displaced = this._placeInSlot('chest', toIndex, item);
-      if (displaced && player.canPlaceQuickItem(displaced)) player.quickSlot = displaced;
-      else player.quickSlot = null;
-      return true;
-    }
-    return false;
-  }
-
-  _placeDragFromThrowable(dropTarget, item, player) {
-    if (dropTarget.dataset.dropZone === 'throwable') {
-      player.restoreThrowableSlot(item);
-      return true;
-    }
-    if (dropTarget.classList.contains('inv-item-slot')) {
-      const toIndex = Number(dropTarget.dataset.slotIndex);
-      if (!player.isItemSlotUnlocked(toIndex)) return false;
-      const displaced = player.itemSlots[toIndex];
-      player.itemSlots[toIndex] = item;
-      if (displaced && player.canPlaceThrowableItem(displaced)) player.throwableSlot = displaced;
-      else player.throwableSlot = null;
-      return true;
-    }
-    if (dropTarget.classList.contains('inv-chest-slot') && this.chest) {
-      const toIndex = Number(dropTarget.dataset.slotIndex);
-      const displaced = this._placeInSlot('chest', toIndex, item);
-      if (displaced && player.canPlaceThrowableItem(displaced)) player.throwableSlot = displaced;
-      else player.throwableSlot = null;
       return true;
     }
     return false;
@@ -1929,27 +1858,25 @@ export class InventoryUI {
     if (!incoming) return false;
     if (dropTarget.classList.contains('inv-equip-slot')) {
       const toIndex = Number(dropTarget.dataset.slotIndex);
-      if (toIndex === eqIndex) {
-        player.restoreEquipmentSlot(eqIndex, incoming);
-        return true;
-      }
-      const displaced = player.equipmentSlots[toIndex];
-      player.equipmentSlots[toIndex] = { ...incoming };
-      player.equipmentSlots[eqIndex] = displaced ? { ...displaced } : null;
+      if (toIndex !== eqIndex) return false;
+      player.restoreEquipmentSlot(eqIndex, incoming);
       return true;
     }
     if (dropTarget.classList.contains('inv-item-slot')) {
       const toIndex = Number(dropTarget.dataset.slotIndex);
       if (!player.isItemSlotUnlocked(toIndex)) return false;
       const displaced = player.itemSlots[toIndex];
+      if (displaced && equipmentSlotFor(displaced) !== eqIndex) return false;
       player.itemSlots[toIndex] = { ...incoming };
-      player.equipmentSlots[eqIndex] = displaced && isEquipmentItem(displaced) ? displaced : null;
+      player.equipmentSlots[eqIndex] = displaced;
       return true;
     }
     if (dropTarget.classList.contains('inv-chest-slot') && this.chest) {
       const toIndex = Number(dropTarget.dataset.slotIndex);
+      const target = this.chest.slots[toIndex];
+      if (target && equipmentSlotFor(target) !== eqIndex) return false;
       const displaced = this._placeInSlot('chest', toIndex, incoming);
-      player.equipmentSlots[eqIndex] = displaced && isEquipmentItem(displaced) ? displaced : null;
+      player.equipmentSlots[eqIndex] = displaced;
       return true;
     }
     return false;
@@ -1957,6 +1884,10 @@ export class InventoryUI {
 
   _handleDragEnd(e) {
     if (!this.drag) return;
+    if (e.type === 'pointercancel') {
+      this._cancelDrag();
+      return;
+    }
     document.removeEventListener('pointermove', this._onDragMove, this._dragListenerOpts);
     document.removeEventListener('pointerup', this._onDragEnd, this._dragListenerOpts);
     document.removeEventListener('pointercancel', this._onDragEnd, this._dragListenerOpts);
@@ -1982,12 +1913,6 @@ export class InventoryUI {
       if (fromHand >= 0) {
         placed = this._placeDragFromHand(fromHand, dropTarget, stashedItem, player);
         if (placed) this._skipClick = true;
-      } else if (fromType === 'quick') {
-        placed = this._placeDragFromQuick(dropTarget, stashedItem, player);
-        if (placed) this._skipClick = true;
-      } else if (fromType === 'throwable') {
-        placed = this._placeDragFromThrowable(dropTarget, stashedItem, player);
-        if (placed) this._skipClick = true;
       } else if (fromType === 'equipment') {
         placed = this._placeDragFromEquipment(fromIndex, dropTarget, stashedItem, player);
         if (placed) this._skipClick = true;
@@ -2006,47 +1931,7 @@ export class InventoryUI {
           this.selectedSlot = null;
           this._skipClick = true;
         }
-      } else if (dropTarget.dataset.dropZone === 'quick' && isQuickEquipItem(stashedItem)) {
-        const incoming = normalizeConsumableItem(stashedItem);
-        if (fromType === 'item' && fromIndex != null) {
-          const outgoing = player.quickSlot ? normalizeConsumableItem(player.quickSlot) : null;
-          player.quickSlot = incoming ? { ...incoming } : null;
-          player.itemSlots[fromIndex] = outgoing;
-          placed = true;
-        } else if (fromType === 'chest' && fromIndex != null && this.chest) {
-          const outgoing = player.quickSlot ? normalizeConsumableItem(player.quickSlot) : null;
-          player.quickSlot = incoming ? { ...incoming } : null;
-          this.chest.slots[fromIndex] = outgoing;
-          placed = true;
-        } else if (fromType === 'quick') {
-          player.restoreQuickSlot(incoming);
-          placed = true;
-        }
-        if (placed) {
-          this.selectedSlot = null;
-          this._skipClick = true;
-        }
-      } else if (dropTarget.dataset.dropZone === 'throwable' && isThrowableItem(stashedItem)) {
-        if (fromType === 'item' && fromIndex != null) {
-          const incoming = normalizeThrowableItem(stashedItem);
-          const outgoing = player.throwableSlot ? normalizeThrowableItem(player.throwableSlot) : null;
-          player.throwableSlot = incoming ? { ...incoming } : null;
-          player.itemSlots[fromIndex] = outgoing;
-          placed = true;
-        } else if (fromType === 'chest' && fromIndex != null && this.chest) {
-          const outgoing = player.throwableSlot;
-          player.throwableSlot = { ...stashedItem };
-          this.chest.slots[fromIndex] = outgoing;
-          placed = true;
-        } else if (fromType === 'throwable') {
-          player.restoreThrowableSlot(stashedItem);
-          placed = true;
-        }
-        if (placed) {
-          this.selectedSlot = null;
-          this._skipClick = true;
-        }
-      } else if (dropTarget.classList.contains('inv-equip-slot') && isEquipmentItem(stashedItem)) {
+      } else if (dropTarget.classList.contains('inv-equip-slot') && equipmentSlotFor(stashedItem) === Number(dropTarget.dataset.slotIndex)) {
         const toIndex = Number(dropTarget.dataset.slotIndex);
         const incoming = normalizeEquipmentItem(stashedItem);
         if (fromType === 'item' && fromIndex != null) {
@@ -2110,7 +1995,7 @@ export class InventoryUI {
 
     if (placed) {
       const zone = dropTarget?.dataset?.dropZone;
-      if (this._handIndexFromZone(zone) >= 0 || zone === 'quick' || zone === 'throwable' || dropTarget?.classList?.contains('inv-equip-slot')) {
+      if (this._handIndexFromZone(zone) >= 0 || dropTarget?.classList?.contains('inv-equip-slot')) {
         this.game.audio?.inventoryEquip();
       } else {
         this.game.audio?.inventoryPlace();
@@ -2147,6 +2032,7 @@ export class InventoryUI {
 
   _bindPlayerItemSlot(slot, index, player, data) {
     slot.appendChild(this._itemIcon(data));
+    this._appendDurability(slot, data);
     this._appendStackCount(slot, this._stackAmount(data));
     this._bindTooltip(slot, getItemDisplayName(data));
     this._bindItemSlotDrag(slot, index, player, 'item');
@@ -2192,7 +2078,12 @@ export class InventoryUI {
   _renderChestSlots() {
     if (!this.chestEl || !this.chest) return;
     const slotCount = this.chest.slots?.length ?? CHEST_SLOT_COUNT;
-    if (slotCount === 5) {
+    const isGround = this.chest.isGround;
+    if (isGround) {
+      this.chestEl.style.gridTemplateColumns = '';
+      this.chestEl.style.gridTemplateRows = '';
+      this.chestEl.style.width = '';
+    } else if (slotCount === 5) {
       this.chestEl.style.gridTemplateColumns = 'repeat(5, var(--chest-slot-size))';
       this.chestEl.style.gridTemplateRows = 'var(--chest-slot-size)';
       this.chestEl.style.width = 'calc(var(--chest-slot-size) * 5 + 24px)';
@@ -2202,6 +2093,12 @@ export class InventoryUI {
       this.chestEl.style.width = 'calc(var(--chest-slot-size) * 4 + 18px)';
     }
     this.chestEl.innerHTML = '';
+    if (isGround) {
+      const heading = document.createElement('div');
+      heading.className = 'ground-loot-heading';
+      heading.textContent = 'Nearby loot';
+      this.chestEl.appendChild(heading);
+    }
     for (let i = 0; i < slotCount; i++) {
       const slot = this._makeSlot('inv-chest-slot');
       slot.dataset.slotIndex = String(i);
@@ -2209,6 +2106,7 @@ export class InventoryUI {
       const data = this.chest.slots[i];
       if (data) {
         slot.appendChild(this._itemIcon(data));
+        this._appendDurability(slot, data);
         this._appendStackCount(slot, this._stackAmount(data));
         this._bindTooltip(slot, getItemDisplayName(data));
         this._bindItemSlotDrag(slot, i, this.game.player, 'chest');
@@ -2216,13 +2114,15 @@ export class InventoryUI {
         this._bindStackDoubleClick(slot, 'chest', i, data);
         slot.addEventListener('click', (e) => {
           if (this._skipClick) { this._skipClick = false; return; }
-          if (!this._isShiftClick(e)) return;
+          if (!isGround && !this._isShiftClick(e)) return;
           e.preventDefault();
           const player = this.game.player;
-          const result = player.tryStoreItem(data);
+          const result = player.tryLootItem(this.chest.slots[i]);
           if (result.ok) {
             this.chest.slots[i] = result.remainder;
             this.game.audio?.pickup();
+          } else if (isGround) {
+            this.game.items?.setPickupMsg('Inventory full', { error: true });
           }
           this.render();
         });
@@ -2232,6 +2132,30 @@ export class InventoryUI {
       }
       this.chestEl.appendChild(slot);
     }
+  }
+
+  _renderGroundLoot(player) {
+    const manager = this.game.groundDrops;
+    const slots = manager?.createLootSlots(player, 4) ?? [];
+    const visible = slots.length > 0;
+    this.chestMode = visible;
+    this.chest = visible ? { isGround: true, slots } : null;
+    this.root.classList.toggle('ground-loot-open', visible);
+    this.chestPanelRoot.classList.toggle('hidden', !visible);
+    this.chestEl.classList.toggle('ground-loot-list', visible);
+    if (visible) this._renderChestSlots();
+  }
+
+  _appendDurability(slot, item) {
+    if (!['weapon', 'melee', 'equipment'].includes(item?.kind)) return;
+    const percent = itemDurability(item);
+    slot.classList.add('inv-has-durability');
+    const bar = document.createElement('span');
+    bar.className = 'inv-durability';
+    bar.setAttribute('aria-hidden', 'true');
+    bar.style.setProperty('--durability', `${percent}%`);
+    bar.style.setProperty('--durability-color', percent <= 25 ? '#d64b3b' : percent <= 60 ? '#d4a24a' : '#74a95c');
+    slot.appendChild(bar);
   }
 
   _tryCraftRecipe(recipe) {
@@ -2317,6 +2241,7 @@ export class InventoryUI {
     if (!player || !this.weaponsEl || !this.itemsEl) return;
     if (this.drag?.moved) return;
 
+    this.game._spillLockedInventory();
     const keepContextMenu = !!options.keepContextMenu;
     if (!keepContextMenu) this._hideContextMenu();
     this._hoverTooltipText = null;
@@ -2324,6 +2249,7 @@ export class InventoryUI {
     this.weaponsEl.innerHTML = '';
     if (this.equipmentEl) this.equipmentEl.innerHTML = '';
     this.itemsEl.innerHTML = '';
+    const lootScroll = this.chestEl?.scrollTop ?? 0;
     if (this.chestEl) this.chestEl.innerHTML = '';
 
     if (this.equipmentEl) {
@@ -2336,11 +2262,13 @@ export class InventoryUI {
         const label = EQUIPMENT_LABELS[i] ?? 'Gear';
         if (data) {
           slot.appendChild(this._itemIcon(data));
-          this._bindTooltip(slot, getItemDisplayName(data));
+          this._appendDurability(slot, data);
+          this._bindTooltip(slot, `${getItemDisplayName(data)} · ${Math.ceil(itemDurability(data))}%`);
           this._bindEquipmentSlotDrag(slot, i, player);
           this._bindContextMenu(slot, 'equipment', i);
         } else {
-          this._setSlotLabel(slot, label);
+          slot.appendChild(this._slotIcon(`assets/ui/${EQUIPMENT_ICONS[i]}`));
+          slot.setAttribute('aria-label', label);
           this._bindTooltip(slot, label);
         }
         this.equipmentEl.appendChild(slot);
@@ -2354,17 +2282,19 @@ export class InventoryUI {
       if (h === player.activeHandSlot) slot.classList.add('inv-hand-active');
       const handItem = player.getHandSlotItem(h);
       if (handItem) {
+        this._appendDurability(slot, handItem);
         if (handItem.kind === 'weapon') {
           slot.appendChild(this._weaponIcon(WEAPONS[handItem.key]?.sprite ?? handItem.key));
         } else {
           slot.appendChild(this._weaponIcon(MELEE_WEAPONS[handItem.key]?.sprite ?? handItem.key));
         }
-        this._bindTooltip(slot, getItemDisplayName(handItem));
+        this._bindTooltip(slot, `${getItemDisplayName(handItem)} · ${Math.ceil(itemDurability(handItem))}%`);
         this._bindHandSlotDrag(slot, h, player);
         this._bindContextMenu(slot, zone, -1);
       } else {
         slot.classList.add('inv-empty-slot');
-        this._setSlotLabel(slot, HAND_SLOT_LABELS[h] ?? 'W');
+        slot.appendChild(this._slotIcon(`assets/ui/${HAND_SLOT_ICONS[h]}`));
+        slot.setAttribute('aria-label', `Weapon slot ${h + 1}`);
         this._bindTooltip(slot, `Weapon slot ${h + 1}`);
         this._bindHandSlotDrag(slot, h, player);
       }
@@ -2379,37 +2309,6 @@ export class InventoryUI {
       });
       this.weaponsEl.appendChild(slot);
     }
-
-    const quickSlot = this._makeSlot('inv-utility-slot inv-quick-slot');
-    quickSlot.dataset.dropZone = 'quick';
-    if (player.quickSlot) {
-      quickSlot.appendChild(this._itemIcon(player.quickSlot));
-      this._appendStackCount(quickSlot, this._stackAmount(player.quickSlot));
-      this._bindTooltip(quickSlot, getItemDisplayName(player.quickSlot));
-      this._bindUtilitySlotDrag(quickSlot, 'quick', player);
-      this._bindContextMenu(quickSlot, 'quick', -1);
-    } else {
-      quickSlot.classList.add('inv-empty-slot');
-      this._setSlotLabel(quickSlot, QUICK_SLOT_LABEL);
-      this._bindTooltip(quickSlot, 'Quick equip consumables');
-      this._bindUtilitySlotDrag(quickSlot, 'quick', player);
-    }
-    this.weaponsEl.appendChild(quickSlot);
-
-    const throwSlot = this._makeSlot('inv-utility-slot inv-throw-slot');
-    throwSlot.dataset.dropZone = 'throwable';
-    if (player.throwableSlot) {
-      throwSlot.appendChild(this._itemIcon(player.throwableSlot));
-      this._bindTooltip(throwSlot, getItemDisplayName(player.throwableSlot));
-      this._bindUtilitySlotDrag(throwSlot, 'throwable', player);
-      this._bindContextMenu(throwSlot, 'throwable', -1);
-    } else {
-      throwSlot.classList.add('inv-empty-slot');
-      this._setSlotLabel(throwSlot, THROW_SLOT_LABEL);
-      this._bindTooltip(throwSlot, 'Throwable items');
-      this._bindUtilitySlotDrag(throwSlot, 'throwable', player);
-    }
-    this.weaponsEl.appendChild(throwSlot);
 
     if (this.craftOpen) this._renderCraftPanel(player);
     this._syncCraftPickerLayoutSoon();
@@ -2441,7 +2340,13 @@ export class InventoryUI {
       this.itemsEl.appendChild(slot);
     }
 
-    if (this.chestMode) this._renderChestSlots();
+    this.root.classList.remove('ground-loot-open');
+    this.chestEl?.classList.remove('ground-loot-list');
+    if (this.chestMode && !this.chest?.isGround) this._renderChestSlots();
+    else if (this.open) {
+      this._renderGroundLoot(player);
+      if (this.chestEl) this.chestEl.scrollTop = lootScroll;
+    }
     if (keepContextMenu) this._reopenContextMenu();
   }
 }

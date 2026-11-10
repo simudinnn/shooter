@@ -58,10 +58,6 @@ export function isConsumableItem(item) {
   return !!normalizeConsumableItem(item);
 }
 
-export function isQuickEquipItem(item) {
-  return isConsumableItem(item);
-}
-
 export function consumableItemsMatch(a, b) {
   const left = normalizeConsumableItem(a);
   const right = normalizeConsumableItem(b);

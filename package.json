@@ -6,9 +6,7 @@
   "scripts": {
     "start": "node server/dev-server.mjs",
     "start:https": "npx --yes serve . -p 3000 -S",
-    "start:network": "node server/dev-server.mjs",
     "dev": "node server/dev-server.mjs",
-    "lan-server": "node server/lan-server.mjs",
     "pwa:icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-pwa-icons.ps1",
     "inventory:template": "powershell -ExecutionPolicy Bypass -File scripts/generate-inventory-template.ps1",
     "font:convert": "python scripts/convert-ascii-font.py",
@@ -18,8 +16,5 @@
     "assets": "powershell -ExecutionPolicy Bypass -File scripts/generate-assets.ps1",
     "assets:new": "powershell -ExecutionPolicy Bypass -File scripts/generate-new-sprites.ps1",
     "map:template": "powershell -ExecutionPolicy Bypass -File scripts/generate-map-template.ps1"
-  },
-  "dependencies": {
-    "ws": "^8.21.0"
   }
 }
