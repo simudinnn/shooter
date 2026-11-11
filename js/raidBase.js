@@ -252,7 +252,9 @@ export class RaidBase {
     this.music.muted = !musicEnabled.checked;
     this.soundEnabled = soundEnabled.checked;
     const applyVolume = () => {
-      this.music.volume = Number(musicVolume.value) / 100;
+      this.musicVolume = Number(musicVolume.value) / 100;
+      if (this.musicGain) this.musicGain.gain.value = this.musicVolume;
+      else this.music.volume = this.musicVolume;
       this.soundVolume = Number(soundVolume.value) / 100;
       setSound(this.soundEnabled, this.soundVolume);
     };
@@ -283,8 +285,8 @@ export class RaidBase {
     for (const label of root.querySelectorAll('nav button, #raid-settings-open, .raid-base-overview h2, .raid-base-mission p, .raid-transfer-hint, .raid-station-description, [data-base-panel="craft"] > h2, [data-base-panel="shop"] > h2, #raid-settings :is(h2, legend, label span)')) {
       this.pixelLabel(label, label.textContent.trim(), label.matches('p') ? 320 : undefined);
     }
-    root.addEventListener('pointerdown', () => this.startMusic());
-    root.addEventListener('keydown', () => this.startMusic());
+    root.addEventListener('click', () => this.startMusic(true));
+    root.addEventListener('keydown', () => this.startMusic(true));
     root.addEventListener('click', (event) => {
       const button = event.target.closest('button');
       if (button && button.id !== 'raid-deploy-confirm') this.playCue([520]);
@@ -353,7 +355,22 @@ export class RaidBase {
     if (this.music.readyState > 0) this.music.currentTime = 0;
   }
 
-  startMusic() {
+  startMusic(fromInteraction = false) {
+    if (fromInteraction && !this.musicGain) {
+      const Context = window.AudioContext || window.webkitAudioContext;
+      if (Context) {
+        const context = this.audioContext ??= new Context();
+        const source = context.createMediaElementSource(this.music);
+        this.musicGain = context.createGain();
+        this.musicGain.gain.value = this.musicVolume;
+        this.music.volume = 1;
+        source.connect(this.musicGain);
+        this.musicGain.connect(context.destination);
+      }
+    }
+    if (fromInteraction && this.audioContext && this.audioContext.state !== 'running') {
+      this.audioContext.resume().catch(() => {});
+    }
     if (!this.music.muted && !this.root.classList.contains('hidden') && this.music.paused) {
       this.music.play().catch(() => {});
     }
@@ -459,14 +476,15 @@ export class RaidBase {
     for (const challenge of challengeProgress(this.profile).filter((entry) => !entry.claimed)) {
       const card = document.createElement('article');
       const title = document.createElement('h3');
+      const goal = challenge.goal;
       const task = {
-        extractions: 'successful extractions',
-        extractedKills: 'robots destroyed and extracted',
-        crafts: 'base recipes crafted',
+        extractions: `Return to Safe Zone through a hatch in ${goal === 1 ? 'one raid' : goal + ' raids'}.`,
+        extractedKills: `Destroy ${goal} robots across raids. Only kills from raids you extract from count.`,
+        crafts: `Complete ${goal} crafting orders at the Safe Zone station. Each craft counts once.`,
       }[challenge.metric];
       this.pixelLabel(title, challenge.title);
       const objective = document.createElement('p');
-      this.pixelLabel(objective, task, 220);
+      this.pixelLabel(objective, task, 350);
       const progress = document.createElement('progress');
       progress.max = challenge.goal;
       progress.value = challenge.progress;
