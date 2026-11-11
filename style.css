@@ -444,10 +444,12 @@ canvas {
   min-width: 120px;
 }
 
-.ui-slice-button:hover {
-  transform: translateY(-2px);
-  filter: brightness(1.1);
-  box-shadow: none;
+@media (hover: hover) {
+  .ui-slice-button:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.1);
+    box-shadow: none;
+  }
 }
 
 .ui-slice-button:active {
@@ -3524,8 +3526,10 @@ body.mobile-ui #raid-extract-hud {
 #overlay #raid-base .raid-base-mission #raid-deploy {
   box-shadow: 0 0 0 1px #da8658, 0 0 20px #b9403b66;
 }
-#overlay #raid-base .raid-base-mission #raid-deploy:hover {
-  filter: brightness(1.2);
+@media (hover: hover) {
+  #overlay #raid-base .raid-base-mission #raid-deploy:hover {
+    filter: brightness(1.2);
+  }
 }
 #raid-base #raid-challenges article {
   padding-inline-start: 10px;
@@ -3652,7 +3656,7 @@ body.mobile-ui #raid-extract-hud {
   background: #a82a23 url('assets/ui/ui_button_9slice.png') center / 100% 100%;
   image-rendering: pixelated;
 }
-#raid-base :is(.raid-quantity-actions, .raid-quantity-value) {
+#raid-base .raid-quantity-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3759,7 +3763,23 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 }
 
 #raid-settings input[type="range"] { touch-action: none; }
+@media (hover: none) and (pointer: coarse) {
+  #raid-base .raid-base-workspace .raid-mobile-loadout-description { display: block; }
+  #raid-base #raid-deploy-status:empty { display: none; }
+  #raid-base #raid-deploy-dialog .raid-base-section > h2 { margin-bottom: 2px; }
+  #raid-base #raid-deploy-dialog .raid-deploy-review { padding-top: 2px; }
+  #overlay :is(#raid-base, #pause-menu, #confirm-dialog) :is(button, input, dialog):focus {
+    outline: none;
+  }
+}
+#raid-base .raid-quantity-dialog .raid-recycle-preview .inv-pixel-text-img {
+  zoom: max(1.5, calc(var(--desktop-ui-scale, 1) * 1.2));
+}
 @media (hover: none) and (pointer: coarse) and (orientation: landscape) {
+  #raid-base #raid-deploy-dialog .raid-deploy-review > .raid-base-columns {
+    grid-template-columns: minmax(0, .625fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
   #overlay #raid-base .raid-base-mission #raid-deploy {
     min-width: min(26vw, 192px);
     min-height: 46px;
