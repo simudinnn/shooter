@@ -3,6 +3,8 @@ export class SoundManager {
     this.ctx = null;
     this.master = null;
     this.enabled = false;
+    this.muted = false;
+    this.volume = 0.45;
     this.buffers = {};
 
     this._lastCasingLand = 0;
@@ -18,7 +20,7 @@ export class SoundManager {
     if (!AudioContext) return;
     this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.45;
+    this.master.gain.value = this.muted ? 0 : this.volume;
     this.master.connect(this.ctx.destination);
     this.enabled = true;
 
@@ -27,6 +29,12 @@ export class SoundManager {
 
   resume() {
     if (this.ctx?.state === 'suspended') this.ctx.resume().catch(() => {});
+  }
+
+  setEnabled(enabled, volume = this.volume) {
+    this.muted = !enabled;
+    this.volume = volume;
+    if (this.master) this.master.gain.value = enabled ? volume : 0;
   }
 
   async loadSounds() {

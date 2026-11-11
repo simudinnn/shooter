@@ -30,39 +30,31 @@
         <p id="loading-status" class="loading-status pixel-text-host">Preparing…</p>
       </div>
     </div>
-    <div id="main-menu">
-      <div class="menu-frame ui-slice-panel">
-        <h1 class="pixel-text-host">Robot Ruins</h1>
-        <p id="menu-subtitle" class="menu-subtitle pixel-text-host hidden"></p>
-        <div class="menu-btn-stack">
-          <button type="button" id="new-game-btn" class="ui-slice-button">New Game</button>
-          <button type="button" id="load-game-btn" class="ui-slice-button hidden">Load Game</button>
-        </div>
-      </div>
-    </div>
     <div id="raid-base" class="hidden">
       <section class="raid-base-frame" aria-label="Safe base">
         <header class="raid-base-top">
-          <div class="raid-base-header-actions">
-            <button type="button" id="raid-base-exit" class="ui-slice-button">Main Menu</button>
-          </div>
+          <div id="raid-stats"></div>
+
           <nav aria-label="Base stations">
             <button type="button" data-station="deploy">Deploy</button>
             <button type="button" data-station="stash">Stash</button>
             <button type="button" data-station="craft">Crafting</button>
             <button type="button" data-station="shop">Shop</button>
           </nav>
+          <div class="raid-base-header-actions">
           <div class="raid-base-balance"><img src="assets/items/misc/cash.png" alt=""><span id="raid-cash"></span></div>
+            <button type="button" id="raid-settings-open">Settings</button>
+          </div>
         </header>
-        <div class="raid-base-strip"><span id="raid-stats"></span><span role="status"></span></div>
+        <div class="raid-base-strip"><span role="status"></span></div>
         <main class="raid-base-workspace">
           <section data-base-panel="deploy" class="raid-base-overview">
-            <div class="raid-base-section"><h2>Challenges</h2><div id="raid-challenges"></div></div>
             <div class="raid-base-mission">
               <p>FIELD OPERATIONS</p><h2>Deploy to the Ruins</h2>
-              <p>Scout nearby towns, gather supplies and return through the marked extraction zone.</p>
+              <p>Search abandoned towns for supplies, evade robot patrols, and reach the extraction zone to bring your loot home.</p>
               <button type="button" id="raid-deploy" class="ui-slice-button">Deploy</button>
             </div>
+            <div class="raid-base-section"><h2>Challenges</h2><div id="raid-challenges"></div></div>
           </section>
           <section data-base-panel="stash" class="raid-base-columns hidden">
             <div class="raid-base-section"><h2>Loadout</h2><p class="raid-transfer-hint">Drag or Shift-click to transfer. Right-click for details.</p>
@@ -71,12 +63,30 @@
                 <div id="raid-kit" class="raid-base-grid" aria-label="Backpack inventory"></div>
               </div>
             </div>
-            <div class="raid-base-section"><h2 id="raid-stash-title">Stash</h2><div id="raid-stash" class="raid-base-grid"></div></div>
+            <div class="raid-base-section"><h2 id="raid-stash-title">Stash</h2><p class="raid-station-description">Keep spare gear and materials here between raids.</p><div id="raid-stash" class="raid-base-grid"></div></div>
           </section>
-          <section data-base-panel="craft" class="raid-base-section hidden"><h2>Crafting station</h2><p>Ready recipes appear first. Select a recipe to compare your stash with its requirements.</p><div id="raid-recipes" class="raid-recipe-grid"></div></section>
-          <section data-base-panel="shop" class="raid-base-section hidden"><h2>Quartermaster</h2><p>Purchases go straight to your stash.</p><div id="raid-shop" class="raid-base-grid"></div></section>
+          <section data-base-panel="craft" class="raid-base-section hidden"><h2>Crafting station</h2><p class="raid-station-description">Select a recipe to see which materials it needs from your stash.</p><div id="raid-recipes" class="raid-base-grid raid-recipe-grid"></div></section>
+          <section data-base-panel="shop" class="raid-base-section hidden"><h2>Quartermaster</h2><p class="raid-station-description">Buy supplies with cash. Purchases go straight to your stash.</p><div id="raid-shop" class="raid-base-grid"></div></section>
           <aside id="raid-selection" class="inv-context-menu raid-base-selection hidden" aria-label="Selected item"></aside>
         </main>
+        <dialog id="raid-settings" aria-label="Settings">
+          <h2>Settings</h2>
+          <form method="dialog">
+            <fieldset>
+              <legend>Audio</legend>
+              <label><span>Base music</span><input id="raid-music-enabled" type="checkbox" checked></label>
+              <label><span>Music volume</span><input id="raid-music-volume" type="range" min="0" max="100" value="28"></label>
+              <label><span>Sound effects</span><input id="raid-sound-enabled" type="checkbox" checked></label>
+              <label><span>Effects volume</span><input id="raid-sound-volume" type="range" min="0" max="100" value="45"></label>
+            </fieldset>
+            <fieldset>
+              <legend>Raid record</legend>
+              <div id="raid-extract-count"></div>
+              <div id="raid-loss-count"></div>
+            </fieldset>
+            <button class="ui-slice-button">Close</button>
+          </form>
+        </dialog>
         <dialog id="raid-deploy-dialog" aria-labelledby="raid-deploy-title">
           <header><h2 id="raid-deploy-title">Check your loadout</h2><p>Only the items in your loadout go into the raid.</p><p id="raid-deploy-status" role="status"></p></header>
           <div class="raid-deploy-review"></div>
@@ -87,6 +97,19 @@
         </dialog>
       </section>
     </div>
+    <section id="raid-results" class="hidden" aria-label="Raid results">
+      <div class="raid-result-content">
+      <h2></h2>
+      <div class="raid-result-stats">
+        <span id="raid-result-duration"></span><span id="raid-result-kills"></span>
+        <span id="raid-result-cash"></span><span id="raid-result-xp"></span>
+      </div>
+      <h3 id="raid-result-items-title"></h3>
+      <div id="raid-result-items"></div>
+      <p id="raid-result-note"></p>
+      <button id="raid-result-continue" type="button" class="ui-slice-button">Continue</button>
+      </div>
+    </section>
     <div id="pause-menu" class="hidden">
       <div class="menu-frame ui-slice-panel">
         <h2 class="menu-heading pixel-text-host">Paused</h2>
@@ -109,10 +132,10 @@
   </div>
 
   <div id="hud" class="hidden">
-    <div id="raid-extract-hud" class="pixel-text-host"></div>
-    <div id="hud-time">
-      <span id="game-day" class="pixel-text-host">Day 1</span>
-      <span id="game-clock" class="pixel-text-host">12:00</span>
+    <div id="raid-extract-hud">
+      <span id="raid-hatch-direction" aria-hidden="true"></span>
+      <span id="raid-extract-distance"></span>
+      <span id="raid-hatch-status"></span>
     </div>
     <div id="hud-bottom-left">
       <div id="health-panel">

@@ -1,4 +1,4 @@
-import { RaidBase, challengeProgress, newRaidProfile, deployProfile, extractProfile, loseRaidProfile, normalizeRaidProfile, EXTRACT_RADIUS, EXTRACT_SECONDS, raidLevel } from './raidBase.js';
+import { RaidBase, challengeProgress, newRaidProfile, deployProfile, extractProfile, loseRaidProfile, normalizeRaidProfile, EXTRACT_RADIUS, EXTRACT_SECONDS } from './raidBase.js';
 import { collectWallOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
 import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { World, TILE } from './world.js';
@@ -8,7 +8,7 @@ import { Robot, Scout, createGroundSpew, updateParticles, createExplosion } from
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
 import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
 import {
-  hasSavedGame,
+  capturePlayerState,
   readSave,
   writeSave,
 } from './saveGame.js';
@@ -130,9 +130,9 @@ class Game {
     this.raidBase = new RaidBase(document.getElementById('raid-base'), {
       save: (profile) => this._writeRaidProfile(profile),
       deploy: () => this._deployRaid(),
-      exit: () => this._showMainMenu(),
+      setSound: (enabled, volume) => this.audio.setEnabled(enabled, volume),
     });
-    this._showMainMenu();
+    this._openSavedBase();
   }
 
   _initCanvas() {
@@ -162,8 +162,6 @@ class Game {
 
   _initUI() {
     this.el = {
-      mainMenu: document.getElementById('main-menu'),
-      menuSubtitle: document.getElementById('menu-subtitle'),
       pauseMenu: document.getElementById('pause-menu'),
       confirmDialog: document.getElementById('confirm-dialog'),
       confirmMessage: document.getElementById('confirm-message'),
@@ -179,11 +177,7 @@ class Game {
       ammoIcon: document.getElementById('ammo-icon'),
       reloadIndicator: document.getElementById('reload-indicator'),
       zoneLabel: document.getElementById('zone-label'),
-      gameDay: document.getElementById('game-day'),
-      gameClock: document.getElementById('game-clock'),
       damageFlash: document.getElementById('damage-flash'),
-      newGameBtn: document.getElementById('new-game-btn'),
-      loadGameBtn: document.getElementById('load-game-btn'),
       resumeBtn: document.getElementById('resume-btn'),
       backToMenuBtn: document.getElementById('back-to-menu-btn'),
       confirmYesBtn: document.getElementById('confirm-yes-btn'),
@@ -226,7 +220,6 @@ class Game {
       const label = btn.textContent.trim();
       if (label) this._setPixelBtn(btn, label, T);
     });
-    this._setPixelText(document.querySelector('#main-menu h1'), 'Robot Ruins', T);
     document.querySelectorAll('#loading-screen .menu-heading, #pause-menu .menu-heading').forEach((el) => {
       const label = el.textContent.trim();
       if (label) this._setPixelText(el, label, T);
@@ -239,45 +232,16 @@ class Game {
     }
   }
 
-  _refreshMainMenuButtons() {
-    const hasSave = hasSavedGame();
-    this.el.loadGameBtn?.classList.toggle('hidden', !hasSave);
-  }
-
-  _showMainMenu(deathStats = null) {
-    this.raidBase?.hide();
-    this._refreshMainMenuButtons();
-    this.el.mainMenu?.classList.remove('hidden');
-    this.el.pauseMenu?.classList.add('hidden');
-    this.el.confirmDialog?.classList.add('hidden');
-    this.el.hud?.classList.add('hidden');
-    document.body.classList.remove('game-active');
-    this._hideGameCursor();
-    this._endSpawnReveal();
-    this.el.mobileControls?.classList.add('hidden');
-    this._enableMenuCursor();
-    if (deathStats) {
-      this._setPixelText(this.el.menuSubtitle, deathStats, PIXEL_TEXT_SCALE_SM);
-      this.el.menuSubtitle.classList.remove('hidden');
-    } else {
-      this._setPixelText(this.el.menuSubtitle, '');
-      this.el.menuSubtitle.classList.add('hidden');
-    }
-  }
-
-  _hideMainMenu() {
-    this.el.mainMenu?.classList.add('hidden');
-    this.el.menuSubtitle?.classList.add('hidden');
-  }
-
   _showPauseMenu() {
     this.paused = true;
     const challenges = document.getElementById('raid-pause-challenges');
     challenges.replaceChildren();
     if (this.raidProfile) {
-      for (const challenge of challengeProgress(this.raidProfile, this.kills)) {
+      for (const challenge of challengeProgress(this.raidProfile, this.kills).filter((entry) => !entry.claimed)) {
         const row = document.createElement('p');
-        row.textContent = `${challenge.title} · ${challenge.progress}/${challenge.goal} · ${challenge.description}`;
+        const label = `${challenge.title} / ${challenge.progress}/${challenge.goal}`;
+        row.setAttribute('aria-label', label);
+        this._setPixelText(row, label, PIXEL_TEXT_SCALE_SM);
         challenges.appendChild(row);
       }
     }
@@ -389,7 +353,6 @@ class Game {
   _showLoadingScreen() {
     this._disableMenuCursor();
     this.el.loadingScreen?.classList.remove('hidden');
-    this.el.mainMenu?.classList.add('hidden');
     this._setLoadingProgress(0, 'Preparing…');
   }
 
@@ -535,8 +498,14 @@ class Game {
     this.paused = false;
     this.inventoryUI.forceClose();
     this._clearKeyboardInput();
-    this._showMainMenu();
-    this._hideMainMenu();
+    this._hideLoadingScreen();
+    this.el.pauseMenu?.classList.add('hidden');
+    this.el.confirmDialog?.classList.add('hidden');
+    this.el.hud?.classList.add('hidden');
+    this.el.mobileControls?.classList.add('hidden');
+    document.body.classList.remove('game-active');
+    this._hideGameCursor();
+    this._endSpawnReveal();
     this._disableMenuCursor();
     this.raidBase.show(profile, message);
   }
@@ -544,34 +513,20 @@ class Game {
   _requestBackToMenu() {
     this._showConfirm('Abandon this raid? You will lose all carried gear and loot.', () => {
       this._closeConfirm();
-      this._finishRaid(false, 'Raid abandoned. Carried gear and loot were lost.');
+      this._finishRaid(false);
     }, () => this._closeConfirm());
   }
 
-  _requestNewGame() {
-    const start = () => {
-      this._closeConfirm();
-      const profile = newRaidProfile();
-      if (this._writeRaidProfile(profile)) this._showRaidBase(profile, 'Prepare your loadout and deploy.');
-      else this._showMainMenu('Could not save the new profile.');
-    };
-    if (hasSavedGame()) this._showConfirm('Start a new profile and replace your existing save?', start, () => this._closeConfirm());
-    else start();
-  }
-
-  _startLoadGame() {
+  _openSavedBase() {
     const save = readSave();
-    if (!save) {
-      this._refreshMainMenuButtons();
-      return;
+    let profile = save?.profile ? normalizeRaidProfile(save.profile) : newRaidProfile(save);
+    let message = '';
+    if (profile.deployed) {
+      profile = loseRaidProfile(profile);
+      message = 'Previous raid abandoned. Your stash is safe.';
     }
-    let profile = save.profile ? normalizeRaidProfile(save.profile) : newRaidProfile(save);
-    const message = profile.deployed ? 'Previous raid abandoned. Your stash is safe.' : '';
-    if (profile.deployed) profile = loseRaidProfile(profile);
-    if (!this._writeRaidProfile(profile)) {
-      this._showMainMenu('Could not save the profile.');
-      return;
-    }
+    if (!this._writeRaidProfile(profile)) message = 'Could not save the profile.';
+    this.raidProfile = profile;
     this._showRaidBase(profile, message);
   }
 
@@ -596,54 +551,158 @@ class Game {
     }
   }
 
-  _pickExtractionPoint() {
-    const { x, z } = this.player;
+  _placeHatches() {
+    const origin = this.player;
     const startAngle = Math.random() * Math.PI * 2;
-    for (let i = 0; i < 12; i++) {
-      const angle = startAngle + i * Math.PI / 6;
-      const wx = x + Math.sin(angle) * 105;
-      const wz = z + Math.cos(angle) * 105;
-      this.world.prewarmGround(wx, wz, 1);
-      const point = this.world.ensureClearSpawnPosition(wx, wz, 2);
-      if (!this.world.checkCollision(point.x, point.z, 2)) return point;
+    const hatches = [];
+    for (let sector = 0; sector < 4; sector++) {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const angle = startAngle + sector * Math.PI / 2 + (attempt % 2 ? -1 : 1) * attempt * 0.09;
+        const radius = 145 + attempt * 16;
+        const x = origin.x + Math.sin(angle) * radius;
+        const z = origin.z + Math.cos(angle) * radius;
+        this.world.prewarmGround(x, z, 1);
+        const point = this.world.ensureClearSpawnPosition(x, z, 2);
+        if (this.world.checkCollision(point.x, point.z, 2)) continue;
+        if (Math.hypot(point.x - origin.x, point.z - origin.z) < 110) continue;
+        if (hatches.some((entry) => Math.hypot(point.x - entry.x, point.z - entry.z) < 140)) continue;
+        hatches.push({ ...point, state: 'closed', remaining: 0 });
+        break;
+      }
     }
-    return { x, z };
+    if (!hatches.length) hatches.push({ x: origin.x, z: origin.z, state: 'closed', remaining: 0 });
+    return hatches;
+  }
+
+  _callHatch(hatch = this.nearestHatch) {
+    if (!this.running || this.paused || this._panelOpen() || this._isSpawnRevealActive()
+      || hatch?.state !== 'closed'
+      || Math.hypot(hatch.x - this.player.x, hatch.z - this.player.z) > EXTRACT_RADIUS) return false;
+    hatch.state = 'calling';
+    hatch.remaining = 10;
+    return true;
+  }
+
+  _canCallHatch() {
+    const hatch = this.nearestHatch;
+    if (this.inventoryUI.isOpen() || hatch?.state !== 'closed'
+      || Math.hypot(hatch.x - this.player.x, hatch.z - this.player.z) > EXTRACT_RADIUS) return false;
+    if (this.mobile) return true;
+    const point = this._worldToScreen(hatch.x, hatch.z);
+    return Math.abs(point.x - this.mouse.sx) <= 18 && Math.abs(point.y - this.mouse.sy) <= 12;
   }
 
   _updateExtraction(dt) {
-    if (!this.raidExit || this._isSpawnRevealActive()) return;
-    const dx = this.raidExit.x - this.player.x;
-    const dz = this.raidExit.z - this.player.z;
-    const distance = Math.hypot(dx, dz);
-    const label = document.getElementById('raid-extract-hud');
-    if (distance <= EXTRACT_RADIUS) {
-      this._extractElapsed += dt;
-      this._setPixelText(label, `Extracting · ${Math.max(1, Math.ceil(EXTRACT_SECONDS - this._extractElapsed))}s`, PIXEL_TEXT_SCALE_SM);
-      if (this._extractElapsed >= EXTRACT_SECONDS) this._finishRaid(true);
-    } else {
-      this._extractElapsed = 0;
-      const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-      const direction = directions[(Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) + 8) % 8];
-      this._setPixelText(label, `Lv ${raidLevel(this.raidProfile)} · Extract ${direction} ${Math.ceil(distance)}m`, PIXEL_TEXT_SCALE_SM);
+    if (!this.hatches?.length || this._isSpawnRevealActive()) return;
+    let nearest = null;
+    let distance = Infinity;
+    for (const hatch of this.hatches) {
+      if (hatch.state === 'calling') {
+        hatch.remaining = Math.max(0, hatch.remaining - dt);
+        if (hatch.remaining === 0) hatch.state = 'open';
+      }
+      const gap = Math.hypot(hatch.x - this.player.x, hatch.z - this.player.z);
+      if (gap < distance) {
+        nearest = hatch;
+        distance = gap;
+      }
     }
+    this.nearestHatch = nearest;
+    const nearby = distance <= EXTRACT_RADIUS;
+    const label = document.getElementById('raid-extract-distance');
+    const metres = 'Hatch / ' + Math.ceil(distance) + 'm';
+    if (label.textContent !== metres) label.textContent = metres;
+    const direction = document.getElementById('raid-hatch-direction');
+    direction.style.rotate = Math.atan2(nearest.x - this.player.x, -(nearest.z - this.player.z)) + 'rad';
+    const status = document.getElementById('raid-hatch-status');
+    let message = nearby && nearest.state === 'calling' ? 'Opening / ' + Math.ceil(nearest.remaining) + 's' : '';
+    if (nearby && nearest.state === 'open') {
+      this._extractElapsed += dt;
+      message = 'Extracting / ' + Math.max(1, Math.ceil(EXTRACT_SECONDS - this._extractElapsed)) + 's';
+      if (this._extractElapsed >= EXTRACT_SECONDS) {
+        this._finishRaid(true);
+        return;
+      }
+    } else this._extractElapsed = 0;
+    if (status.textContent !== message) status.textContent = message;
   }
 
-  _finishRaid(extracted, message = '') {
+  _finishRaid(extracted) {
+    if (!this.running) return;
+    this.running = false;
     this.inventoryUI.forceClose();
+    this._clearKeyboardInput();
     const previous = this.raidProfile;
+    const carried = capturePlayerState(this.player);
     const next = extracted ? extractProfile(previous, this.player, this.kills) : loseRaidProfile(previous);
-    let report = extracted
-      ? `Extracted · +${next.xp - previous.xp} XP · +${next.cash - previous.cash} Cash. Move your loot to the stash before redeploying.`
-      : message;
-    if (extracted) {
-      const completed = challengeProgress(next).filter((challenge) =>
-        challenge.progress >= challenge.goal && previous[challenge.metric] < challenge.goal);
-      if (completed.length) report += ` Challenge complete · ${completed.map((challenge) => challenge.title).join(', ')}.`;
-    }
     const saved = this._writeRaidProfile(next);
     this.raidProfile = next;
-    this.raidExit = null;
-    this._showRaidBase(next, saved ? report : `${report} Save failed. Progress is available for this session only.`);
+    this.hatches = [];
+    this.nearestHatch = null;
+    this.el.pauseMenu.classList.add('hidden');
+    this.el.hud.classList.add('hidden');
+    this.el.mobileControls.classList.add('hidden');
+    document.body.classList.remove('game-active');
+    this._hideGameCursor();
+    this._disableMenuCursor();
+    const summary = document.getElementById('raid-results');
+    summary.dataset.outcome = extracted ? 'success' : 'loss';
+    const setLabel = (selector, text) => {
+      const element = summary.querySelector(selector);
+      element.setAttribute('aria-label', text);
+      this._setPixelText(element, text, PIXEL_TEXT_SCALE_SM);
+    };
+    const seconds = Math.max(0, Math.floor((performance.now() - this.raidStartedAt) / 1000));
+    setLabel('h2', extracted ? 'Extraction successful' : 'Raid lost');
+    setLabel('#raid-result-duration', 'Time: ' + Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's');
+    setLabel('#raid-result-kills', 'Robots: ' + this.kills);
+    setLabel('#raid-result-cash', '+' + (next.cash - previous.cash) + ' Cash');
+    setLabel('#raid-result-xp', '+' + (next.xp - previous.xp) + ' XP');
+    setLabel('#raid-result-items-title', extracted ? 'New loot extracted' : 'Items lost');
+    const items = summary.querySelector('#raid-result-items');
+    items.replaceChildren();
+    const totals = new Map();
+    const itemKey = (item) => item.kind + ':' + (item.key ?? item.ammoType ?? '');
+    const slots = (kit) => [...kit.itemSlots, ...kit.handSlots, ...kit.equipmentSlots].filter(Boolean);
+    for (const item of slots(carried)) {
+      const key = itemKey(item);
+      const existing = totals.get(key);
+      totals.set(key, { ...item, amount: (existing?.amount ?? 0) + (item.amount ?? 1) });
+    }
+    if (extracted) {
+      for (const item of slots(this.raidStartingKit)) {
+        const entry = totals.get(itemKey(item));
+        if (entry) entry.amount -= item.amount ?? 1;
+      }
+    }
+    for (const item of totals.values()) {
+      if (item.amount <= 0) continue;
+      const cell = document.createElement('div');
+      cell.className = 'raid-result-item';
+      cell.style.setProperty('--result-delay', Math.min(items.childElementCount * 35, 350) + 'ms');
+      const icon = document.createElement('img');
+      icon.src = getItemIconSrc(item);
+      icon.alt = getItemDisplayName(item);
+      cell.title = icon.alt;
+      const count = document.createElement('span');
+      this._setPixelText(count, String(item.amount), PIXEL_TEXT_SCALE_SM);
+      cell.append(icon, count);
+      items.append(cell);
+    }
+    if (!items.childElementCount) this._setPixelText(items, 'None', PIXEL_TEXT_SCALE_SM);
+    const completed = extracted ? challengeProgress(next).filter((challenge) =>
+      !challenge.claimed && challenge.progress >= challenge.goal &&
+      challengeProgress(previous).some((entry) => entry.id === challenge.id && entry.progress < entry.goal)) : [];
+    const notes = completed.map((challenge) => 'Challenge complete / ' + challenge.title);
+    if (!saved) notes.push('Save failed. Progress is available for this session only.');
+    setLabel('#raid-result-note', notes.filter(Boolean).join(' / '));
+    const button = summary.querySelector('#raid-result-continue');
+    button.onclick = () => {
+      summary.classList.add('hidden');
+      this._showRaidBase(next);
+    };
+    summary.classList.remove('hidden');
+    button.focus();
   }
 
   showWaveBanner(text, duration = 2) {
@@ -681,6 +740,12 @@ class Game {
   }
 
   _onGameKeyDown(e) {
+    const confirmOpen = this.el.confirmDialog && !this.el.confirmDialog.classList.contains('hidden');
+    const menu = confirmOpen ? this.el.confirmDialog : this.running ? this.el.pauseMenu : undefined;
+    if ((!this.running || this.paused || confirmOpen) && this.raidBase?.handleMenuKey(e, menu)) {
+      e.preventDefault();
+      return;
+    }
     if (this.running && e.ctrlKey && (e.code === 'KeyW' || e.key?.toLowerCase() === 'w')) {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -752,8 +817,6 @@ class Game {
   }
 
   _bindEvents() {
-    this.el.newGameBtn?.addEventListener('click', () => this._requestNewGame());
-    this.el.loadGameBtn?.addEventListener('click', () => this._startLoadGame());
     this.el.resumeBtn?.addEventListener('click', () => this._hidePauseMenu());
     this.el.backToMenuBtn?.addEventListener('click', () => this._requestBackToMenu());
     this.el.confirmYesBtn?.addEventListener('click', () => this._confirmYes?.());
@@ -775,6 +838,7 @@ class Game {
       this.audio.resume();
         if (!this.paused) this.mouseDown = true;
       } else if (e.button === 2 && this.running && !this.paused && !this._panelOpen()) {
+        if (!this.mobile && this._canCallHatch() && this._callHatch()) return;
         if (this._tryPickupGroundDrop()) {
           /* hovered ground drop takes priority over chest / door */
         } else if (!this._tryToggleNearbyDoor()) {
@@ -1190,9 +1254,13 @@ class Game {
         && Math.abs(point.y - (INTERNAL_H >> 1)) <= this._visibleHalfHeight;
     };
     this._nextTerrainWarmup = 0;
-    this.raidExit = raidKit ? this._pickExtractionPoint() : null;
+    this.hatches = raidKit ? this._placeHatches() : [];
+    this.nearestHatch = null;
+    this.raidStartedAt = performance.now();
+    this.raidStartingKit = capturePlayerState(this.player);
     this._extractElapsed = 0;
-    this._setPixelText(document.getElementById('raid-extract-hud'), '', PIXEL_TEXT_SCALE_SM);
+    document.getElementById('raid-extract-distance').textContent = '';
+    document.getElementById('raid-hatch-status').textContent = '';
 
     this._disableMenuCursor();
     this._hideGameCursor();
@@ -1299,7 +1367,6 @@ class Game {
 
 
     const inventoryOpen = this._panelOpen();
-    this.dayNight?.update(dt);
     if (this.player?.alive && this.world && time >= this._nextTerrainWarmup) {
       this._nextTerrainWarmup = time + 0.08;
       this.world.touchChunksAround(this.player.x, this.player.z, 5, { budget: 1 });
@@ -1618,7 +1685,7 @@ class Game {
       this.kills++;
       if (this.raidProfile) {
         const reached = challengeProgress(this.raidProfile, this.kills).find((challenge) =>
-          challenge.metric === 'extractedKills' && this.raidProfile.extractedKills + this.kills === challenge.goal);
+          !challenge.claimed && challenge.metric === 'extractedKills' && challenge.progress >= challenge.goal && challengeProgress(this.raidProfile, this.kills - 1).some((entry) => entry.id === challenge.id && entry.progress < entry.goal));
         if (reached) this.showWaveBanner(`${reached.title} · Extract to complete`, 3);
       }
       const time = performance.now() / 1000;
@@ -1762,6 +1829,7 @@ class Game {
 
   _tryInteract() {
     if (this._isSpawnRevealActive()) return false;
+    if (this._callHatch()) return true;
     if (this._tryToggleNearbyDoor()) return true;
     if (this._tryPickupGroundDrop()) return true;
     if (this._tryOpenNearbyChest()) return true;
@@ -2382,15 +2450,25 @@ class Game {
       drawBuildingFloors(ctx, building, worldToScreen, tilePx, this.sprites);
     }
 
-    if (this.raidExit && inView(this.raidExit.x, this.raidExit.z, EXTRACT_RADIUS)) {
-      const exit = worldToScreen(this.raidExit.x, this.raidExit.z);
-      ctx.beginPath();
-      ctx.arc(exit.x, exit.y, EXTRACT_RADIUS * PPU, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(65, 170, 108, 0.18)';
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#85d79c';
-      ctx.stroke();
+    for (const hatch of this.hatches ?? []) {
+      if (!inView(hatch.x, hatch.z, EXTRACT_RADIUS)) continue;
+      const point = worldToScreen(hatch.x, hatch.z);
+      const phase = hatch.state === 'open' ? 1 : hatch.state === 'calling' ? 1 - hatch.remaining / 10 : 0;
+      ctx.fillStyle = '#302a24';
+      ctx.fillRect(point.x - 15, point.y - 9, 30, 18);
+      ctx.fillStyle = '#100e0b';
+      ctx.fillRect(point.x - 12, point.y - 6, 24, 12);
+      ctx.fillStyle = '#827053';
+      ctx.fillRect(point.x - 12, point.y - 6, Math.round(24 * (1 - phase)), 12);
+      ctx.fillStyle = hatch.state === 'open' ? '#85d79c' : '#e6b558';
+      ctx.fillRect(point.x - 2, point.y - 10, 4, 3);
+      if (hatch === this.nearestHatch && this._extractElapsed > 0) {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 20, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * this._extractElapsed / EXTRACT_SECONDS);
+        ctx.strokeStyle = '#85d79c';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
 
     const playerSortZ = this._playerSortZ();
@@ -2970,13 +3048,6 @@ class Game {
       this._setPixelText(this.el.zoneLabel, '', PIXEL_TEXT_SCALE);
     }
 
-    if (this.el.gameDay && this.dayNight) {
-      this._setPixelText(this.el.gameDay, this.dayNight.formatDay(), PIXEL_TEXT_SCALE);
-    }
-    if (this.el.gameClock && this.dayNight) {
-      this._setPixelText(this.el.gameClock, this.dayNight.formatClock(), PIXEL_TEXT_SCALE);
-    }
-
     if (this.items.pickupMsg) {
       this._setPixelText(this.el.pickupStatus, this.items.pickupMsg, PIXEL_TEXT_SCALE);
       this.el.pickupStatus.classList.add('active');
@@ -3020,12 +3091,14 @@ class Game {
     const mbInteract = document.getElementById('mb-interact');
     mbInteract?.classList.toggle('mb-nearby', canToggleDoor || canOpenChestMobile || canOpenCorpseMobile || canPickupDropMobile);
     const pickupDrop = canPickupDrop ? (hoveredDrop ?? nearbyDrop) : null;
-    const showPrompt = canToggleDoor || canOpenChest || canOpenCorpse || canPickupDrop;
+    const canCallHatch = this._canCallHatch();
+    if (canCallHatch) mbInteract?.classList.add('mb-nearby');
+    const showPrompt = canCallHatch || canToggleDoor || canOpenChest || canOpenCorpse || canPickupDrop;
     this.el.interactPrompt.classList.toggle('hidden', !showPrompt);
     if (showPrompt) {
       const doorVerb = interactDoor?.doorOpen ? 'close' : 'open';
       if (this.mobile) {
-        const mobileText = canToggleDoor
+        const mobileText = canCallHatch ? 'E Call Extract' : canToggleDoor
           ? `E to ${doorVerb} door`
           : (canOpenCorpse ? 'E to loot' : (pickupDrop ? `E ${pickupDrop.label}` : 'E to open'));
         setElementPixelText(this.el.interactPrompt, mobileText, PIXEL_TEXT_SCALE);
@@ -3033,7 +3106,7 @@ class Game {
       } else {
         const mx = this.mouse.clientX;
         const my = this.mouse.clientY;
-        const desktopText = canToggleDoor
+        const desktopText = canCallHatch ? 'RMB to call extract' : canToggleDoor
           ? `RMB to ${doorVerb} door`
           : (canOpenCorpse ? 'RMB to loot' : (pickupDrop ? `RMB ${pickupDrop.label}` : 'RMB to open'));
         setElementPixelText(this.el.interactPrompt, desktopText, PIXEL_TEXT_SCALE);
@@ -3056,7 +3129,7 @@ class Game {
 
   _endGame() {
     this.audio.lose();
-    this._finishRaid(false, 'KIA. Carried gear and loot were lost. Your stash is safe.');
+    this._finishRaid(false);
   }
 
   _scheduleFrame() {

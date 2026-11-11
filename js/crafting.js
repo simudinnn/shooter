@@ -8,6 +8,12 @@ import { normalizeThrowableItem } from './throwables.js';
 export const CRAFT_MAX_MATERIALS = 4;
 
 const RECIPES = [
+  { id: 'plank', output: { kind: 'material', key: 'plank', amount: 1 }, costs: { wood: 3 } },
+  { id: 'metal_sheet', output: { kind: 'material', key: 'metal_sheet', amount: 1 }, costs: { metal: 3 } },
+  { id: 'metal_pipe', output: { kind: 'material', key: 'metal_pipe', amount: 1 }, costs: { metal: 3, tape: 1 } },
+  { id: 'copper_coil', output: { kind: 'material', key: 'copper_coil', amount: 1 }, costs: { wires: 3, tape: 1 } },
+  { id: 'glass_bottle', output: { kind: 'material', key: 'glass_bottle', amount: 1 }, costs: { glass: 3 } },
+  { id: 'adhesive', output: { kind: 'material', key: 'adhesive', amount: 1 }, costs: { chemicals: 2, rubber: 1 } },
   {
     id: 'bandage',
     output: { kind: 'consumable', key: 'bandage', amount: 1 },
@@ -206,6 +212,12 @@ const RECYCLE_TABLE = {
   bandage: [{ key: 'cloth', amount: 1 }],
   ammo: [{ key: 'metal', amount: 1 }],
   material: {
+    plank: [{ key: 'wood', amount: 1 }],
+    metal_sheet: [{ key: 'metal', amount: 1 }],
+    metal_pipe: [{ key: 'metal', amount: 1 }],
+    copper_coil: [{ key: 'wires', amount: 1 }],
+    stick: [{ key: 'wood', amount: 1 }],
+    tape: [{ key: 'adhesive', amount: 1 }],
     repair_kit: [{ key: 'metal', amount: 2 }, { key: 'tape', amount: 1 }],
     sewing_kit: [{ key: 'cloth', amount: 2 }, { key: 'rope', amount: 1 }],
     splint_kit: [{ key: 'plank', amount: 1 }, { key: 'cloth', amount: 1 }],
@@ -362,9 +374,9 @@ export function getRecycleYields(item, count = 1) {
   const scale = Math.max(1, Math.floor(count));
   if (item.kind === 'weapon') return RECYCLE_TABLE.weapon;
   if (item.kind === 'melee') return RECYCLE_TABLE.melee;
-  if (item.kind === 'bandage') return RECYCLE_TABLE.bandage;
-  if (item.kind === 'ammo') {
-    return RECYCLE_TABLE.ammo.map((entry) => ({
+  if (item.kind === 'bandage' || item.kind === 'ammo' || (item.kind === 'consumable' && item.key === 'bandage')) {
+    const table = item.kind === 'ammo' ? RECYCLE_TABLE.ammo : RECYCLE_TABLE.bandage;
+    return table.map((entry) => ({
       key: entry.key,
       amount: entry.amount * scale,
     }));

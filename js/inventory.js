@@ -443,7 +443,8 @@ export class InventoryUI {
       - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
     const maxH = (viewport?.height ?? window.innerHeight)
       - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
-    const scale = Math.max(0, Math.min(this.game.mobile ? 1 : 1.08, maxW / w, maxH / h));
+    const desktopScale = Math.min(2, Math.max(1.15, maxH / 620));
+    const scale = Math.max(0, Math.min(this.game.mobile ? 1 : desktopScale, maxW / w, maxH / h));
     this.dualWrap.style.setProperty('--inv-mobile-scale', String(scale));
   }
 

@@ -2,12 +2,23 @@ import { Player, WEAPONS } from './player.js';
 import { capturePlayerState } from './saveGame.js';
 import { getItemDescription, getItemDisplayName, getItemIconSrc } from './loot.js';
 import { INV_LOCK_SRC } from './inventory.js';
-import { equipmentSlotFor } from './equipment.js';
+import { equipmentSlotFor, itemDurability } from './equipment.js';
 import { setElementPixelText, setElementWrappedPixelText, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { applyRecycleYields, canCraftRecipe, canRecycleItem, craftRecipe, getCraftableRecipes, getRecycleYields, SHOP_RECIPES } from './crafting.js';
 
 export const EXTRACT_RADIUS = 5;
 export const EXTRACT_SECONDS = 3;
+const CATALOG_CATEGORIES = [
+  ['Equipment', ['equipment']],
+  ['Weapons', ['weapon', 'melee', 'throwable']],
+  ['Ammo', ['ammo']],
+  ['Consumables', ['consumable', 'bandage']],
+  ['Materials', ['material']],
+];
+
+function catalogCategory(item) {
+  return CATALOG_CATEGORIES.findIndex(([, kinds]) => kinds.includes(item.kind));
+}
 const XP_PER_LEVEL = 100;
 export const raidLevel = (profile) => 1 + Math.floor(profile.xp / XP_PER_LEVEL);
 
@@ -66,6 +77,14 @@ export function loseRaidProfile(profile) {
 const SHOP = [
   { level: 1, price: 20, item: { kind: 'ammo', ammoType: 'pistol', amount: 24 } },
   { level: 1, price: 15, item: { kind: 'consumable', key: 'bandage', amount: 2 } },
+  { level: 4, price: 32, item: { kind: 'ammo', ammoType: 'shotgun', amount: 12 } },
+  { level: 8, price: 44, item: { kind: 'ammo', ammoType: 'rifle', amount: 30 } },
+  { level: 12, price: 52, item: { kind: 'ammo', ammoType: 'sniper', amount: 12 } },
+  { level: 2, price: 25, item: { kind: 'material', key: 'cloth', amount: 5 } },
+  { level: 3, price: 30, item: { kind: 'material', key: 'metal', amount: 5 } },
+  { level: 5, price: 38, item: { kind: 'material', key: 'chemicals', amount: 4 } },
+  { level: 8, price: 48, item: { kind: 'material', key: 'repair_kit', amount: 1 } },
+  { level: 5, price: 48, item: { kind: 'melee', key: 'wooden_bat' } },
   { level: 20, price: 90, item: { kind: 'weapon', key: 'glock', ammo: WEAPONS.glock.magSize } },
   { level: 20, price: 100, item: { kind: 'equipment', key: 'backpack_1' } },
   { level: 20, price: 110, item: { kind: 'equipment', key: 'vest' } },
@@ -105,17 +124,44 @@ const CHALLENGES = [
     xp: 200, item: { kind: 'equipment', key: 'backpack_1' } },
 ];
 
+const ROTATION_MS = 3 * 60 * 60 * 1000;
+const ROTATING_CHALLENGES = [
+  { title: 'Quick Extraction', metric: 'extractions', goal: 1, xp: 80 },
+  { title: 'Robot Sweep', metric: 'extractedKills', goal: 3, xp: 120 },
+  { title: 'Workshop Shift', metric: 'crafts', goal: 2, xp: 90 },
+  { title: 'Double Return', metric: 'extractions', goal: 2, xp: 140 },
+  { title: 'Heavy Patrol', metric: 'extractedKills', goal: 6, xp: 180 },
+  { title: 'Supply Run', metric: 'crafts', goal: 4, xp: 150 },
+];
+
+export function refreshChallengeRotation(profile, now = Date.now()) {
+  const period = Math.floor(now / ROTATION_MS);
+  if (profile.challengeRotation?.period === period) return false;
+  const index = (period * 2) % ROTATING_CHALLENGES.length;
+  profile.challengeRotation = {
+    period,
+    entries: ROTATING_CHALLENGES.slice(index, index + 2).map((entry) => ({
+      ...entry, baseline: profile[entry.metric], claimed: false,
+    })),
+  };
+  return true;
+}
+
 export function challengeProgress(profile, raidKills = 0) {
-  return CHALLENGES.map((challenge) => ({
+  const rotating = profile.challengeRotation?.entries.map((entry, index) => ({
+    ...entry, id: `rotation-${profile.challengeRotation.period}-${index}`, rotationIndex: index,
+  })) ?? [];
+  return [...CHALLENGES, ...rotating].map((challenge) => ({
     ...challenge,
-    progress: Math.min(challenge.goal, profile[challenge.metric] + (challenge.metric === 'extractedKills' ? raidKills : 0)),
-    claimed: profile.claimed.includes(challenge.id),
+    progress: Math.min(challenge.goal, profile[challenge.metric] - (challenge.baseline ?? 0)
+      + (challenge.metric === 'extractedKills' ? raidKills : 0)),
+    claimed: challenge.claimed ?? profile.claimed.includes(challenge.id),
   }));
 }
 
 export function claimChallenge(profile, id) {
-  const challenge = CHALLENGES.find((entry) => entry.id === id);
-  if (!challenge || profile.claimed.includes(id) || profile[challenge.metric] < challenge.goal) {
+  const challenge = challengeProgress(profile).find((entry) => entry.id === id);
+  if (!challenge || challenge.claimed || challenge.progress < challenge.goal) {
     return 'Challenge reward is unavailable.';
   }
   const nextXP = profile.xp + challenge.xp;
@@ -125,7 +171,8 @@ export function claimChallenge(profile, id) {
     profile.stash = staged.stash;
   }
   profile.xp = nextXP;
-  profile.claimed.push(id);
+  if (challenge.rotationIndex === undefined) profile.claimed.push(id);
+  else profile.challengeRotation.entries[challenge.rotationIndex].claimed = true;
 }
 
 function stashInventory(profile, player) {
@@ -156,18 +203,21 @@ export function craftAtBase(profile, player, recipe) {
   profile.crafts++;
 }
 
-export function recycleAtBase(profile, player, index) {
+export function recycleAtBase(profile, player, index, count) {
   const inventory = stashInventory(profile, player);
   const item = inventory.itemSlots[index];
-  const yields = getRecycleYields(item, item?.amount ?? 1);
+  const total = item?.amount ?? 1;
+  const quantity = count ?? total;
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > total) return 'Invalid recycle quantity.';
+  const yields = getRecycleYields(item, quantity);
   if (!yields?.length) return 'This item cannot be recycled.';
-  inventory.itemSlots[index] = null;
+  inventory.itemSlots[index] = quantity === total ? null : { ...item, amount: total - quantity };
   if (applyRecycleYields(inventory, yields).length) return 'Make space for the recovered materials.';
   profile.stash = inventory.itemSlots;
 }
 
 export class RaidBase {
-  constructor(root, { save, deploy, exit }) {
+  constructor(root, { save, deploy, setSound }) {
     this.root = root;
     this.save = save;
     this.status = root.querySelector('[role=status]');
@@ -188,6 +238,51 @@ export class RaidBase {
     this.music.loop = true;
     this.music.preload = 'none';
     this.music.volume = 0.28;
+    const settings = root.querySelector('#raid-settings');
+    const musicEnabled = root.querySelector('#raid-music-enabled');
+    const soundEnabled = root.querySelector('#raid-sound-enabled');
+    const musicVolume = root.querySelector('#raid-music-volume');
+    const soundVolume = root.querySelector('#raid-sound-volume');
+    try {
+      musicEnabled.checked = localStorage.getItem('raid-base-music') !== 'off';
+      soundEnabled.checked = localStorage.getItem('raid-sound-effects') !== 'off';
+      musicVolume.value = localStorage.getItem('raid-music-volume') ?? musicVolume.value;
+      soundVolume.value = localStorage.getItem('raid-effects-volume') ?? soundVolume.value;
+    } catch {}
+    this.music.muted = !musicEnabled.checked;
+    this.soundEnabled = soundEnabled.checked;
+    const applyVolume = () => {
+      this.music.volume = musicVolume.valueAsNumber / 100;
+      this.soundVolume = soundVolume.valueAsNumber / 100;
+      setSound(this.soundEnabled, this.soundVolume);
+    };
+    applyVolume();
+    for (const [slider, key] of [[musicVolume, 'raid-music-volume'], [soundVolume, 'raid-effects-volume']]) {
+      slider.addEventListener('input', applyVolume);
+      slider.addEventListener('change', () => {
+        try { localStorage.setItem(key, slider.value); } catch {}
+      });
+    }
+    const saveToggle = (key, enabled) => {
+      try { localStorage.setItem(key, enabled ? 'on' : 'off'); } catch {}
+    };
+    musicEnabled.addEventListener('change', () => {
+      this.music.muted = !musicEnabled.checked;
+      if (musicEnabled.checked) this.startMusic();
+      else this.music.pause();
+      saveToggle('raid-base-music', musicEnabled.checked);
+    });
+    soundEnabled.addEventListener('change', () => {
+      this.soundEnabled = soundEnabled.checked;
+      applyVolume();
+      saveToggle('raid-sound-effects', this.soundEnabled);
+    });
+    const settingsButton = root.querySelector('#raid-settings-open');
+    settingsButton.addEventListener('click', () => settings.showModal());
+    settings.addEventListener('close', () => settingsButton.focus({ preventScroll: true }));
+    for (const label of root.querySelectorAll('nav button, #raid-settings-open, .raid-base-overview h2, .raid-base-mission p, .raid-transfer-hint, .raid-station-description, [data-base-panel="craft"] > h2, [data-base-panel="shop"] > h2, #raid-settings :is(h2, legend, label span)')) {
+      this.pixelLabel(label, label.textContent.trim(), label.matches('p') ? 320 : undefined);
+    }
     root.addEventListener('pointerdown', () => this.startMusic());
     root.addEventListener('keydown', () => this.startMusic());
     root.addEventListener('click', (event) => {
@@ -199,15 +294,9 @@ export class RaidBase {
       review.append(this.stashPanel, this.selection);
       this.dialogStatus.textContent = '';
       this.deployDialog.showModal();
-      if (matchMedia('(hover: none) and (pointer: coarse)').matches) {
-        const title = this.deployDialog.querySelector('h2');
-        const intro = this.deployDialog.querySelector('header p');
-        const text = intro.getAttribute('aria-label') || intro.textContent;
-        title.setAttribute('aria-label', 'Check your loadout');
-        intro.setAttribute('aria-label', text);
-        setElementPixelText(title, 'Check your loadout', PIXEL_TEXT_SCALE_SM);
-        setElementWrappedPixelText(intro, text, intro.clientWidth, PIXEL_TEXT_SCALE_SM);
-      }
+      const intro = this.deployDialog.querySelector('header p');
+      this.pixelLabel(this.deployDialog.querySelector('h2'), 'Check your loadout');
+      this.pixelLabel(intro, intro.getAttribute('aria-label') || intro.textContent, intro.clientWidth);
       this.render();
     });
     root.querySelector('#raid-deploy-cancel').addEventListener('click', () => this.deployDialog.close());
@@ -218,9 +307,11 @@ export class RaidBase {
     });
     this.deployDialog.addEventListener('close', () => {
       this.workspace.append(this.stashPanel, this.selection);
-      if (!this.root.classList.contains('hidden')) this.render();
+      if (!this.root.classList.contains('hidden')) {
+        this.render();
+        root.querySelector('#raid-deploy').focus({ preventScroll: true });
+      }
     });
-    root.querySelector('#raid-base-exit').addEventListener('click', exit);
     for (const tab of root.querySelectorAll('[data-station]')) {
       tab.addEventListener('click', () => {
         if (this.station === tab.dataset.station) return;
@@ -243,13 +334,18 @@ export class RaidBase {
       this.catalogSelection = null;
     }
     this.profile = profile;
+    this.refreshChallenges();
     this.root.classList.remove('hidden');
     if (entering) this.startMusic();
+    if (entering) this.challengeTimer = setInterval(() => {
+      if (this.refreshChallenges() && this.station === 'deploy' && !this.deployDialog.open) this.renderChallenges();
+    }, 15_000);
     this.setStatus(message);
     this.render();
   }
 
   hide() {
+    clearInterval(this.challengeTimer);
     if (this.deployDialog.open) this.deployDialog.close();
     this.closeSelection();
     this.root.classList.add('hidden');
@@ -258,12 +354,13 @@ export class RaidBase {
   }
 
   startMusic() {
-    if (!this.root.classList.contains('hidden') && this.music.paused) {
+    if (!this.music.muted && !this.root.classList.contains('hidden') && this.music.paused) {
       this.music.play().catch(() => {});
     }
   }
 
   playCue(notes) {
+    if (!this.soundEnabled || this.soundVolume === 0) return;
     const Context = window.AudioContext || window.webkitAudioContext;
     if (!Context) return;
     const context = this.audioContext ??= new Context();
@@ -276,7 +373,8 @@ export class RaidBase {
         tone.type = 'triangle';
         tone.frequency.value = frequency;
         gain.gain.setValueAtTime(0.001, start);
-        gain.gain.exponentialRampToValueAtTime(notes.length === 1 ? 0.025 : 0.065, start + 0.008);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.001,
+          (notes.length === 1 ? 0.025 : 0.065) * this.soundVolume / 0.45), start + 0.008);
         gain.gain.exponentialRampToValueAtTime(0.001, start + 0.07);
         tone.connect(gain);
         gain.connect(context.destination);
@@ -288,12 +386,33 @@ export class RaidBase {
     else context.resume().then(play).catch(() => {});
   }
 
+  refreshChallenges() {
+    const next = structuredClone(this.profile);
+    let changed = false;
+    for (const challenge of challengeProgress(next)) {
+      if (!challenge.claimed && challenge.progress >= challenge.goal && !claimChallenge(next, challenge.id)) {
+        changed = true;
+      }
+    }
+    changed = refreshChallengeRotation(next) || changed;
+    if (!changed || !this.save(next)) return false;
+    this.profile = next;
+    return true;
+  }
+
+  pixelLabel(element, label, width) {
+    element.setAttribute('aria-label', label);
+    if (width) setElementWrappedPixelText(element, label, width, PIXEL_TEXT_SCALE_SM);
+    else setElementPixelText(element, label, PIXEL_TEXT_SCALE_SM);
+  }
+
   setStatus(message) {
-    this.status.textContent = message;
-    this.dialogStatus.textContent = message;
+    this.pixelLabel(this.status, message, 420);
+    this.pixelLabel(this.dialogStatus, message);
   }
 
   transact(change) {
+    this.refreshChallenges();
     const next = structuredClone(this.profile);
     const player = new Player();
     player.applySaveData(next.kit);
@@ -307,15 +426,17 @@ export class RaidBase {
       this.setStatus('Could not save the change.');
       return;
     }
-    this.show(next, 'Saved to base.');
+    this.show(next);
     return true;
   }
 
   render() {
     const profile = this.profile;
-    this.root.querySelector('#raid-stats').textContent =
-      `Level ${raidLevel(profile)}  ·  ${profile.xp % XP_PER_LEVEL}/${XP_PER_LEVEL} XP  ·  ${profile.extractions} extracts  ·  ${profile.losses} lost raids`;
-    this.root.querySelector('#raid-cash').textContent = `${profile.cash.toLocaleString()} Cash`;
+    this.pixelLabel(this.root.querySelector('#raid-stats'),
+      `Level ${raidLevel(profile)}  /  ${profile.xp % XP_PER_LEVEL}/${XP_PER_LEVEL} XP`);
+    this.pixelLabel(this.root.querySelector('#raid-extract-count'), `Extracts: ${profile.extractions}`);
+    this.pixelLabel(this.root.querySelector('#raid-loss-count'), `Lost raids: ${profile.losses}`);
+    this.pixelLabel(this.root.querySelector('#raid-cash'), `${profile.cash.toLocaleString()} Cash`);
     for (const tab of this.root.querySelectorAll('[data-station]')) {
       tab.setAttribute('aria-pressed', String(tab.dataset.station === this.station));
     }
@@ -335,21 +456,47 @@ export class RaidBase {
   renderChallenges() {
     const grid = this.root.querySelector('#raid-challenges');
     grid.replaceChildren();
-    for (const challenge of challengeProgress(this.profile)) {
+    for (const challenge of challengeProgress(this.profile).filter((entry) => !entry.claimed)) {
       const card = document.createElement('article');
       const title = document.createElement('h3');
-      title.textContent = challenge.title;
-      const desc = document.createElement('p');
-      desc.textContent = challenge.description;
+      const task = {
+        extractions: 'successful extractions',
+        extractedKills: 'robots destroyed and extracted',
+        crafts: 'base recipes crafted',
+      }[challenge.metric];
+      this.pixelLabel(title, challenge.title);
+      const objective = document.createElement('p');
+      this.pixelLabel(objective, task, 220);
       const progress = document.createElement('progress');
       progress.max = challenge.goal;
       progress.value = challenge.progress;
       progress.setAttribute('aria-label', challenge.title);
-      const reward = document.createElement('p');
-      reward.textContent = `${progress.value}/${progress.max} · ${challenge.xp} XP${challenge.item ? ` + ${getItemDisplayName(challenge.item)}` : ''}`;
-      const claimed = challenge.claimed;
-      card.append(title, desc, progress, reward, this.button(claimed ? 'Claimed' : 'Claim reward',
-        () => this.transact((next) => claimChallenge(next, challenge.id)), claimed || progress.value < progress.max));
+      const rewards = document.createElement('div');
+      rewards.className = 'raid-challenge-rewards';
+      const count = document.createElement('span');
+      this.pixelLabel(count, `${progress.value}/${progress.max}`);
+      const xpIcon = document.createElement('span');
+      xpIcon.className = 'raid-xp-icon';
+      xpIcon.setAttribute('aria-hidden', 'true');
+      const xp = document.createElement('span');
+      this.pixelLabel(xp, `${challenge.xp} XP`);
+      rewards.append(count, xpIcon, xp);
+      if (challenge.item) {
+        const icon = document.createElement('img');
+        icon.src = getItemIconSrc(challenge.item);
+        icon.alt = getItemDisplayName(challenge.item);
+        icon.title = icon.alt;
+        rewards.append(icon);
+        if (challenge.item.amount > 1) {
+          const quantity = document.createElement('span');
+          this.pixelLabel(quantity, `x${challenge.item.amount}`);
+          rewards.append(quantity);
+        }
+      }
+      card.append(title, objective, progress, rewards);
+      if (progress.value >= progress.max) {
+        card.append(this.button('Claim reward', () => this.transact((next) => claimChallenge(next, challenge.id))));
+      }
       grid.appendChild(card);
     }
   }
@@ -471,6 +618,7 @@ export class RaidBase {
       this._suppressSlotClick = null;
       if (event.button !== 0 || event.shiftKey || drag) return;
       event.preventDefault();
+      slot.focus({ preventScroll: true });
       const listeners = new AbortController();
       drag = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, listeners };
       const options = { capture: true, signal: listeners.signal };
@@ -492,23 +640,8 @@ export class RaidBase {
   renderStash() {
     const { kit, stash } = this.profile;
     const limit = stashLimit(this.profile);
-    const stashTitle = this.root.querySelector('#raid-stash-title');
-    const stashLabel = `Stash · ${stash.filter(Boolean).length}/${limit}`;
-    const loadoutTitle = this.stashPanel.querySelector('h2');
-    if (this.deployDialog.open && matchMedia('(hover: none) and (pointer: coarse)').matches) {
-      stashTitle.setAttribute('aria-label', stashLabel);
-      loadoutTitle.setAttribute('aria-label', 'Loadout');
-      setElementPixelText(stashTitle, stashLabel, PIXEL_TEXT_SCALE_SM);
-      setElementPixelText(loadoutTitle, 'Loadout', PIXEL_TEXT_SCALE_SM);
-    } else {
-      stashTitle.removeAttribute('aria-label');
-      loadoutTitle.removeAttribute('aria-label');
-      for (const title of [stashTitle, loadoutTitle]) {
-        for (const property of ['color', 'font-size', 'line-height']) title.style.removeProperty(property);
-      }
-      stashTitle.textContent = stashLabel;
-      loadoutTitle.textContent = 'Loadout';
-    }
+    this.pixelLabel(this.root.querySelector('#raid-stash-title'), `Stash ${stash.filter(Boolean).length}/${limit}`);
+    this.pixelLabel(this.stashPanel.querySelector('h2'), 'Loadout');
     const kitGrid = this.root.querySelector('#raid-kit');
     const gearGrid = this.root.querySelector('#raid-gear');
     const stashGrid = this.root.querySelector('#raid-stash');
@@ -526,7 +659,10 @@ export class RaidBase {
         const slot = this.slot(key === 'itemSlots' ? kitGrid : gearGrid, item, item ? (anchor) => this.inspectKit(item, key, index, anchor) : null, '',
           locked ? INV_LOCK_SRC : key === 'handSlots' ? ['assets/ui/weapon1.png', 'assets/ui/weapon2.png'][index]
             : key === 'equipmentSlots' ? ['assets/ui/vest.png', 'assets/ui/backpack.png'][index] : null);
-        if (locked) slot.setAttribute('aria-label', 'Locked inventory slot');
+        if (locked) {
+          slot.dataset.locked = 'true';
+          slot.setAttribute('aria-label', 'Locked inventory slot');
+        }
         this.slotPositions.set(slot, { source: 'kit', key, index });
         if (item) this.bindTransfer(slot, 'kit', key, index);
       });
@@ -534,20 +670,13 @@ export class RaidBase {
     for (let i = 0; i < Math.max(limit, stash.length); i++) {
       const item = stash[i];
       const slot = this.slot(stashGrid, item, item ? (anchor) => {
-        const actions = [['Take into loadout', () => this.transferItem('stash', null, i)]];
+        const actions = [];
         const detail = document.createElement('div');
         const description = document.createElement('p');
         description.textContent = getItemDescription(item);
         detail.append(description);
-        if (canRecycleItem(item)) {
-          const yields = getRecycleYields(item, item.amount ?? 1)
-            .map((entry) => getItemDisplayName({ kind: 'material', ...entry })).join(', ');
-          const salvage = document.createElement('p');
-          salvage.textContent = `Recycle yield · ${yields}`;
-          detail.append(salvage);
-          actions.push(['Recycle stack', () => this.transact((next, loadout) => recycleAtBase(next, loadout, i))]);
-        }
-        this.addSplitAction(item, actions, detail, (next, amount) => {
+        this.addRecycleAction(item, actions, (next, player, quantity) => recycleAtBase(next, player, i, quantity));
+        this.addSplitAction(item, actions, (next, amount) => {
           const empty = Array.from({ length: stashLimit(next) }).findIndex((_, index) => !next.stash[index]);
           if (empty < 0) return 'Stash is full.';
           const source = next.stash[i];
@@ -555,13 +684,13 @@ export class RaidBase {
           next.stash[i] = { ...source, amount: source.amount - amount };
         });
         if (raidLevel(this.profile) >= 10 && item.kind === 'material') {
-          const price = (item.amount ?? 1) * 2;
-          actions.push([`Sell · ${price} Cash`, () => this.transact((next) => {
-            next.stash[i] = null;
-            next.cash += price;
+          actions.push(['Sell', () => this.openQuantityDialog('Sell', item, item.amount ?? 1, (next, player, quantity) => {
+            const remaining = (item.amount ?? 1) - quantity;
+            next.stash[i] = remaining ? { ...item, amount: remaining } : null;
+            next.cash += quantity * 2;
           })]);
         }
-        this.inspect(item, actions, detail, anchor);
+        this.inspect(item, actions, detail, anchor, { showClose: false });
       } : null);
       this.slotPositions.set(slot, { source: 'stash', key: null, index: i });
       if (item) this.bindTransfer(slot, 'stash', null, i);
@@ -576,7 +705,7 @@ export class RaidBase {
     description.textContent = getItemDescription(item);
     detail.append(description);
     if (key === 'itemSlots') {
-      this.addSplitAction(item, actions, detail, (next, amount, player) => {
+      this.addSplitAction(item, actions, (next, amount, player) => {
         const empty = player.itemSlots.findIndex((entry, i) => !entry && player.isItemSlotUnlocked(i));
         if (empty < 0) return 'No empty loadout slot.';
         const source = player.itemSlots[index];
@@ -584,36 +713,123 @@ export class RaidBase {
         player.itemSlots[index] = { ...source, amount: source.amount - amount };
       });
     }
-    if (canRecycleItem(item)) {
-      actions.push(['Recycle to stash', () => this.transact((next, player) => {
+    this.addRecycleAction(item, actions, (next, player, quantity) => {
         const current = key === 'handSlots' ? player.suspendHandSlotForDrag(index)
           : key === 'equipmentSlots' ? player.suspendEquipmentForDrag(index) : player.itemSlots[index];
-        if (key === 'itemSlots') player.itemSlots[index] = null;
-        const empty = Array.from({ length: stashLimit(next) }).findIndex((_, index) => !next.stash[index]);
-        if (empty < 0) return 'Make room in the stash first.';
-        next.stash[empty] = current;
-        return recycleAtBase(next, player, empty);
-      })]);
-    }
+        const yields = getRecycleYields(current, quantity);
+        if (!yields?.length) return 'This item cannot be recycled.';
+        const remaining = (current.amount ?? 1) - quantity;
+        if (key === 'itemSlots') player.itemSlots[index] = remaining > 0 ? { ...current, amount: remaining } : null;
+        const stash = stashInventory(next, player);
+        if (applyRecycleYields(stash, yields).length) return 'Make space for the recovered materials.';
+        next.stash = stash.itemSlots;
+        if (!storeInStash(next, player, player.drainLockedInventory())) return 'Not enough stash space.';
+    });
     this.inspect(item, actions, detail, anchor);
   }
 
-  addSplitAction(item, actions, detail, split) {
+  addRecycleAction(item, actions, recycle) {
+    if (canRecycleItem(item)) {
+      actions.push(['Recycle', () => this.openQuantityDialog('Recycle', item, item.amount ?? 1, recycle)]);
+    }
+  }
+
+  addSplitAction(item, actions, split) {
     if (!['material', 'ammo', 'consumable', 'bandage', 'throwable'].includes(item.kind) || !(item.amount > 1)) return;
-    const label = document.createElement('label');
-    label.className = 'raid-split';
+    actions.push(['Split', () => this.openQuantityDialog('Split', item, item.amount - 1,
+      (next, player, quantity) => split(next, quantity, player))]);
+  }
+
+  openQuantityDialog(action, item, maximum, change) {
+    const anchor = this.selectionAnchor;
+    this.closeSelection();
+    const dialog = document.createElement('dialog');
+    dialog.className = 'raid-quantity-dialog';
+    dialog.setAttribute('aria-label', action + ' ' + getItemDisplayName(item));
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = '1';
-    slider.max = String(item.amount - 1);
-    slider.value = String(Math.floor(item.amount / 2));
-    const amountLabel = document.createElement('span');
-    const update = () => { amountLabel.textContent = `Split quantity · ${slider.value}`; };
+    slider.max = String(maximum);
+    slider.value = '1';
+    slider.setAttribute('aria-label', 'Quantity');
+    const preview = document.createElement('div');
+    preview.className = 'raid-recycle-preview';
+    const quantity = document.createElement('div');
+    quantity.className = 'raid-quantity-value';
+    const status = document.createElement('div');
+    status.setAttribute('role', 'status');
+    const update = () => {
+      const count = slider.valueAsNumber;
+      const fill = maximum > 1 ? (count - 1) / (maximum - 1) * 100 : 100;
+      slider.style.setProperty('--raid-slider-fill', fill + '%');
+      this.pixelLabel(quantity, count + ' / ' + maximum + (action === 'Sell' ? '  /  ' + count * 2 + ' Cash' : ''));
+      if (action === 'Sell') {
+        const cash = document.createElement('img');
+        cash.className = 'raid-shop-price-icon';
+        cash.src = 'assets/items/misc/cash.png';
+        cash.alt = '';
+        quantity.append(cash);
+      }
+      const original = document.createElement('div');
+      const originalIcon = document.createElement('img');
+      originalIcon.src = getItemIconSrc(item);
+      originalIcon.alt = getItemDisplayName({ ...item, amount: 1 });
+      const originalAmount = document.createElement('span');
+      this.pixelLabel(originalAmount, String(count));
+      original.append(originalIcon, originalAmount);
+      const equals = document.createElement('span');
+      this.pixelLabel(equals, '=');
+      preview.replaceChildren(original, equals);
+      const materials = getRecycleYields(item, count);
+      if (!materials?.length) {
+        const empty = document.createElement('span');
+        this.pixelLabel(empty, 'No materials');
+        preview.append(empty);
+        return;
+      }
+      for (const material of materials) {
+        const reward = document.createElement('div');
+        const icon = document.createElement('img');
+        const entry = { kind: 'material', ...material };
+        icon.src = getItemIconSrc(entry);
+        icon.alt = getItemDisplayName({ ...entry, amount: 1 });
+        icon.title = icon.alt;
+        const amount = document.createElement('span');
+        this.pixelLabel(amount, String(material.amount));
+        reward.append(icon, amount);
+        preview.append(reward);
+      }
+    };
     slider.addEventListener('input', update);
     update();
-    label.append(amountLabel, slider);
-    detail.append(label);
-    actions.push(['Split stack', () => this.transact((next, player) => split(next, Number(slider.value), player))]);
+    const controls = document.createElement('div');
+    controls.className = 'raid-quantity-actions';
+    controls.append(this.button('Cancel', () => dialog.close()), this.button(action, () => {
+      if (this.transact((next, player) => change(next, player, slider.valueAsNumber))) dialog.close();
+      else this.pixelLabel(status, this.status.getAttribute('aria-label'), 270);
+    }));
+    dialog.append(preview);
+    if (maximum > 1) dialog.append(slider);
+    if (action !== 'Recycle') dialog.append(quantity);
+    dialog.append(status, controls);
+    let pressedBackdrop = false;
+    const outsideDialog = (event) => {
+      const bounds = dialog.getBoundingClientRect();
+      return event.target === dialog && (event.clientX < bounds.left || event.clientX >= bounds.right
+        || event.clientY < bounds.top || event.clientY >= bounds.bottom);
+    };
+    dialog.addEventListener('pointerdown', (event) => { pressedBackdrop = outsideDialog(event); });
+    dialog.addEventListener('click', (event) => {
+      if (pressedBackdrop && outsideDialog(event)) dialog.close();
+      pressedBackdrop = false;
+    });
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      if (anchor?.isConnected) anchor.focus({ preventScroll: true });
+    }, { once: true });
+    this.root.append(dialog);
+    dialog.showModal();
+    if (maximum > 1) slider.focus({ preventScroll: true });
   }
 
   renderCraft() {
@@ -623,13 +839,14 @@ export class RaidBase {
     player.applySaveData(this.profile.kit);
     const inventory = stashInventory(this.profile, player);
     const recipes = getCraftableRecipes(player).map((recipe) => ({ recipe, ready: canCraftRecipe(inventory, recipe) }));
-    recipes.sort((a, b) => Number(b.ready) - Number(a.ready));
+    recipes.sort((a, b) => catalogCategory(a.recipe.output) - catalogCategory(b.recipe.output)
+      || Number(b.ready) - Number(a.ready));
+    let previousCategory = null;
     for (const { recipe, ready } of recipes) {
+      const category = catalogCategory(recipe.output);
+      if (category !== previousCategory) this.appendCatalogHeading(grid, category);
+      previousCategory = category;
       const hasMaterials = inventory.hasMaterials(recipe.costs);
-      const status = ready ? 'Ready' : hasMaterials ? 'Stash full' : 'Missing materials';
-      const card = document.createElement('div');
-      card.className = 'raid-recipe-card';
-      card.dataset.ready = String(ready);
       const detail = document.createElement('div');
       const requirements = document.createElement('ul');
       requirements.className = 'raid-recipe-materials';
@@ -640,21 +857,25 @@ export class RaidBase {
         const icon = document.createElement('img');
         icon.src = getItemIconSrc({ kind: 'material', key });
         icon.alt = '';
-        row.append(icon, `${getItemDisplayName({ kind: 'material', key })} · ${have}/${amount}`);
+        const label = document.createElement('span');
+        this.pixelLabel(label, `${getItemDisplayName({ kind: 'material', key })} ${have}/${amount}`, 240);
+        row.append(icon, label);
         requirements.appendChild(row);
       }
-      detail.append(status, requirements);
+      if (!ready && hasMaterials) {
+        const availability = document.createElement('p');
+        this.pixelLabel(availability, 'Stash full');
+        detail.append(availability);
+      }
+      detail.append(requirements);
       const select = (anchor, keepPosition = false) => {
         this.catalogSelection = recipe.id;
         this.inspect(recipe.output,
-          [['Craft to stash', () => this.transact((next, loadout) => craftAtBase(next, loadout, recipe)), !ready]], detail, anchor, keepPosition);
+          [['Craft', () => this.transact((next, loadout) => craftAtBase(next, loadout, recipe)), !ready]], detail, anchor, { keepPosition });
       };
-      const slot = this.slot(card, recipe.output, select);
+      const slot = this.slot(grid, recipe.output, select);
+      slot.dataset.locked = String(!ready);
       slot.removeAttribute('title');
-      const label = document.createElement('small');
-      label.textContent = status;
-      card.append(label);
-      grid.appendChild(card);
       if (recipe.id === this.catalogSelection) select(slot, true);
     }
   }
@@ -663,12 +884,17 @@ export class RaidBase {
     const grid = this.root.querySelector('#raid-shop');
     grid.replaceChildren();
     const entries = SHOP.map((offer, index) => ({ offer, index }));
+    entries.sort((a, b) => catalogCategory(a.offer.item) - catalogCategory(b.offer.item));
+    let previousCategory = null;
     for (const { offer, index } of entries) {
+      const category = catalogCategory(offer.item);
+      if (category !== previousCategory) this.appendCatalogHeading(grid, category);
+      previousCategory = category;
       const unlocked = raidLevel(this.profile) >= offer.level;
       const price = `${offer.price} Cash`;
       const select = (anchor, keepPosition = false) => {
         this.catalogSelection = index;
-        this.inspect(offer.item, [[unlocked ? `Buy · ${price}` : `Unlocks at level ${offer.level}`,
+        this.inspect(offer.item, [['BUY',
         () => {
           if (!this.transact((next, player) => {
             if (next.cash < offer.price) return 'Not enough cash.';
@@ -681,27 +907,52 @@ export class RaidBase {
               [{ transform: 'scale(1)' }, { transform: 'scale(1.12)', color: '#f5ce86' }, { transform: 'scale(1)' }],
               { duration: 250, easing: 'ease-out' });
           }
-        }, !unlocked || this.profile.cash < offer.price]], price, anchor, keepPosition);
+        }, !unlocked || this.profile.cash < offer.price]], price, anchor, { keepPosition });
       };
-      const slot = this.slot(grid, offer.item, select, unlocked ? '' : `Lv ${offer.level}`);
+      const card = document.createElement('div');
+      card.className = 'raid-shop-offer';
+      const slot = this.slot(card, offer.item, select, unlocked ? '' : `Lv ${offer.level}`);
       slot.dataset.locked = String(!unlocked);
+      slot.setAttribute('aria-label', `${getItemDisplayName(offer.item)}, ${price}${unlocked ? '' : `, level ${offer.level} required`}`);
+      const priceTag = document.createElement('div');
+      priceTag.className = 'raid-shop-price';
+      const cash = document.createElement('img');
+      cash.src = 'assets/items/misc/cash.png';
+      cash.alt = '';
+      const amount = document.createElement('span');
+      this.pixelLabel(amount, offer.price.toLocaleString());
+      priceTag.append(cash, amount);
+      card.append(priceTag);
+      grid.append(card);
       if (index === this.catalogSelection) select(slot, true);
     }
   }
 
-  inspect(item, actions, detail, anchor, keepPosition = false) {
+  appendCatalogHeading(grid, category) {
+    const heading = document.createElement('h3');
+    heading.className = 'raid-catalog-heading';
+    this.pixelLabel(heading, CATALOG_CATEGORIES[category]?.[0] ?? 'Other');
+    grid.append(heading);
+  }
+
+  inspect(item, actions, detail, anchor, { keepPosition = false, showClose = true } = {}) {
     const title = document.createElement('h2');
-    title.textContent = getItemDisplayName(item);
+    this.pixelLabel(title, getItemDisplayName(item), 260);
     const description = detail instanceof HTMLElement ? detail : document.createElement('p');
-    if (typeof detail === 'string') description.textContent = detail || getItemDescription(item);
+    if (typeof detail === 'string') this.pixelLabel(description, detail || getItemDescription(item), 250);
+    else for (const line of description.querySelectorAll('p')) {
+      if (line.textContent) this.pixelLabel(line, line.textContent, 250);
+    }
     title.className = 'inv-context-title';
     description.classList.add('inv-context-desc');
     const buttons = document.createElement('div');
     buttons.className = 'inv-context-actions';
-    const close = this.button('Close', () => this.closeSelection());
-    buttons.append(...actions.map((action) => this.button(...action)), close);
-    this.selection.replaceChildren(title, description, buttons);
+    buttons.append(...actions.map((action) => this.button(...action)));
+    if (showClose) buttons.append(this.button('Close', () => this.closeSelection()));
+    this.selection.replaceChildren(title, description);
+    if (buttons.childElementCount) this.selection.append(buttons);
     this.selection.classList.remove('hidden');
+    this.selectionAnchor = anchor;
     if (keepPosition) return;
     const rect = anchor.getBoundingClientRect();
     const width = this.selection.offsetWidth;
@@ -714,9 +965,79 @@ export class RaidBase {
     this.selection.style.top = `${Math.max(8, Math.min(rect.top, maxY - height - 8))}px`;
   }
 
-  closeSelection() {
+  closeSelection(restoreFocus = false) {
     this.catalogSelection = null;
     this.selection.classList.add('hidden');
+    if (restoreFocus && this.selectionAnchor?.isConnected) {
+      this.selectionAnchor.focus({ preventScroll: true });
+    }
+    this.selectionAnchor = null;
+  }
+
+  handleMenuKey(event, scope = this.root) {
+    if (scope.classList.contains('hidden') || event.altKey || event.ctrlKey || event.metaKey) return false;
+    const modal = scope === this.root ? [...scope.querySelectorAll('dialog[open]')].at(-1) : null;
+    if (event.code === 'Escape' && scope === this.root) {
+      if (event.repeat) return true;
+      if (modal) modal.close();
+      else if (!this.selection.classList.contains('hidden')) this.closeSelection(true);
+      return true;
+    }
+
+    const key = event.code;
+    if (!['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(key)) return false;
+    const horizontal = key === 'KeyA' || key === 'KeyD';
+    const step = key === 'KeyA' || key === 'KeyW' ? -1 : 1;
+    const focused = document.activeElement;
+    if (horizontal && focused?.matches('input[type="range"]:enabled') && (modal ?? scope).contains(focused)) {
+      if (step < 0) focused.stepDown();
+      else focused.stepUp();
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+      focused.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
+    const tooltipOpen = scope === this.root && !this.selection.classList.contains('hidden');
+    if (!modal && !tooltipOpen && horizontal && scope === this.root && focused?.matches('[data-station]')) {
+      const tabs = [...scope.querySelectorAll('[data-station]')];
+      const index = tabs.findIndex((tab) => tab.dataset.station === this.station);
+      const tab = tabs[(index + step + tabs.length) % tabs.length];
+      tab.focus();
+      tab.click();
+      return true;
+    }
+
+    const options = [...(modal ?? (tooltipOpen ? this.selection : scope))
+      .querySelectorAll('button:enabled, input:enabled')]
+      .filter((element) => element.getClientRects().length > 0);
+    if (options.length) {
+      const index = options.indexOf(focused);
+      if (index >= 0) {
+        const current = focused.getBoundingClientRect();
+        const centerX = current.left + current.width / 2;
+        const centerY = current.top + current.height / 2;
+        let closest = null;
+        let bestDistance = Infinity;
+        for (const option of options) {
+          const bounds = option.getBoundingClientRect();
+          const y = bounds.top + bounds.height / 2;
+          const x = bounds.left + bounds.width / 2;
+          const forward = step * (horizontal ? x - centerX : y - centerY);
+          const sideways = Math.abs(horizontal ? y - centerY : x - centerX);
+          if (forward <= 4 || sideways > forward * 2) continue;
+          const distance = forward + sideways * 2;
+          if (distance < bestDistance) {
+            closest = option;
+            bestDistance = distance;
+          }
+        }
+        closest?.focus();
+        return true;
+      }
+      const next = index < 0 ? (step > 0 ? 0 : options.length - 1) : (index + step + options.length) % options.length;
+      options[next].focus();
+    }
+    return true;
   }
 
   slot(parent, item, action, badge = '', placeholderIcon = null) {
@@ -752,18 +1073,35 @@ export class RaidBase {
     }
     if (badge) {
       const tag = document.createElement('span');
-      tag.textContent = badge;
+      this.pixelLabel(tag, badge);
       slot.appendChild(tag);
+    }
+    if (item && ['weapon', 'melee', 'equipment'].includes(item.kind) && itemDurability(item) < 100) {
+      const durability = itemDurability(item);
+      const bar = document.createElement('div');
+      bar.className = 'raid-slot-durability';
+      bar.style.setProperty('--durability', `${durability}%`);
+      bar.style.setProperty('--durability-color', durability <= 25 ? '#d64b3b' : durability <= 60 ? '#d4a24a' : '#74a95c');
+      bar.setAttribute('aria-label', `Durability ${Math.ceil(durability)}%`);
+      slot.append(bar);
     }
     parent.appendChild(slot);
     return slot;
   }
 
-  button(label, action, disabled = false) {
+  button(label, action, disabled = false, iconSrc = null) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'ui-slice-button';
-    button.textContent = label;
+    this.pixelLabel(button, label, 120);
+    if (iconSrc) {
+      button.setAttribute('aria-label', `${label} Cash`);
+      const icon = document.createElement('img');
+      icon.className = 'raid-shop-price-icon';
+      icon.src = iconSrc;
+      icon.alt = '';
+      button.append(icon);
+    }
     button.disabled = disabled;
     button.addEventListener('click', action);
     return button;
