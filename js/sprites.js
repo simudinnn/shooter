@@ -61,6 +61,8 @@ const WORLD_FOLIAGE_SPRITES = [
 ];
 
 const WORLD_ASSET_PATHS = Object.fromEntries([
+  ['hatch_closed', 'assets/world/hatch_closed.png'],
+  ['hatch_open', 'assets/world/hatch_open.png'],
   ...WORLD_FLOOR_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
   ...WORLD_FOLIAGE_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
 ]);

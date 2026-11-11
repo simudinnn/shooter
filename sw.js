@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v414';
+const CACHE = 'robot-ruins-v417';
 
 function buildingKitSprites() {
   return [
@@ -163,6 +163,8 @@ const SHELL = [
 ];
 
 const ASSETS = [
+  './assets/world/hatch_closed.png',
+  './assets/world/hatch_open.png',
   ...PLAYER_SPRITES,
   ...WEAPON_SPRITES,
   ...WORLD_SPRITES,

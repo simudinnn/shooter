@@ -966,14 +966,11 @@ function clearAstarPlan(nav) {
   nav.astarAt = -999;
 }
 
-function maybeRefreshAstarPath(robot, world, buildings, goal, nav, time) {
+function maybeRefreshAstarPath(robot, world, buildings, goal, nav, time, threshold) {
   const stuck = nav.stuckTime ?? 0;
-  if (stuck < STUCK_ASTAR_THRESHOLD) {
-    if (nav.astarPath) clearAstarPlan(nav);
-    return;
-  }
+  if (stuck < threshold) return;
 
-  const goalKey = `${goal.kind}:${Math.round(goal.x)}:${Math.round(goal.z)}`;
+  const goalKey = `${goal.kind}:${Math.floor(goal.x / TILE)}:${Math.floor(goal.z / TILE)}`;
   if (nav.astarGoalKey === goalKey && (time - (nav.astarAt ?? -999)) < ASTAR_PATH_TTL) {
     return;
   }
@@ -1292,7 +1289,7 @@ export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 6
   const nav = ensureNavState(robot);
   const goal = getMindGoal(robot, player, buildings, world);
   const navShape = robot.getMoveCollider();
-  const goalKey = `${goal.kind}:${Math.round(goal.x)}:${Math.round(goal.z)}`;
+  const goalKey = `${goal.kind}:${Math.floor(goal.x / TILE)}:${Math.floor(goal.z / TILE)}`;
   if (nav.goalKey !== goalKey) {
     nav.goalKey = goalKey;
     nav.stuckTime = 0;
@@ -1308,8 +1305,8 @@ export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 6
   const nearWall = isNearNavObstacle(world, robot.x, robot.z, buildings);
   const astarAfter = nearWall ? STUCK_ASTAR_NEAR_WALL : STUCK_ASTAR_THRESHOLD;
 
-  maybeRefreshAstarPath(robot, world, buildings, goal, nav, time);
-  if ((nav.stuckTime ?? 0) >= astarAfter && nav.astarPath) {
+  maybeRefreshAstarPath(robot, world, buildings, goal, nav, time, astarAfter);
+  if (nav.astarPath) {
     const astarDir = followAstarPath(robot, nav, goal);
     if (astarDir) {
       return { dirX: astarDir.dirX, dirZ: astarDir.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
@@ -1332,7 +1329,8 @@ export function noteChaseMoveResult(robot, moved, dt) {
     nav.anchorZ = robot.z;
     nav.anchorTime = 0;
   }
-  if (Math.hypot(robot.x - nav.anchorX, robot.z - nav.anchorZ) > anchorEps) {
+  const madeProgress = Math.hypot(robot.x - nav.anchorX, robot.z - nav.anchorZ) > anchorEps;
+  if (madeProgress) {
     nav.anchorX = robot.x;
     nav.anchorZ = robot.z;
     nav.anchorTime = 0;
@@ -1340,14 +1338,8 @@ export function noteChaseMoveResult(robot, moved, dt) {
     nav.anchorTime = (nav.anchorTime ?? 0) + dt;
   }
 
-  if (moved) {
-    nav.stuckTime = 0;
-    nav.idleTime = 0;
-    clearAstarPlan(nav);
-  } else {
-    nav.stuckTime = (nav.stuckTime ?? 0) + dt;
-    nav.idleTime = (nav.idleTime ?? 0) + dt;
-  }
+  nav.stuckTime = madeProgress ? 0 : (nav.stuckTime ?? 0) + dt;
+  nav.idleTime = moved ? 0 : (nav.idleTime ?? 0) + dt;
 }
 
 export function canMeleeTarget(world, ax, az, tx, tz) {

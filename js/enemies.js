@@ -270,7 +270,7 @@ export class Robot {
     if (!ignoreRobots) {
       applyApproachPush(this, prevX, prevZ, this.x, this.z, entityPushRadius(this, PPU), targets, 0.24, world, PPU);
     }
-    if (ignoreRobots) this._softSeparateFromRobots(robots);
+    if (ignoreRobots) this._softSeparateFromRobots(robots, world, worldCol, moveOpts);
     if (world.checkCollisionShape(this.x, this.z, worldCol, false, moveOpts)) {
       const dep = world.depenetrateShape(this.x, this.z, worldCol);
       this.x = dep.x;
@@ -279,7 +279,7 @@ export class Robot {
   }
 
   /** Mild spacing so chasing robots do not stack on the same pixel. */
-  _softSeparateFromRobots(robots) {
+  _softSeparateFromRobots(robots, world, shape, moveOpts) {
     for (const other of robots) {
       if (other === this || !other.alive || other.emerging) continue;
       const dx = this.x - other.x;
@@ -288,8 +288,9 @@ export class Robot {
       const minDist = (this.radius + other.radius) * 0.72;
       if (dist >= minDist || dist < 1e-5) continue;
       const push = ((minDist - dist) / dist) * 0.45;
-      this.x += dx * push;
-      this.z += dz * push;
+      const position = world.moveAxisShape(this.x, this.z, dx * push, dz * push, shape, moveOpts);
+      this.x = position.x;
+      this.z = position.z;
     }
   }
 
@@ -618,6 +619,7 @@ export class Scout extends Robot {
       phase: 'ready',
       chargeLeft: 0,
       reloadLeft: 0,
+      aimTime: 0,
       burstLeft: 0,
       burstTimer: 0,
       animStart: null,
@@ -716,7 +718,10 @@ export class Scout extends Robot {
     const chaseRange = 58 * (player.getStealthMult?.() ?? 1);
     const detectRange = getEnemyDetectRange(this, player, SCOUT_DETECT_RANGE);
     const canSee = canEnemySeePlayer(this, player, world, buildings, detectRange);
-    if (!canSee) this._abortShoot(true);
+    this.shoot.reloadLeft = Math.max(0, this.shoot.reloadLeft - dt);
+    const canStartCharge = canSee && dist < detectRange && dist >= this.meleeRange + player.radius
+      && this.shoot.reloadLeft === 0 && onShoot;
+    this.shoot.aimTime = canStartCharge ? this.shoot.aimTime + dt : 0;
     updateEnemySpotTimer(this, canSee, dt);
     updateEnemyLastKnown(this, player, canSee);
 
@@ -737,7 +742,16 @@ export class Scout extends Robot {
         if (this.shoot.phase === 'charging') {
           this.shoot.chargeLeft -= dt;
           this.bob = 0;
-          if (this.shoot.chargeLeft <= 0) this._beginBurst(onShoot);
+          if (this.shoot.chargeLeft <= 0) {
+            if (world.hasLineOfSight(this.x, this.z, player.x, player.z)) this._beginBurst(onShoot);
+            else {
+              this._abortShoot(true);
+              this.shoot.reloadLeft = 1;
+            }
+          }
+        } else if (!world.hasLineOfSight(this.x, this.z, player.x, player.z)) {
+          this._abortShoot(true);
+          this.shoot.reloadLeft = 1;
         } else {
           this.shoot.burstTimer -= dt;
           while (this.shoot.burstTimer <= 0 && this.shoot.burstLeft > 0) {
@@ -762,12 +776,12 @@ export class Scout extends Robot {
           this.meleeCooldown = this.attackRate;
         }
       } else if (canSee && dist < detectRange && onShoot) {
-        if (this.shoot.reloadLeft > 0) {
-          this.shoot.reloadLeft -= dt;
+        if (this.shoot.aimTime < 0.65) {
           this._abortShoot();
           moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz);
         } else if (this.shoot.phase === 'ready') {
           this.shoot.phase = 'charging';
+          this.shoot.aimTime = 0;
           this.shoot.chargeLeft = this.shoot.chargeDuration;
           this.shoot.animStart = performance.now() / 1000;
         }

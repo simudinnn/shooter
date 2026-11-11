@@ -556,21 +556,19 @@ class Game {
     const startAngle = Math.random() * Math.PI * 2;
     const hatches = [];
     for (let sector = 0; sector < 4; sector++) {
-      for (let attempt = 0; attempt < 8; attempt++) {
+      for (let attempt = 0; attempt < 16; attempt++) {
         const angle = startAngle + sector * Math.PI / 2 + (attempt % 2 ? -1 : 1) * attempt * 0.09;
         const radius = 145 + attempt * 16;
-        const x = origin.x + Math.sin(angle) * radius;
-        const z = origin.z + Math.cos(angle) * radius;
+        const x = Math.round((origin.x + Math.sin(angle) * radius) / TILE) * TILE;
+        const z = Math.round((origin.z + Math.cos(angle) * radius) / TILE) * TILE;
         this.world.prewarmGround(x, z, 1);
-        const point = this.world.ensureClearSpawnPosition(x, z, 2);
-        if (this.world.checkCollision(point.x, point.z, 2)) continue;
-        if (Math.hypot(point.x - origin.x, point.z - origin.z) < 110) continue;
-        if (hatches.some((entry) => Math.hypot(point.x - entry.x, point.z - entry.z) < 140)) continue;
-        hatches.push({ ...point, state: 'closed', remaining: 0 });
+        if (!this.world.isValidHatchSite(x, z)) continue;
+        if (hatches.some((entry) => Math.hypot(x - entry.x, z - entry.z) < 140)) continue;
+        hatches.push({ x, z, state: 'closed', remaining: 0 });
         break;
       }
     }
-    if (!hatches.length) hatches.push({ x: origin.x, z: origin.z, state: 'closed', remaining: 0 });
+    if (!hatches.length) throw new Error('No clear hatch site outside town.');
     return hatches;
   }
 
@@ -589,7 +587,8 @@ class Game {
       || Math.hypot(hatch.x - this.player.x, hatch.z - this.player.z) > EXTRACT_RADIUS) return false;
     if (this.mobile) return true;
     const point = this._worldToScreen(hatch.x, hatch.z);
-    return Math.abs(point.x - this.mouse.sx) <= 18 && Math.abs(point.y - this.mouse.sy) <= 12;
+    const halfSize = TILE * PPU;
+    return Math.abs(point.x - this.mouse.sx) <= halfSize && Math.abs(point.y - this.mouse.sy) <= halfSize;
   }
 
   _updateExtraction(dt) {
@@ -599,7 +598,12 @@ class Game {
     for (const hatch of this.hatches) {
       if (hatch.state === 'calling') {
         hatch.remaining = Math.max(0, hatch.remaining - dt);
-        if (hatch.remaining === 0) hatch.state = 'open';
+        if (hatch.remaining === 0) {
+          hatch.state = 'open';
+          for (let puff = 0; puff < 5; puff++) {
+            this.particles.push(...createRobotSmoke(hatch.x, hatch.z, .5));
+          }
+        }
       }
       const gap = Math.hypot(hatch.x - this.player.x, hatch.z - this.player.z);
       if (gap < distance) {
@@ -2452,15 +2456,8 @@ class Game {
     for (const hatch of this.hatches ?? []) {
       if (!inView(hatch.x, hatch.z, EXTRACT_RADIUS)) continue;
       const point = worldToScreen(hatch.x, hatch.z);
-      const phase = hatch.state === 'open' ? 1 : hatch.state === 'calling' ? 1 - hatch.remaining / 10 : 0;
-      ctx.fillStyle = '#302a24';
-      ctx.fillRect(point.x - 15, point.y - 9, 30, 18);
-      ctx.fillStyle = '#100e0b';
-      ctx.fillRect(point.x - 12, point.y - 6, 24, 12);
-      ctx.fillStyle = '#827053';
-      ctx.fillRect(point.x - 12, point.y - 6, Math.round(24 * (1 - phase)), 12);
-      ctx.fillStyle = hatch.state === 'open' ? '#85d79c' : '#e6b558';
-      ctx.fillRect(point.x - 2, point.y - 10, 4, 3);
+      this.sprites.drawPropSprite(ctx, hatch.state === 'open' ? 'hatch_open' : 'hatch_closed',
+        point.x, point.y, 2 * tilePx, { anchor: 'center' });
       if (hatch === this.nearestHatch && this._extractElapsed > 0) {
         ctx.beginPath();
         ctx.arc(point.x, point.y, 20, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * this._extractElapsed / EXTRACT_SECONDS);

@@ -963,6 +963,16 @@ export class World {
     return true;
   }
 
+  isValidHatchSite(x, z) {
+    if (this.checkCollision(x, z, TILE)) return false;
+    for (const dx of [-0.5, 0.5]) {
+      for (const dz of [-0.5, 0.5]) {
+        if (!this._isValidPlayerSpawn(x + dx * TILE, z + dz * TILE)) return false;
+      }
+    }
+    return true;
+  }
+
   /** Nudge spawn point out of walls/buildings after nearby chunks finish generating. */
   ensureClearSpawnPosition(x, z, radius = PLAYER_RADIUS) {
     if (!this.checkCollision(x, z, radius) && this._isValidPlayerSpawn(x, z)) {

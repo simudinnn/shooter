@@ -231,6 +231,12 @@ export class RaidBase {
     }, true);
     this.stashPanel = root.querySelector('[data-base-panel="stash"]');
     this.workspace = this.stashPanel.parentElement;
+    this.workspace.addEventListener('scroll', () => {
+      if (this.selectionAnchor?.isConnected && !this.selection.classList.contains('hidden')
+        && matchMedia('(hover: none) and (pointer: coarse)').matches) {
+        this.positionSelection(this.selectionAnchor);
+      }
+    }, { passive: true });
     this.deployDialog = root.querySelector('#raid-deploy-dialog');
     this.station = 'deploy';
     this.catalogSelection = null;
@@ -977,8 +983,16 @@ export class RaidBase {
     if (catalog && !keepPosition) {
       const workspace = this.workspace.getBoundingClientRect();
       const item = anchor.getBoundingClientRect();
-      this.workspace.scrollTop += item.top + item.height / 2 - workspace.top - workspace.height / 2;
+      this.workspace.scrollTo({
+        top: this.workspace.scrollTop + item.top + item.height / 2 - workspace.top - workspace.height / 2,
+        behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+      });
     }
+    this.positionSelection(anchor);
+  }
+
+  positionSelection(anchor) {
+    const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
     const rect = anchor.getBoundingClientRect();
     const width = this.selection.offsetWidth;
     const height = this.selection.offsetHeight;
