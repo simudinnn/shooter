@@ -3515,21 +3515,11 @@ body.mobile-ui #raid-extract-hud {
     repeating-linear-gradient(90deg, #b6a66a12 0 1px, transparent 1px 24px),
     radial-gradient(ellipse at 50% 70%, #53412c, #222823 62%, #181e1c);
 }
-#raid-base .raid-base-mission::before,
 #raid-base .raid-base-mission::after {
   content: "";
   position: absolute;
   pointer-events: none;
   z-index: -1;
-}
-#raid-base .raid-base-mission::before {
-  inset: 8px;
-  background:
-    linear-gradient(#d5ad64, #d5ad64) top left / 18px 2px,
-    linear-gradient(#d5ad64, #d5ad64) top left / 2px 18px,
-    linear-gradient(#d5ad64, #d5ad64) bottom right / 18px 2px,
-    linear-gradient(#d5ad64, #d5ad64) bottom right / 2px 18px;
-  background-repeat: no-repeat;
 }
 #overlay #raid-base .raid-base-mission #raid-deploy {
   box-shadow: 0 0 0 1px #da8658, 0 0 20px #b9403b66;
@@ -3701,21 +3691,6 @@ body.mobile-ui #raid-extract-hud {
 }
 #raid-deploy-dialog .raid-station-description { display: none; }
 
-#raid-base :is([data-base-panel="craft"], [data-base-panel="shop"], [data-base-panel="stash"] > .raid-base-section) {
-  position: relative;
-}
-#raid-base :is([data-base-panel="craft"], [data-base-panel="shop"], [data-base-panel="stash"] > .raid-base-section)::after {
-  content: "";
-  position: absolute;
-  inset: 5px;
-  pointer-events: none;
-  background:
-    linear-gradient(#d5ad64, #d5ad64) top right / 16px 2px,
-    linear-gradient(#d5ad64, #d5ad64) top right / 2px 16px,
-    linear-gradient(#957345, #957345) bottom left / 16px 2px,
-    linear-gradient(#957345, #957345) bottom left / 2px 16px;
-  background-repeat: no-repeat;
-}
 
 #raid-base .raid-base-workspace > [data-base-panel]:not(.raid-base-overview),
 #raid-base .raid-base-overview > .raid-base-section,
@@ -3780,5 +3755,14 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
     grid-row: 1 / 3;
     min-width: min(20vw, 150px);
     margin: 0;
+  }
+}
+
+#raid-settings input[type="range"] { touch-action: none; }
+@media (hover: none) and (pointer: coarse) and (orientation: landscape) {
+  #overlay #raid-base .raid-base-mission #raid-deploy {
+    min-width: min(26vw, 192px);
+    min-height: 46px;
+    margin-inline-end: clamp(12px, 3vw, 28px);
   }
 }
