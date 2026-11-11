@@ -3122,15 +3122,6 @@ body.mobile-ui #raid-extract-hud {
 }
 
 @media (hover: none) and (pointer: coarse) {
-  body.mobile-ui #game-canvas {
-    clip-path: inset(
-      max(0px, calc((100% - 100dvh) / 2 + env(safe-area-inset-top, 0px)))
-      max(0px, calc((100% - 100dvw) / 2 + env(safe-area-inset-right, 0px)))
-      max(0px, calc((100% - 100dvh) / 2 + env(safe-area-inset-bottom, 0px)))
-      max(0px, calc((100% - 100dvw) / 2 + env(safe-area-inset-left, 0px)))
-    );
-  }
-
   #raid-base {
     --raid-safe-left: max(8px, env(safe-area-inset-left, 0px));
     --raid-safe-right: max(8px, env(safe-area-inset-right, 0px));
