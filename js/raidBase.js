@@ -772,22 +772,12 @@ export class RaidBase {
     slider.setAttribute('aria-label', 'Quantity');
     const preview = document.createElement('div');
     preview.className = 'raid-recycle-preview';
-    const quantity = document.createElement('div');
-    quantity.className = 'raid-quantity-value';
     const status = document.createElement('div');
     status.setAttribute('role', 'status');
     const update = () => {
       const count = slider.valueAsNumber;
       const fill = maximum > 1 ? (count - 1) / (maximum - 1) * 100 : 100;
       slider.style.setProperty('--raid-slider-fill', fill + '%');
-      this.pixelLabel(quantity, count + ' / ' + maximum + (action === 'Sell' ? '  /  ' + count * 2 + ' Cash' : ''));
-      if (action === 'Sell') {
-        const cash = document.createElement('img');
-        cash.className = 'raid-shop-price-icon';
-        cash.src = 'assets/items/misc/cash.png';
-        cash.alt = '';
-        quantity.append(cash);
-      }
       const original = document.createElement('div');
       const originalIcon = document.createElement('img');
       originalIcon.src = getItemIconSrc(item);
@@ -796,8 +786,19 @@ export class RaidBase {
       this.pixelLabel(originalAmount, String(count));
       original.append(originalIcon, originalAmount);
       const equals = document.createElement('span');
-      this.pixelLabel(equals, '=');
+      this.pixelLabel(equals, action === 'Split' ? '/' : '=');
       preview.replaceChildren(original, equals);
+      if (action === 'Split' || action === 'Sell') {
+        const result = original.cloneNode(true);
+        const icon = result.querySelector('img');
+        if (action === 'Sell') {
+          icon.src = 'assets/items/misc/cash.png';
+          icon.alt = 'Cash';
+        }
+        this.pixelLabel(result.querySelector('span'), String(action === 'Sell' ? count * 2 : maximum + 1 - count));
+        preview.append(result);
+        return;
+      }
       const materials = getRecycleYields(item, count);
       if (!materials?.length) {
         const empty = document.createElement('span');
@@ -828,7 +829,6 @@ export class RaidBase {
     }));
     dialog.append(preview);
     if (maximum > 1) dialog.append(slider);
-    if (action !== 'Recycle') dialog.append(quantity);
     dialog.append(status, controls);
     let pressedBackdrop = false;
     const outsideDialog = (event) => {
@@ -971,13 +971,34 @@ export class RaidBase {
     if (buttons.childElementCount) this.selection.append(buttons);
     this.selection.classList.remove('hidden');
     this.selectionAnchor = anchor;
-    if (keepPosition) return;
+    const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
+    const catalog = touch && anchor.closest('#raid-shop, #raid-recipes');
+    if (keepPosition && !catalog) return;
+    if (catalog && !keepPosition) {
+      const workspace = this.workspace.getBoundingClientRect();
+      const item = anchor.getBoundingClientRect();
+      this.workspace.scrollTop += item.top + item.height / 2 - workspace.top - workspace.height / 2;
+    }
     const rect = anchor.getBoundingClientRect();
     const width = this.selection.offsetWidth;
     const height = this.selection.offsetHeight;
     const viewport = window.visualViewport;
     const maxX = viewport?.width ?? window.innerWidth;
     const maxY = viewport?.height ?? window.innerHeight;
+    if (touch) {
+      const bounds = (this.deployDialog.open ? this.deployDialog : this.root.querySelector('.raid-base-frame')).getBoundingClientRect();
+      const leftEdge = Math.max(bounds.left, viewport?.offsetLeft ?? 0) + 8;
+      const topEdge = Math.max(bounds.top, viewport?.offsetTop ?? 0) + 8;
+      const rightEdge = Math.min(bounds.right, (viewport?.offsetLeft ?? 0) + maxX) - 8;
+      const bottomEdge = Math.min(bounds.bottom, (viewport?.offsetTop ?? 0) + maxY) - 8;
+      this.selection.style.maxWidth = `${rightEdge - leftEdge}px`;
+      this.selection.style.maxHeight = `${bottomEdge - topEdge}px`;
+      const box = this.selection.getBoundingClientRect();
+      const x = rect.right + box.width + 5 <= rightEdge ? rect.right + 5 : rect.left - box.width - 5;
+      this.selection.style.left = `${Math.max(leftEdge, Math.min(x, rightEdge - box.width))}px`;
+      this.selection.style.top = `${Math.max(topEdge, Math.min(rect.top + (rect.height - box.height) / 2, bottomEdge - box.height))}px`;
+      return;
+    }
     const left = rect.right + width + 8 <= maxX ? rect.right + 5 : rect.left - width - 5;
     this.selection.style.left = `${Math.max(8, Math.min(left, maxX - width - 8))}px`;
     this.selection.style.top = `${Math.max(8, Math.min(rect.top, maxY - height - 8))}px`;
