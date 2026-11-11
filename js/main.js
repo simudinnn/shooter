@@ -963,7 +963,6 @@ class Game {
     });
 
     if (this.mobile) {
-      this.el.mobileControls.classList.remove('hidden');
       document.body.classList.add('mobile-ui');
     }
   }
@@ -1293,7 +1292,7 @@ class Game {
 
     this.lastTime = performance.now();
 
-    this._scheduleFrame();
+    this._loop(this.lastTime);
   }
 
   _applySaveState(data) {
@@ -3163,5 +3162,9 @@ class Game {
   }
 }
 
-const game = new Game();
-window.game = game;
+try {
+  window.game = new Game();
+} catch (error) {
+  console.error('Game startup failed:', error);
+  document.getElementById('startup-error').classList.remove('hidden');
+}

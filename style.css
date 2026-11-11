@@ -230,6 +230,23 @@ canvas {
   pointer-events: auto;
 }
 
+#startup-error {
+  position: absolute;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
+  color: #efe5d3;
+  background: #151817;
+}
+#startup-error button {
+  padding: 8px 16px;
+  border: 1px solid #957345;
+  background: #942521;
+}
+
 #start-screen,
 #game-over,
 #pause-menu,

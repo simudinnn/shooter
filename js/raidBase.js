@@ -252,8 +252,8 @@ export class RaidBase {
     this.music.muted = !musicEnabled.checked;
     this.soundEnabled = soundEnabled.checked;
     const applyVolume = () => {
-      this.music.volume = musicVolume.valueAsNumber / 100;
-      this.soundVolume = soundVolume.valueAsNumber / 100;
+      this.music.volume = Number(musicVolume.value) / 100;
+      this.soundVolume = Number(soundVolume.value) / 100;
       setSound(this.soundEnabled, this.soundVolume);
     };
     applyVolume();
