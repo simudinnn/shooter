@@ -1,4 +1,4 @@
-import { TILE, CHUNK_WORLD, CHUNK_TILES, isInBase, snapWorldPoint, PLAYER_SPAWN_TOWN_CLEARANCE_TILES } from './worldGen.js';
+import { TILE, CHUNK_WORLD, CHUNK_TILES, hash01, isInBase, snapWorldPoint, PLAYER_SPAWN_TOWN_CLEARANCE_TILES } from './worldGen.js';
 import { INTERNAL_W, INTERNAL_H } from './renderConfig.js';
 import {
   BUILDING_MAX_W,
@@ -94,8 +94,17 @@ function generateTownLotCells(lot, seedA, seedB) {
       cellData = generateBuildingCells(lot.w, lot.h, 'rect');
     }
     cellData = applyLotDoor(cellData, lot);
+    if (hash01(seedA + 61, seedB + 17) < 0.35) addRearDoor(cellData);
   }
   return cellData;
+}
+
+function addRearDoor(cellData) {
+  const { cells, w } = cellData;
+  const northTx = Math.floor(w / 2);
+  if (![northTx - 1, northTx, northTx + 1, w + northTx].every((index) => cells[index] === CELL_FLOOR)) return;
+  cells[northTx] = CELL_DOOR;
+  cellData.rearDoorTx = northTx;
 }
 
 /** Screen-space center + half extents for door interact hover (internal resolution). */
@@ -266,6 +275,7 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
     for (let tz = 0; tz < h; tz++) {
       for (let tx = 0; tx < w; tx++) {
         if (!isFloorCell(building, tx, tz)) continue;
+        if (tz === 0) continue;
         const tileName = (tx + tz) % 4 === 0 && hasSprite(sprites, style.floor[1])
           ? style.floor[1]
           : style.floor[0];
@@ -291,13 +301,15 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
     drawPlaceholderFloor(ctx, x, y, fw, fh);
   }
 
-  const doorTx = building.doorTx ?? Math.floor(building.w / 2);
-  const doorTz = building.doorTz ?? building.h - 1;
-  const { x: doorX, y: doorY } = buildingTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
   const matName = buildingStyle(building).doorMat;
-  if (!sprites || !drawBuildingTile(sprites, ctx, matName, doorX, doorY, tilePx)) {
-    ctx.fillStyle = '#4a3828';
-    ctx.fillRect(doorX, doorY, tilePx, tilePx);
+  for (const door of building.rearDoor ? [building, building.rearDoor] : [building]) {
+    const doorTx = door.doorTx ?? Math.floor(w / 2);
+    const doorTz = door.doorTz ?? h - 1;
+    const { x: doorX, y: doorY } = buildingTileTopLeft(originX, originZ, doorTx, doorTz, worldToScreen);
+    if (!sprites || !drawBuildingTile(sprites, ctx, matName, doorX, doorY, tilePx)) {
+      ctx.fillStyle = '#4a3828';
+      ctx.fillRect(doorX, doorY, tilePx, tilePx);
+    }
   }
 }
 
@@ -426,6 +438,8 @@ export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, spr
 
   if (sprites) {
     const primary = wallSpriteId(style, orient);
+    const windowSprite = wall.window ? primary.replace('bld_wall_', 'bld_window_') : null;
+    if (windowSprite && drawBuildingTile(sprites, ctx, windowSprite, tileX, tileY, tilePx)) return;
     const candidates = orient === 'ew'
       ? [primary, 'bld_wall_ew']
       : orient === 'corner'
@@ -456,7 +470,7 @@ export function drawDecorPiece(ctx, sprites, piece, tilePx, worldToScreen) {
   if (!sprites.ensureSprite(piece.sprite)) return;
 
   const anchorX = piece.obstacle?.x ?? piece.x;
-  const anchorZ = piece.obstacle?.z ?? piece.z;
+  const anchorZ = piece.interior ? piece.z : (piece.obstacle?.z ?? piece.z);
   const ss = worldToScreen(anchorX, anchorZ);
 
   if (piece.interior) {
@@ -483,9 +497,10 @@ export function drawBuildingDecor(ctx, building, worldToScreen, tilePx, sprites 
 }
 
 export class BuildingManager {
-  constructor(world, chests = null) {
+  constructor(world, chests = null, onDoorChange = null) {
     this.world = world;
     this.chests = chests;
+    this.onDoorChange = onDoorChange;
     this.buildings = [];
     this.roofAlpha = ROOF_ALPHA_OUTSIDE;
     this.insideBuilding = null;
@@ -532,6 +547,7 @@ export class BuildingManager {
     if (hasFridge && hasTable) return;
 
     const reserved = [...(building.chestTiles ?? (building.chestTile ? [building.chestTile] : []))];
+    reserved.push(...building.walls.filter((wall) => wall.window));
     const doorFacing = building.doorFacing ?? 'south';
     reserved.push(...doorApproachExcludeTiles(
       building.doorTx,
@@ -612,7 +628,7 @@ export class BuildingManager {
   getNearbyDoor(player, maxDist = DOOR_INTERACT_DIST) {
     let best = null;
     let bestD = maxDist + (player.radius ?? 0);
-    for (const building of this.buildings) {
+    for (const building of this.buildings.flatMap((house) => house.rearDoor ? [house, house.rearDoor] : [house])) {
       if (!isNearDoor(building, player.x, player.z, maxDist)) continue;
       const pos = getDoorWorldPos(building);
       const d = Math.hypot(player.x - pos.x, player.z - pos.z);
@@ -630,11 +646,14 @@ export class BuildingManager {
 
   toggleDoor(building, player = null) {
     if (!building) return false;
+    if (!player && !building.doorOpen && performance.now() < (building.manualCloseUntil ?? 0)) return false;
     if (building.doorOpen && player && wouldClosingDoorTrapPlayer(building, player)) {
       return false;
     }
     building.doorOpen = !building.doorOpen;
+    if (player && !building.doorOpen) building.manualCloseUntil = performance.now() + 1600;
     this._syncDoorObstacle(building);
+    this.onDoorChange?.(building.doorOpen, getDoorWorldPos(building));
     return true;
   }
 
@@ -738,10 +757,12 @@ export class BuildingManager {
     building.obstacles = [];
     this._registerObstacles(building);
     this._syncDoorObstacle(building);
+    if (building.rearDoor) this._syncDoorObstacle(building.rearDoor);
     this._clearFoliageForBuilding(world, building);
     this.buildings.push(building);
     this.chests?.spawnInBuilding(building, chunk);
     const reserved = [...(building.chestTiles ?? (building.chestTile ? [building.chestTile] : []))];
+    reserved.push(...building.walls.filter((wall) => wall.window));
     const doorFacing = building.doorFacing ?? 'south';
     reserved.push(...doorApproachExcludeTiles(
       building.doorTx,
@@ -849,7 +870,11 @@ export class BuildingManager {
       Math.floor(layout.x * 0.41),
       Math.floor(layout.z * 0.53),
     );
-    const building = buildBuildingPieces(layout.x, layout.z, layout.cellData, style);
+    const { cellData } = layout;
+    if (cellData.shape === 'rect' && hash01(chunk.cx * 19, chunk.cz * 23) < 0.35) {
+      addRearDoor(cellData);
+    }
+    const building = buildBuildingPieces(layout.x, layout.z, cellData, style);
     this._finalizeBuilding(building, chunk, world);
     return true;
   }
@@ -888,7 +913,6 @@ export class BuildingManager {
       const building = buildBuildingPieces(bx, bz, cellData, style);
       building.doorTx = cellData.doorTx;
       building.doorTz = cellData.doorTz;
-      building.doorFacing = 'south';
       building.townId = `town@${anchor.id}`;
       building.persistentTown = true;
       building.townAnchorId = anchor.id;
@@ -919,6 +943,10 @@ export class BuildingManager {
   }
 
   _clearFoliageForBuilding(world, building) {
+    if (building.rearDoor) {
+      const { x, z } = getDoorWorldPos(building.rearDoor);
+      world.clearFoliageInRect(x - TILE / 2, x + TILE / 2, z - TILE * 2, z, { markBlocked: true });
+    }
     for (const rect of buildingFoliageClearRects(building)) {
       world.clearFoliageInRect(rect.minX, rect.maxX, rect.minZ, rect.maxZ, { markBlocked: true });
     }
@@ -974,9 +1002,15 @@ export class BuildingManager {
       doorTx: saved.doorTx,
       doorTz: saved.doorTz,
       shape: saved.shape ?? 'rect',
+      rearDoorTx: saved.rearDoorTx,
+      chestTiles: saved.chestTiles ?? (saved.chestTile ? [saved.chestTile] : []),
     };
     const building = buildBuildingPieces(saved.originX, saved.originZ, cellData, saved.style);
     building.doorOpen = !!saved.doorOpen;
+    if (building.rearDoor) {
+      building.rearDoor.doorOpen = !!saved.rearDoorOpen;
+      this._syncDoorObstacle(building.rearDoor);
+    }
     building.homeCx = saved.homeCx;
     building.homeCz = saved.homeCz;
     building.townId = saved.townId ?? null;
@@ -998,6 +1032,7 @@ export class BuildingManager {
       building.chestTile = building.chestTiles[0];
     }
     const reserved = [...(building.chestTiles ?? [])];
+    reserved.push(...building.walls.filter((wall) => wall.window));
     const doorFacing = building.doorFacing ?? 'south';
     reserved.push(...doorApproachExcludeTiles(
       building.doorTx,
@@ -1079,6 +1114,7 @@ export class BuildingManager {
   }
 
   _unregisterObstacles(building) {
+    for (const obs of building.rearDoor?.doorEdgeObstacles ?? []) this.world.removeDynamicObstacle(obs);
     if (building.doorEdgeObstacles?.length) {
       for (const obs of building.doorEdgeObstacles) {
         this.world.removeDynamicObstacle(obs);

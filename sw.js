@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v417';
+const CACHE = 'robot-ruins-v457';
 
 function buildingKitSprites() {
   return [
@@ -14,6 +14,11 @@ function buildingKitSprites() {
     './assets/buildings/walls/blue.png',
     './assets/buildings/walls/white_wood.png',
     './assets/buildings/walls/wall_ew.png',
+    './assets/buildings/windows/wood.png',
+    './assets/buildings/windows/brick.png',
+    './assets/buildings/windows/gray.png',
+    './assets/buildings/windows/blue.png',
+    './assets/buildings/windows/white_wood.png',
     './assets/buildings/roof/brown.png',
     './assets/buildings/roof/brown_edge.png',
     './assets/buildings/roof/red.png',
@@ -43,6 +48,15 @@ function playerSprites() {
     './assets/player/idle.png',
     './assets/player/walk.png',
     './assets/player/run.png',
+    './assets/enemies/raiders/idle1.png',
+    './assets/enemies/raiders/walk1.png',
+    './assets/enemies/raiders/run1.png',
+    './assets/enemies/raiders/idle2.png',
+    './assets/enemies/raiders/walk2.png',
+    './assets/enemies/raiders/run2.png',
+    './assets/enemies/raiders/idle3.png',
+    './assets/enemies/raiders/walk3.png',
+    './assets/enemies/raiders/run3.png',
   ];
 }
 
@@ -95,6 +109,7 @@ const SHELL = [
   './js/custom-content-data.js',
   './js/consumables.js',
   './js/crafting.js',
+  './js/economy-data.js',
   './js/equipment.js',
   './js/highwayGen.js',
   './js/imageMap.js',
@@ -163,6 +178,11 @@ const SHELL = [
 ];
 
 const ASSETS = [
+  './assets/ui/loading_circle.png',
+  './sounds/ui/click1.ogg',
+  './sounds/ui/button1.ogg',
+  './sounds/ui/buy.ogg',
+  './sounds/ui/deploy.ogg',
   './assets/world/hatch_closed.png',
   './assets/world/hatch_open.png',
   ...PLAYER_SPRITES,

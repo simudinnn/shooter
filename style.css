@@ -138,25 +138,46 @@ body.mobile-ui .menu-cursor-follow {
   display: none;
 }
 
-.loading-frame {
-  min-width: min(92vw, 360px);
+#loading-screen .loading-frame {
+  box-sizing: border-box;
+  width: min(88vw, 480px);
+  min-width: 0;
+  padding: clamp(14px, 4dvh, 36px) clamp(16px, 5vw, 44px);
+  transform: none;
+}
+
+.loading-spinner {
+  display: block;
+  width: clamp(32px, 12dvh, 72px);
+  aspect-ratio: 1;
+  object-fit: contain;
+  margin: 0 auto 12px;
+  image-rendering: pixelated;
+  animation: raid-loading-spin 1.15s linear infinite;
+}
+
+@keyframes raid-loading-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner { animation: none; }
+  #loading-bar-fill { transition: none; }
 }
 
 .loading-bar {
-  width: 100%;
-  height: 14px;
-  margin: 18px 0 10px;
-  border: 2px solid #3a4a3a;
-  background: #1a221a;
-  border-radius: 2px;
+  height: 12px;
+  margin: 14px 0 10px;
+  border: 1px solid #81673f;
+  background: #251918;
   overflow: hidden;
 }
 
 #loading-bar-fill {
   width: 0%;
   height: 100%;
-  background: linear-gradient(90deg, #6a8a4a, #9ab86a);
-  transition: width 0.15s ease-out;
+  background: linear-gradient(90deg, #922823, #d84c3a);
+  transition: width 0.18s ease-out;
 }
 
 .loading-status {
@@ -179,9 +200,8 @@ body.game-active.mobile-ui {
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 1;
-  image-rendering: pixelated;
-  image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
+  image-rendering: pixelated;
   max-width: none;
   max-height: none;
 }
@@ -1120,7 +1140,9 @@ body.inv-custom-cursor * {
 #inventory .ground-loot-list {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: none;
+  container-type: inline-size;
+  grid-template-rows: max-content;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 4px;
   width: 100%;
@@ -1145,7 +1167,8 @@ body.inv-custom-cursor * {
 
 #inventory .ground-loot-list .inv-chest-slot {
   width: 100%;
-  height: auto;
+  height: calc((100cqw - 12px) / 4);
+  align-self: start;
   aspect-ratio: 1;
   min-width: 0;
   touch-action: none;
@@ -1985,6 +2008,20 @@ body.mobile-ui .inv-cursor-follow {
   gap: 8px;
 }
 
+#inventory .inv-context-actions > .inv-context-btn {
+  align-self: stretch;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+#inventory .inv-context-actions > .inv-context-btn + .inv-context-recycle-row {
+  padding-top: 7px;
+  border-top: 1px solid rgba(200, 168, 96, 0.2);
+}
+#inventory .inv-context-menu {
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+}
+
 .inv-context-recycle-row {
   display: flex;
   flex-direction: column;
@@ -2009,10 +2046,55 @@ body.mobile-ui .inv-cursor-follow {
   gap: 4px;
 }
 
+.inv-context-slider-track {
+  position: relative;
+  display: grid;
+  align-items: center;
+  min-height: 28px;
+  margin-inline: 2px;
+}
+.inv-context-slider-track::before {
+  content: '';
+  height: 10px;
+  border: 1px solid #957345;
+  background: #422523;
+}
+.inv-context-slider-thumb {
+  position: absolute;
+  left: clamp(9px, var(--slider-progress), calc(100% - 9px));
+  width: 18px;
+  height: 18px;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  box-sizing: border-box;
+  border-image: url('assets/ui/ui_button_9slice.png') 4 fill stretch;
+  image-rendering: pixelated;
+  transition: left 100ms ease-out;
+  pointer-events: none;
+}
+.inv-context-slider-track::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  width: calc(var(--slider-progress) - 1px);
+  height: 8px;
+  background: #c73930;
+  transition: width 100ms ease-out;
+  pointer-events: none;
+}
+.inv-context-slider-thumb { z-index: 1; }
+.inv-context-slider-track:has(:focus-visible) { outline: 1px solid #c9a465; }
+@media (prefers-reduced-motion: reduce) {
+  .inv-context-slider-thumb, .inv-context-slider-track::after { transition: none; }
+}
 .inv-context-amount-slider {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   width: 100%;
+  height: 100%;
   margin: 0;
-  accent-color: #c73930;
+  opacity: 0;
   touch-action: none;
 }
 
@@ -2653,7 +2735,7 @@ body.game-active.mobile-ui .inv-combine-btn {
   min-width: 0;
   padding: 5px 10px;
 }
-#overlay .raid-base-frame button:disabled { opacity: 0.45; }
+#overlay :is(.raid-base-frame, .raid-quantity-dialog) button:disabled { opacity: 0.45; }
 #overlay #raid-deploy { min-width: min(100%, 220px); min-height: 46px; font-size: 16px; }
 
 @media (max-width: 620px) {
@@ -2731,6 +2813,13 @@ body.mobile-ui #raid-extract-hud {
 #raid-results[data-outcome="loss"] { --raid-result-accent: #c7735e; }
 #raid-results .inv-pixel-text-img { zoom: clamp(1, calc(100dvw / 1050px), 2.25); }
 #raid-results h2 .inv-pixel-text-img { zoom: clamp(1.35, calc(100dvw / 760px), 3); }
+#raid-results h2 { text-align: center; }
+#raid-results[data-outcome="success"] h2 .inv-pixel-text-img {
+  filter: brightness(.68) sepia(1) saturate(2.8) hue-rotate(68deg);
+}
+#raid-results[data-outcome="loss"] h2 .inv-pixel-text-img {
+  filter: brightness(.58) sepia(1) saturate(5) hue-rotate(318deg);
+}
 #raid-results :is(h2, h3, p) { margin: 0 0 10px; }
 #raid-results p:empty { display: none; }
 .raid-result-stats {
@@ -2768,7 +2857,31 @@ body.mobile-ui #raid-extract-hud {
   padding: 6px 14px;
 }
 @media (min-width: 900px) {
-  .raid-result-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .raid-result-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (hover: none) and (pointer: coarse) {
+  #raid-results .raid-result-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - max(18px, env(safe-area-inset-top)) - max(18px, env(safe-area-inset-bottom)));
+    padding: 10px 14px;
+  }
+  #raid-results :is(h2, h3, p) { margin-bottom: 5px; }
+  #raid-results h2 .inv-pixel-text-img { zoom: 1.15; }
+  #raid-results .raid-result-stats { padding: 6px; gap: 4px 8px; margin-bottom: 8px; }
+  #raid-result-items {
+    min-height: 0;
+    overflow-y: auto;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 38px), 1fr));
+    grid-auto-rows: max-content;
+    margin-bottom: 5px;
+  }
+  #overlay #raid-result-continue {
+    flex-shrink: 0;
+    min-height: 34px;
+    min-width: 125px;
+    margin-top: 5px;
+  }
 }
 @media (prefers-reduced-motion: no-preference) {
   #raid-results:not(.hidden) .raid-result-content { animation: raid-result-enter 360ms ease-out; }
@@ -2849,7 +2962,6 @@ body.mobile-ui #raid-extract-hud {
   .raid-base-overview { display: grid; }
   .raid-base-mission { grid-row: auto; gap: 6px; }
   #overlay #raid-deploy { margin-top: 8px; }
-  #raid-stash { gap: 3px; }
   #raid-stash .raid-base-slot span { font-size: 12px; right: 1px; bottom: 1px; }
   .raid-deploy-review { padding: 8px; }
 }
@@ -2877,10 +2989,21 @@ body.mobile-ui #raid-extract-hud {
   flex-direction: column;
 }
 #raid-stash {
+  --raid-stash-gap: 8px;
+  --raid-stash-cell: calc((100cqw - 9 * var(--raid-stash-gap)) / 10);
+  container-type: inline-size;
+  gap: var(--raid-stash-gap);
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   align-content: start;
   overscroll-behavior: contain;
+}
+#raid-stash > .raid-base-slot {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--raid-stash-cell);
+  min-height: var(--raid-stash-cell);
 }
 .raid-loadout-layout {
   width: min(100%, max(132px, calc((100dvh - 245px) * 1.17)));
@@ -3025,18 +3148,8 @@ body.mobile-ui #raid-extract-hud {
   scrollbar-width: thin;
 }
 #raid-deploy-dialog #raid-stash {
-  --raid-review-stash-gap: 5px;
   flex: 1;
   max-width: 810px;
-  container-type: size;
-  display: grid;
-  grid-template-columns: repeat(10, max-content);
-  align-content: start;
-  gap: var(--raid-review-stash-gap);
-}
-#raid-deploy-dialog #raid-stash .raid-base-slot {
-  width: min(calc((100cqw - 9 * var(--raid-review-stash-gap)) / 10),
-    calc((100cqh + var(--raid-review-stash-gap)) / var(--raid-stash-rows, 4) - var(--raid-review-stash-gap)));
 }
 #raid-deploy-dialog .raid-transfer-hint { display: none; }
 .raid-base-slot:not(.raid-drag-ghost) { position: relative; }
@@ -3186,7 +3299,7 @@ body.mobile-ui #raid-extract-hud {
   #overlay #raid-deploy { align-self: start; margin: 2px 0 0; min-height: 40px; }
 
   #raid-base .raid-transfer-hint { display: none; }
-  #raid-base .raid-base-workspace #raid-stash { width: 100%; gap: 4px; }
+  #raid-base .raid-base-workspace #raid-stash { width: 100%; --raid-stash-gap: 4px; }
   #raid-base .raid-base-workspace [data-base-panel="stash"] .raid-base-slot img { width: 82%; height: 82%; }
   #raid-base .raid-base-workspace [data-base-panel="stash"] .raid-base-slot span {
     font-size: clamp(10px, 1.7vw, 16px);
@@ -3297,7 +3410,7 @@ body.mobile-ui #raid-extract-hud {
   background: #242621;
 }
 #raid-deploy-dialog .raid-loadout-layout { --raid-slot-gap: 3px; }
-#raid-deploy-dialog #raid-stash { --raid-review-stash-gap: 3px; }
+#raid-deploy-dialog #raid-stash { --raid-stash-gap: 3px; }
 #raid-deploy-dialog footer { padding: 4px 8px; }
 #overlay #raid-deploy-dialog footer .ui-slice-button {
   min-height: 36px;
@@ -3419,7 +3532,7 @@ body.mobile-ui #raid-extract-hud {
   #raid-base .raid-base-workspace #raid-stash {
     width: 100%;
     max-width: none;
-    gap: clamp(3px, .55vw, 9px);
+    --raid-stash-gap: clamp(3px, .55vw, 9px);
   }
   #raid-base .raid-loadout-layout {
     --raid-slot-gap: clamp(3px, .55vw, 9px);
@@ -3555,6 +3668,7 @@ body.mobile-ui #raid-extract-hud {
 }
 @keyframes raid-radar-sweep { to { rotate: 1turn; } }
 .raid-station-description { margin: 0 0 10px; }
+#raid-base .raid-repair-missing { opacity: .4; }
 #raid-base #raid-selection .raid-tooltip-operation {
   box-sizing: border-box;
   width: 100%;
@@ -3686,6 +3800,7 @@ body.mobile-ui #raid-extract-hud {
   zoom: calc(var(--desktop-ui-scale, 1) * .88);
 }
 #raid-base .raid-base-workspace.raid-catalog-active { overflow-y: auto; }
+#raid-base .raid-catalog-active { overflow-anchor: none; }
 #raid-base .raid-catalog-heading {
   grid-column: 1 / -1;
   justify-self: stretch;

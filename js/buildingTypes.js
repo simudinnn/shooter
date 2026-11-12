@@ -70,18 +70,18 @@ export const TOWN_BUILDING_GAP_TILES = 4;
 
 /** Rect footprints — width always greater than height. */
 export const BUILDING_SIZE_VARIANTS = [
-  { w: 5, h: 4 },
-  { w: 6, h: 4 },
   { w: 6, h: 5 },
-  { w: 7, h: 4 },
-  { w: 7, h: 5 }
+  { w: 7, h: 5 },
+  { w: 7, h: 6 },
+  { w: 8, h: 5 },
+  { w: 8, h: 6 }
 ];
 
-export const BUILDING_WIDTH_VARIANTS = [5, 6, 7];
-export const BUILDING_SHAPE_H = 5;
+export const BUILDING_WIDTH_VARIANTS = [6, 7, 8];
+export const BUILDING_SHAPE_H = 6;
 
-export const BUILDING_MAX_W = 7;
-export const BUILDING_MAX_H = 5;
+export const BUILDING_MAX_W = 8;
+export const BUILDING_MAX_H = 6;
 
 export function rollBuildingSize(seedA, seedB) {
   return BUILDING_SIZE_VARIANTS[hash32(seedA, seedB) % BUILDING_SIZE_VARIANTS.length];

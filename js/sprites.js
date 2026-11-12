@@ -21,6 +21,12 @@ const PLAYER_ASSET_PATHS = {
   player_run: 'assets/player/run.png',
 };
 
+export const RAIDER_SPRITE_VARIANTS = [1, 2, 3];
+const RAIDER_ASSET_PATHS = Object.fromEntries(
+  RAIDER_SPRITE_VARIANTS.flatMap((variant) => ['idle', 'walk', 'run'].map((state) =>
+    [`raider_${state}${variant}`, `assets/enemies/raiders/${state}${variant}.png`])),
+);
+
 const GUN_SPRITES = ['glock', 'm16', 'm870', 'm24', 'uzi', 'revolver', 'famas', 'fal'];
 /** Pump / bolt guns use a dedicated mid-fire cycle strip. */
 const GUN_CYCLE_SPRITES = ['m870', 'm24'];
@@ -82,6 +88,11 @@ const BUILDING_ASSET_PATHS = Object.fromEntries([
   ['bld_wall_brick', 'assets/buildings/walls/brick.png'],
   ['bld_wall_gray', 'assets/buildings/walls/gray.png'],
   ['bld_wall_blue', 'assets/buildings/walls/blue.png'],
+  ['bld_window_blue', 'assets/buildings/windows/blue.png'],
+  ['bld_window_brick', 'assets/buildings/windows/brick.png'],
+  ['bld_window_gray', 'assets/buildings/windows/gray.png'],
+  ['bld_window_white_wood', 'assets/buildings/windows/white_wood.png'],
+  ['bld_window_wood', 'assets/buildings/windows/wood.png'],
   ['bld_wall_white_wood', 'assets/buildings/walls/white_wood.png'],
   ['bld_wall_ew', 'assets/buildings/walls/wall_ew.png'],
   ['bld_roof_brown', 'assets/buildings/roof/brown.png'],
@@ -186,6 +197,7 @@ export const loadedSheetMeta = {};
 export const ASSET_PATHS = {
   ...Object.fromEntries(EQUIPMENT_ITEM_KEYS.map((key) => [`equip_${key}`, equipmentSpritePath(key)])),
   ...PLAYER_ASSET_PATHS,
+  ...RAIDER_ASSET_PATHS,
   ...WEAPON_ASSET_PATHS,
   ...ITEM_WEAPON_ASSET_PATHS,
   ...CORE_ASSETS,
@@ -288,7 +300,8 @@ function getAnimSpec(name) {
         ...(moving ? {} : { frames: 1 }) };
     }
   }
-  return SPRITE_ANIM.sheets[name] || {};
+  const raiderState = /^raider_(idle|walk|run)[1-3]$/.exec(name)?.[1];
+  return SPRITE_ANIM.sheets[raiderState ? `player_${raiderState}` : name] || {};
 }
 
 function defaultFrameSize(name) {
@@ -993,8 +1006,8 @@ export function getHandHoldPose(player, punchExtend = 0) {
 }
 
 export function getPlayerSheet(player) {
-  if (!player.isMoving) return 'player_idle';
-  return player.isSprinting ? 'player_run' : 'player_walk';
+  const state = !player.isMoving ? 'idle' : player.isSprinting ? 'run' : 'walk';
+  return player.spriteVariant ? `raider_${state}${player.spriteVariant}` : `player_${state}`;
 }
 
 /** Animation state for flipbook player sheets. */
@@ -1018,8 +1031,8 @@ export function getWalkBounceY(walkPhase, moving, amp = 1.8) {
 }
 
 export function getPlayerBounceY(player) {
-  const amp = player.isSprinting ? 2.8 : 1.8;
-  return getWalkBounceY(player.walkPhase, player.isMoving, amp);
+  if (!player.isMoving || player.isSprinting) return 0;
+  return -0.65 * (1 - Math.cos(player.walkPhase * Math.PI));
 }
 
 /** Subtle idle bob for held weapon — syncs with standing/breathing (screen px, negative = up). */

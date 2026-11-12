@@ -612,7 +612,7 @@ export function updateParticles(particles, dt, world = null, callbacks = null) {
               p.vz = 0;
               if (!p._landSnd) {
                 p._landSnd = true;
-                callbacks?.onCasingLand?.();
+                callbacks?.onCasingLand?.(p);
               }
             }
 

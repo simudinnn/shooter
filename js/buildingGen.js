@@ -24,15 +24,13 @@ export const EW_WALL_THICK = TILE * 0.25;
 export const NS_WALL_THICK = TILE;
 
 /** Extra padding on wall collision strips (single box — movement, bullets, door trap). */
-export const WALL_COLLISION_PAD = 0.16;
-
 function makeWallAabb(x, z, halfW, halfH, extra = {}) {
   return {
     kind: 'aabb',
     x,
     z,
-    halfW: halfW + WALL_COLLISION_PAD,
-    halfH: halfH + WALL_COLLISION_PAD,
+    halfW,
+    halfH,
     blocksBullets: true,
     ...extra,
   };
@@ -58,14 +56,8 @@ function makeFloorEdgeObstacle(originX, originZ, tx, tz, dir) {
   let halfH;
   switch (dir) {
     case 'n':
-      // Interior lip — bottom 25% under north wall row.
-      x = cx;
-      z = tileZ + TILE - edgeHalf;
-      halfW = TILE * 0.5;
-      halfH = edgeHalf;
-      break;
     case 's':
-      // South lip — bottom 25% of south wall row (same thickness as E/W).
+      // Both horizontal faces use the bottom four pixels of the wall art.
       x = cx;
       z = tileZ + TILE - edgeHalf;
       halfW = TILE * 0.5;
@@ -87,19 +79,21 @@ function makeFloorEdgeObstacle(originX, originZ, tx, tz, dir) {
   return makeWallAabb(x, z, halfW, halfH, { floorEdge: true, edgeDir: dir });
 }
 
-/** Full-tile north perimeter — one tile tall. */
-function makeNorthExteriorObstacle(originX, originZ, tx, tz) {
-  const tileX = originX + tx * TILE;
-  const tileZ = originZ + tz * TILE;
-  const cx = tileX + TILE * 0.5;
-  const cz = tileZ + TILE * 0.5;
-  const halfW = TILE * 0.5;
-  const halfH = TILE * 0.5;
-  return makeWallAabb(cx, cz, halfW, halfH, { floorEdge: true, edgeDir: 'n' });
+function pushNorthPerimeter(obstacles, originX, originZ, tx, tz) {
+  obstacles.push(makeFloorEdgeObstacle(originX, originZ, tx, tz, 'n'));
 }
 
-function pushNorthPerimeter(obstacles, originX, originZ, tx, tz) {
-  obstacles.push(makeNorthExteriorObstacle(originX, originZ, tx, tz));
+function openingFrameObstacles(edge) {
+  const width = TILE * 3 / BUILDING_ART_PX;
+  const offset = edge.halfW - width / 2;
+  return [-1, 1].map((side) => ({
+    ...edge,
+    x: edge.x + side * offset,
+    halfW: width / 2,
+    blocksBullets: true,
+    blocksVision: true,
+    openingFrame: true,
+  }));
 }
 
 /** South wall — single 25% floor-edge strip (same as E/W). */
@@ -113,6 +107,9 @@ export function isNorthInteriorColumn(cells, w, h, tx, tz) {
   if (cellWalkable(cells, w, h, tx, tz - 1)) return false;
   if (!cellWalkable(cells, w, h, tx - 1, tz)) return false;
   if (!cellWalkable(cells, w, h, tx + 1, tz)) return false;
+  if (!cellWalkable(cells, w, h, tx, tz + 1)
+    || !cellWalkable(cells, w, h, tx - 1, tz + 1)
+    || !cellWalkable(cells, w, h, tx + 1, tz + 1)) return false;
   return true;
 }
 
@@ -123,7 +120,14 @@ export function buildFloorEdgeObstacles(originX, originZ, w, h, cells, doorTx, d
     for (let tx = 0; tx < w; tx++) {
       const cell = cells[tz * w + tx];
       if (cell !== CELL_FLOOR && cell !== CELL_DOOR) continue;
-      if (cell === CELL_DOOR && tx === doorTx && tz === doorTz) continue;
+      if (cell === CELL_DOOR) {
+        for (const [dir, dz] of [['n', -1], ['s', 1]]) {
+          if (!cellWalkable(cells, w, h, tx, tz + dz)) {
+            obstacles.push(...openingFrameObstacles(makeFloorEdgeObstacle(originX, originZ, tx, tz, dir)));
+          }
+        }
+        continue;
+      }
       if (!cellWalkable(cells, w, h, tx, tz - 1)) {
         pushNorthPerimeter(obstacles, originX, originZ, tx, tz);
       }
@@ -132,10 +136,10 @@ export function buildFloorEdgeObstacles(originX, originZ, w, h, cells, doorTx, d
           pushSouthEdge(obstacles, originX, originZ, tx, tz);
         }
       }
-      if (!cellWalkable(cells, w, h, tx - 1, tz)) {
+      if (cellWalkable(cells, w, h, tx, tz - 1) && !cellWalkable(cells, w, h, tx - 1, tz)) {
         obstacles.push(makeFloorEdgeObstacle(originX, originZ, tx, tz, 'w'));
       }
-      if (!cellWalkable(cells, w, h, tx + 1, tz)) {
+      if (cellWalkable(cells, w, h, tx, tz - 1) && !cellWalkable(cells, w, h, tx + 1, tz)) {
         obstacles.push(makeFloorEdgeObstacle(originX, originZ, tx, tz, 'e'));
       }
     }
@@ -185,7 +189,7 @@ export function generateShackCells(w, h) {
 }
 
 function isPerimeterWallCell(tx, tz, cells, w, h, doorTx, doorTz) {
-  if (tx === doorTx && tz === doorTz) return false;
+  if (cells[tz * w + tx] === CELL_DOOR) return false;
   const cell = cells[tz * w + tx];
   if (cell !== CELL_FLOOR && cell !== CELL_DOOR) return false;
   return !cellWalkable(cells, w, h, tx - 1, tz)
@@ -442,6 +446,7 @@ export function playerSouthEdgeZ(px, pz) {
 
 /** South edge Z for player or enemy (used for interior / door routing). */
 export function entityFeetZ(entity) {
+  if (entity?.type === 'raider') return playerSouthEdgeZ(entity.x, entity.z);
   if (entity?.type) {
     const nativePx = getEnemyNativePx(entity.type);
     const scale = getEnemyDrawScale(entity.type);
@@ -464,16 +469,14 @@ export function playerFootFloorPoint(px, pz) {
 }
 
 /**
- * Inside when the entity move AABB lies fully on building floor/door cells
- * and sprite feet sit on an interior floor/door cell (not hugging south wall outside).
+ * Classify by the feet and the inner wall faces, including at corners.
  */
 export function isInsideBuilding(building, px, pz, collider = null, feetZOverride = null) {
   if (collider?.kind === 'aabb') {
-    if (!isMoveShapeOnBuildingFloor(building, px, pz, collider)) return false;
     const feetZ = feetZOverride ?? (pz + (collider.zOff ?? 0) + collider.halfH);
     return isFeetOnBuildingFloor(building, px, feetZ);
   }
-  const feetZ = typeof collider === 'number' ? collider : null;
+  const feetZ = feetZOverride ?? (typeof collider === 'number' ? collider : null);
   return isInsideBuildingFeet(building, px, pz, feetZ);
 }
 
@@ -486,59 +489,18 @@ function isFeetOnBuildingFloor(building, px, feetZ) {
   const tz = Math.floor((feetZ - originZ) / TILE);
   if (tx < 0 || tx >= w || tz < 0 || tz >= h) return false;
 
-  const cell = cells[tz * w + tx];
-  return cell === CELL_FLOOR || cell === CELL_DOOR;
-}
-
-function isMoveShapeOnBuildingFloor(building, px, pz, shape) {
-  const { originX, originZ, w, h, cells } = building;
-  const acz = pz + (shape.zOff ?? 0);
-  const minX = px - shape.halfW;
-  const maxX = px + shape.halfW;
-  const minZ = acz - shape.halfH;
-  const maxZ = acz + shape.halfH;
-
-  const northFace = originZ;
-  const southFace = originZ + h * TILE;
-  const westFace = originX;
-  const eastFace = originX + w * TILE;
-
-  if (minX < westFace || maxX > eastFace || minZ < northFace || maxZ > southFace) {
-    return false;
-  }
-
-  const samples = [
-    [minX, minZ], [maxX, minZ], [minX, maxZ], [maxX, maxZ],
-    [px, minZ], [px, maxZ], [minX, acz], [maxX, acz],
-  ];
-
-  for (const [sx, sz] of samples) {
-    const tx = Math.floor((sx - originX) / TILE);
-    const tz = Math.floor((sz - originZ) / TILE);
-    if (tx < 0 || tx >= w || tz < 0 || tz >= h) return false;
-    const cell = cells[tz * w + tx];
-    if (cell !== CELL_FLOOR && cell !== CELL_DOOR) return false;
-  }
+  if (!cellWalkable(cells, w, h, tx, tz)) return false;
+  if (!cellWalkable(cells, w, h, tx, tz - 1)) return false;
+  const localX = px - (originX + tx * TILE);
+  if (localX < EW_WALL_THICK && !cellWalkable(cells, w, h, tx - 1, tz)) return false;
+  if (localX > TILE - EW_WALL_THICK && !cellWalkable(cells, w, h, tx + 1, tz)) return false;
   return true;
 }
 
 /** Legacy feet-point test for entities without a move shape. */
 function isInsideBuildingFeet(building, px, pz, feetZOverride = null) {
-  const { originX, originZ, w, h, cells } = building;
   const feetZ = feetZOverride ?? playerSouthEdgeZ(px, pz);
-  const feetTx = Math.floor((px - originX) / TILE);
-  const feetTz = Math.floor((feetZ - originZ) / TILE);
-
-  if (feetTx < 0 || feetTx >= w || feetTz < 0 || feetTz >= h) return false;
-
-  const cell = cells[feetTz * w + feetTx];
-  if (cell !== CELL_FLOOR && cell !== CELL_DOOR) return false;
-
-  if (feetTz === 0 && !cellWalkable(cells, w, h, feetTx, -1)) {
-    if (feetZ <= originZ + TILE * 0.1) return false;
-  }
-
-  return true;
+  return isFeetOnBuildingFloor(building, px, feetZ);
 }
 
 /** Y-sort Z for bullets — tuck behind north walls and doors when north of them. */
@@ -594,8 +556,7 @@ function isNearNorthWallOutside(px, pz, wall, building) {
 }
 
 function wallDrawSortZ(originZ, tz, orient, face, extendNorth) {
-  if (isSouthFace(face)) return originZ + (tz + 1) * TILE;
-  if (isNorthFace(face)) return originZ + tz * TILE;
+  if (isSouthFace(face) || isNorthFace(face)) return originZ + (tz + 1) * TILE;
   const feetZ = wallFeetZ(originZ, tz, orient);
   return extendNorth ? feetZ + TILE * 0.04 : feetZ;
 }
@@ -623,10 +584,7 @@ export function wallBackDrawZ(wall, playerSortZ, playerInside, px, pz, building)
 /** Walls that skip the back pass and draw in front of the player body/gun. */
 export function wallDrawsInFront(wall, playerSortZ, playerInside, px, pz, building = null) {
   const face = wall.face;
-  if (isNorthFace(face)) {
-    return !playerInside && building != null
-      && isNearNorthWallOutside(px, pz, wall, building);
-  }
+  if (isNorthFace(face)) return playerSortZ < wall.sortZ;
   if (isSouthFace(face)) {
     if (playerInside) return playerSortZ >= wall.sortZ - TILE * 0.85;
     return building != null && isNearSouthWallOutside(px, pz, wall, building);
@@ -760,6 +718,7 @@ function isNearDoorOutside(px, pz, building) {
 /** Door depth — closed: player on top outside unless hugging door; open outside: door behind player. */
 export function doorDrawsInFront(building, playerSortZ, playerInside, px, pz) {
   const sortZ = doorSortZ(building);
+  if (building.doorFacing === 'north') return playerSortZ < sortZ;
   if (playerInside) return playerSortZ >= sortZ - TILE * 0.85;
   if (building.doorOpen) return false;
   return isNearDoorOutside(px, pz, building);
@@ -863,13 +822,14 @@ export function getPlayerFeetStripBounds(x, z) {
 export function getDoorTileFootStrip(building) {
   const doorTx = building.doorTx ?? Math.floor(building.w / 2);
   const doorTz = building.doorTz ?? building.h - 1;
-  const tileSouth = building.originZ + (doorTz + 1) * TILE;
+  const north = building.doorFacing === 'north';
+  const edgeZ = building.originZ + (doorTz + (north ? 0 : 1)) * TILE;
   const stripH = TILE * DOOR_TILE_FOOT_FRAC;
   return {
     minX: building.originX + doorTx * TILE,
     maxX: building.originX + (doorTx + 1) * TILE,
-    minZ: tileSouth - stripH,
-    maxZ: tileSouth,
+    minZ: north ? edgeZ : edgeZ - stripH,
+    maxZ: north ? edgeZ + stripH : edgeZ,
   };
 }
 
@@ -877,13 +837,14 @@ export function getDoorTileFootStrip(building) {
 export function getDoorCloseBlockRects(building) {
   const doorTx = building.doorTx ?? Math.floor(building.w / 2);
   const doorTz = building.doorTz ?? building.h - 1;
-  const tileSouth = building.originZ + (doorTz + 1) * TILE;
+  const north = building.doorFacing === 'north';
+  const edgeZ = building.originZ + (doorTz + (north ? 0 : 1)) * TILE;
   const stripH = TILE * DOOR_CLOSE_BLOCK_FRAC;
   return [{
     minX: building.originX + doorTx * TILE,
     maxX: building.originX + (doorTx + 1) * TILE,
-    minZ: tileSouth - stripH,
-    maxZ: tileSouth + DOOR_CLOSE_SOUTH_PAD,
+    minZ: edgeZ - (north ? DOOR_CLOSE_SOUTH_PAD : stripH),
+    maxZ: edgeZ + (north ? stripH : DOOR_CLOSE_SOUTH_PAD),
   }];
 }
 
@@ -913,6 +874,7 @@ export function wouldClosingDoorTrapPlayer(building, player) {
 
 export function doorBackDrawZ(building, playerSortZ, playerInside, px, pz) {
   const sortZ = doorSortZ(building);
+  if (building.doorFacing === 'north') return sortZ;
   if (!playerInside) return sortZ;
   if (playerSortZ < sortZ - TILE * 0.85) return sortZ;
   return Math.min(sortZ, playerSortZ - 0.06);
@@ -1171,13 +1133,13 @@ function collectReentrantEwWalls(cells, w, h) {
   return extra;
 }
 
-function makePropObstacle(x, z, { blocksBullets = false, blocksVision = null, sizeFrac = BARREL_COLLISION_FRAC } = {}) {
+function makePropObstacle(x, z, { blocksBullets = false, blocksVision = null, sizeFrac = BARREL_COLLISION_FRAC, widthFrac = sizeFrac } = {}) {
   const half = TILE * sizeFrac * 0.5;
   const obs = {
     kind: 'aabb',
     x,
     z,
-    halfW: half,
+    halfW: TILE * widthFrac * 0.5,
     halfH: half,
     blocksBullets,
     isDecor: true,
@@ -1222,7 +1184,7 @@ export function doorApproachExcludeTiles(doorTx, doorTz, doorFacing = 'south', d
   }
   for (let d = 1; d <= depth; d++) {
     for (let dx = -2; dx <= 2; dx++) {
-      tiles.push({ tx: doorTx + dx, tz: doorTz + d });
+      tiles.push({ tx: doorTx + dx, tz: doorTz + (doorFacing === 'north' ? -d : d) });
     }
   }
   return tiles;
@@ -1233,7 +1195,8 @@ function isDoorApproachExterior(otx, otz, doorTx, doorTz, doorFacing = 'south') 
     if (otx < doorTx + 1 || otx > doorTx + 5) return false;
     return Math.abs(otz - doorTz) <= 2;
   }
-  if (otz < doorTz + 1 || otz > doorTz + 5) return false;
+  const depth = (otz - doorTz) * (doorFacing === 'north' ? -1 : 1);
+  if (depth < 1 || depth > 5) return false;
   return Math.abs(otx - doorTx) <= 2;
 }
 
@@ -1268,15 +1231,13 @@ export function buildBuildingInteriorProps(
       if (cells[tz * w + tx] !== CELL_FLOOR) continue;
       if (tx === doorTx && tz === doorTz) continue;
       if (taken.has(tileKey(tx, tz))) continue;
-      if (cellWalkable(cells, w, h, tx, tz - 1)) continue;
+      if (!isNorthInteriorColumn(cells, w, h, tx, tz)) continue;
       northCandidates.push({ tx, tz });
     }
   }
   if (northCandidates.length) {
     northWallTz = Math.min(...northCandidates.map((c) => c.tz));
-    const northRow = northCandidates.filter((c) => c.tz === northWallTz);
-    const interiorRow = northRow.filter((c) => isNorthInteriorColumn(cells, w, h, c.tx, c.tz));
-    const pool = interiorRow.length ? interiorRow : northRow;
+    const pool = northCandidates.filter((c) => c.tz === northWallTz);
     const idx = hash32(seedA + 11, seedB + 13) % pool.length;
     const fridge = pool[idx];
     if (fridge) {
@@ -1286,15 +1247,16 @@ export function buildBuildingInteriorProps(
         sprite: 'bld_fridge',
         x: pos.x,
         z: pos.z,
-        sortZ: pos.z - TILE * 0.12,
+        sortZ: pos.z + 0.02,
         sortBias: 2,
         tx: fridge.tx,
         tz: fridge.tz,
         interior: true,
-        obstacle: makePropObstacle(pos.x, pos.z, {
+        obstacle: makePropObstacle(pos.x, pos.z + TILE * 0.26, {
           blocksBullets: true,
           blocksVision: false,
-          sizeFrac: INTERIOR_PROP_COLLISION_FRAC,
+          sizeFrac: 0.48,
+          widthFrac: 1,
         }),
       });
     }
@@ -1491,6 +1453,21 @@ export function buildBuildingPieces(originX, originZ, cellData, style = rollBuil
 
   const interior = computeInteriorBounds(originX, originZ, w, h, cells);
   const obstacles = buildFloorEdgeObstacles(originX, originZ, w, h, cells, doorTx, doorTz);
+  for (const wall of walls) {
+    if (wall.orient !== 'ns' || wall.reentrant
+      || cellData.chestTiles?.some((tile) => tile.tx === wall.tx && tile.tz === wall.tz)
+      || [-1, 0, 1].some((offset) => cells[wall.tz * w + wall.tx + offset] === CELL_DOOR)) continue;
+    if (hash01(originX + wall.tx * 31, originZ + wall.tz * 37) >= 0.32) continue;
+    const edge = wall.face === 'north' ? 'n' : 's';
+    const edgeBox = makeFloorEdgeObstacle(originX, originZ, wall.tx, wall.tz, edge);
+    const obstacle = obstacles.find((box) => box.edgeDir === edge && box.x === edgeBox.x && box.z === edgeBox.z);
+    if (!obstacle) continue;
+    obstacle.blocksBullets = false;
+    obstacle.blocksVision = false;
+    obstacle.halfW = TILE * 5 / BUILDING_ART_PX;
+    obstacles.push(...openingFrameObstacles(edgeBox));
+    wall.window = true;
+  }
 
   return {
     type: style.id,
@@ -1506,6 +1483,11 @@ export function buildBuildingPieces(originX, originZ, cellData, style = rollBuil
     doorTx,
     doorTz,
     interior,
+    doorFacing: doorTz === 0 ? 'north' : 'south',
+    rearDoor: cellData.rearDoorTx == null ? null : {
+      originX, originZ, w, h, cells, style, doorTx: cellData.rearDoorTx,
+      doorTz: 0, doorFacing: 'north', doorOpen: false,
+    },
     walls,
     decor: [],
     obstacles,

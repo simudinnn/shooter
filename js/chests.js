@@ -1,6 +1,6 @@
 import { TILE, hash01 } from './worldGen.js';
 import { rollChestLoot, rollChestVariant } from './loot.js';
-import { CELL_FLOOR, interiorPropCollisionHalf, isNorthInteriorColumn } from './buildingGen.js';
+import { CELL_FLOOR, isNorthInteriorColumn } from './buildingGen.js';
 
 export const CHEST_INTERACT_DIST = 3;
 export const CHEST_DRAW_SCALE = 2.1;
@@ -11,8 +11,8 @@ const CHEST_GAME_PPU = 8;
 export const CHEST_VIS_PIVOT = { nx: 8, ny: 8 };
 export const CHEST_DRAW_PIVOT = CHEST_VIS_PIVOT;
 /** Match fridge / interior prop collision (same anchor and footprint). */
-export const CHEST_COLLISION_HALF_W = interiorPropCollisionHalf();
-export const CHEST_COLLISION_HALF_H = interiorPropCollisionHalf();
+export const CHEST_COLLISION_HALF_W = TILE * 0.5;
+export const CHEST_COLLISION_HALF_H = TILE * 0.24;
 /** Screen-space hit test half extents for mouse hover. */
 export const CHEST_OPAQUE_HALF_W = CHEST_COLLISION_HALF_W * CHEST_GAME_PPU;
 export const CHEST_OPAQUE_HALF_H = CHEST_COLLISION_HALF_H * CHEST_GAME_PPU;
@@ -25,12 +25,6 @@ export const LARGE_BUILDING_TWO_CHEST_CHANCE = 0.45;
 /** Single world anchor for draw, collision, and interaction. */
 export function getChestWorldPos(chest) {
   return { x: chest.x, z: chest.z };
-}
-
-function cellWalkable(cells, w, h, tx, tz) {
-  if (tx < 0 || tz < 0 || tx >= w || tz >= h) return false;
-  const cell = cells[tz * w + tx];
-  return cell === CELL_FLOOR;
 }
 
 export function isLargeBuilding(building) {
@@ -88,7 +82,7 @@ export class ChestManager {
   _pickNorthBorderSpot(building, reservedTiles = [], edge = 'mid') {
     const { originX, originZ, w, h, cells, doorTx } = building;
     const doorTz = building.doorTz ?? h - 1;
-    const reserved = new Set(reservedTiles.map((t) => `${t.tx},${t.tz}`));
+    const reserved = new Set([...reservedTiles, ...building.walls.filter((wall) => wall.window)].map((t) => `${t.tx},${t.tz}`));
     const candidates = [];
 
     for (let tz = 0; tz < h; tz++) {
@@ -96,7 +90,7 @@ export class ChestManager {
         if (cells[tz * w + tx] !== CELL_FLOOR) continue;
         if (tx === doorTx && tz === doorTz) continue;
         if (reserved.has(`${tx},${tz}`)) continue;
-        if (cellWalkable(cells, w, h, tx, tz - 1)) continue;
+        if (!isNorthInteriorColumn(cells, w, h, tx, tz)) continue;
         candidates.push({ tx, tz });
       }
     }
@@ -104,9 +98,7 @@ export class ChestManager {
     if (!candidates.length) return null;
 
     const northTz = Math.min(...candidates.map((c) => c.tz));
-    const northRow = candidates.filter((c) => c.tz === northTz);
-    const interiorRow = northRow.filter((c) => isNorthInteriorColumn(cells, w, h, c.tx, c.tz));
-    const pool = interiorRow.length ? interiorRow : northRow;
+    const pool = candidates.filter((c) => c.tz === northTz);
     pool.sort((a, b) => a.tx - b.tx);
 
     let pick;
@@ -207,13 +199,13 @@ export class ChestManager {
     chest.obstacle = {
       kind: 'aabb',
       x: chest.x,
-      z: chest.z,
+      z: chest.z + TILE * 0.26,
       halfW: CHEST_COLLISION_HALF_W,
       halfH: CHEST_COLLISION_HALF_H,
       softHalfW: CHEST_COLLISION_HALF_W,
       softHalfH: CHEST_COLLISION_HALF_H,
       softX: chest.x,
-      softZ: chest.z,
+      softZ: chest.z + TILE * 0.26,
       blocksBullets: false,
     };
     this.world.addDynamicObstacle(chest.obstacle);

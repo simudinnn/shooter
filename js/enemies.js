@@ -1,8 +1,10 @@
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, didDisplace, MOTION_IDLE_EPS, entityPushRadius } from './collision.js';
 import { customEnemies } from './customContent.js';
+import { RAIDER_SPRITE_VARIANTS } from './sprites.js';
 import {
   updateChaseNav,
   canMeleeTarget,
+  hasCombatSight,
   ensureNavState,
   updateEnemySpotTimer,
   shouldEnemyChase,
@@ -21,7 +23,7 @@ import {
   SCOUT_DETECT_RANGE,
 } from './enemyNav.js';
 import { getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, resolveFlipX } from './sprites.js';
-import { PLAYER_MOVE_W_PX, PLAYER_MOVE_H_PX } from './player.js';
+import { PLAYER_MOVE_W_PX, PLAYER_MOVE_H_PX, WEAPONS, MELEE_WEAPONS, getHumanMoveCollider } from './player.js';
 import { PPU } from './renderConfig.js';
 import { TILE } from './worldGen.js';
 
@@ -252,7 +254,8 @@ export class Robot {
       ? [player]
       : targets;
     const worldCol = this.getMoveCollider();
-    const moveOpts = { axisSlide: true, ...(opts.buildings ? { buildings: opts.buildings } : {}) };
+    const moveOpts = this.type === 'raider' ? {}
+      : { axisSlide: true, ...(opts.buildings ? { buildings: opts.buildings } : {}) };
     const r = moveWithEntityCollision(
       world,
       this.x,
@@ -272,6 +275,11 @@ export class Robot {
     }
     if (ignoreRobots) this._softSeparateFromRobots(robots, world, worldCol, moveOpts);
     if (world.checkCollisionShape(this.x, this.z, worldCol, false, moveOpts)) {
+      if (this.type === 'raider' && !world.checkCollisionShape(prevX, prevZ, worldCol)) {
+        this.x = prevX;
+        this.z = prevZ;
+        return;
+      }
       const dep = world.depenetrateShape(this.x, this.z, worldCol);
       this.x = dep.x;
       this.z = dep.z;
@@ -743,13 +751,13 @@ export class Scout extends Robot {
           this.shoot.chargeLeft -= dt;
           this.bob = 0;
           if (this.shoot.chargeLeft <= 0) {
-            if (world.hasLineOfSight(this.x, this.z, player.x, player.z)) this._beginBurst(onShoot);
+            if (hasCombatSight(world, this, player)) this._beginBurst(onShoot);
             else {
               this._abortShoot(true);
               this.shoot.reloadLeft = 1;
             }
           }
-        } else if (!world.hasLineOfSight(this.x, this.z, player.x, player.z)) {
+        } else if (!hasCombatSight(world, this, player)) {
           this._abortShoot(true);
           this.shoot.reloadLeft = 1;
         } else {
@@ -802,6 +810,313 @@ export class Scout extends Robot {
 }
 
 export { updateParticles } from './particles.js';
+
+const RAIDER_WEAPONS = ['revolver', 'glock', 'm870', 'm16', 'knife', 'wooden_bat'];
+
+export class Raider extends Robot {
+  constructor(x, z, chest) {
+    super(x, z, 1, 'raider');
+    this.spriteVariant = RAIDER_SPRITE_VARIANTS[Math.floor(Math.random() * RAIDER_SPRITE_VARIANTS.length)];
+    this.health = this.maxHealth = 100;
+    this.speed = this.baseSpeed = 9;
+    this.radius = 1.25;
+    this.weaponKey = RAIDER_WEAPONS[Math.floor(Math.random() * RAIDER_WEAPONS.length)];
+    this.ammo = WEAPONS[this.weaponKey]?.magSize ?? 0;
+    this.reloadLeft = 0;
+    this.dodgeCooldown = 0;
+    this.fleeUntil = 0;
+    this.bandages = 2;
+    this.lastCombatSight = null;
+    this.loot = [];
+    this.lootTarget = chest;
+    this.fireCooldown = 0.6;
+    this.lootCooldown = 0;
+    this.lootedChests = new Set();
+    this.indoorTime = 0;
+  }
+
+  getMoveCollider(ppu = PPU) {
+    return getHumanMoveCollider(ppu);
+  }
+
+  getPushCollider(ppu = PPU) {
+    const move = this.getMoveCollider(ppu);
+    return { ...move, radius: move.radius * 0.88 };
+  }
+
+  updateRaider(dt, player, world, robots, chests, corpses, groundDrops, bullets, buildings, time, attack) {
+    const shape = this.getMoveCollider();
+    if (world.checkCollisionShape(this.x, this.z, shape)) {
+      const clear = this.lastClearPosition;
+      const recovered = clear && !world.checkCollisionShape(clear.x, clear.z, shape)
+        ? clear : world.depenetrateShape(this.x, this.z, shape);
+      this.x = recovered.x;
+      this.z = recovered.z;
+    } else {
+      this.lastClearPosition = { x: this.x, z: this.z };
+    }
+    const startX = this.x;
+    const startZ = this.z;
+    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
+    this.shotBloom = Math.max(0, (this.shotBloom ?? 0) - dt * 0.13);
+    if (this.reloadLeft > 0) {
+      this.reloadLeft = Math.max(0, this.reloadLeft - dt);
+      if (this.reloadLeft === 0) this.ammo = WEAPONS[this.weaponKey].magSize;
+    }
+    let target = null;
+    let range = 30;
+    let bestScore = Infinity;
+    let secondScore = Infinity;
+    for (const candidate of [player, ...robots]) {
+      if (candidate === this || !candidate.alive || candidate.emerging) continue;
+      const distance = Math.hypot(candidate.x - this.x, candidate.z - this.z);
+      const score = distance + (candidate === player || candidate.type === 'raider' ? 0 : 24);
+      if (distance >= 30 || score >= secondScore || !hasCombatSight(world, this, candidate)) continue;
+      if (score >= bestScore) {
+        secondScore = score;
+        continue;
+      }
+      secondScore = bestScore;
+      bestScore = score;
+      range = distance;
+      target = candidate;
+    }
+    this.chasing = Boolean(target);
+    this.combatTarget = target;
+    this.searchPhase = null;
+    const inside = buildings.getEntityBuildingAt(this);
+    if (target) this.lastCombatSight = { x: target.x, z: target.z, until: time + 7 };
+    const melee = MELEE_WEAPONS[this.weaponKey];
+    const incoming = melee ? this._incomingShotDodge(bullets) : null;
+    const threat = incoming?.threat ?? target
+      ?? (time < (this.lastCombatSight?.until ?? 0) ? this.lastCombatSight : null);
+    const needsHeal = this.health <= this.maxHealth * 0.4 && this.bandages > 0;
+    const pressed = target && range < 8;
+    const outnumbered = target && range < 17 && secondScore - bestScore < 7;
+    if (!this.retreat && threat && ((needsHeal && !pressed) || incoming || outnumbered) && time >= this.fleeUntil) {
+      const cover = this._findBuildingCover(world, buildings, threat);
+      this.fleeUntil = time + 2.5;
+      if (cover) {
+        this.retreat = { cover, threat, until: time + 8, healTime: 0, health: this.health };
+        this.exitBuilding = null;
+        this.lastCombatSight = null;
+      }
+    }
+    this.indoorTime = inside ? this.indoorTime + dt : 0;
+    if (!this.retreat && inside && (this.indoorTime > 15 || (target && buildings.getEntityBuildingAt(target) !== inside))) {
+      this.exitBuilding = inside;
+      if (this.lootTarget?.homeBuilding === inside) {
+        this.lootTarget = null;
+      }
+    }
+    if (this.retreat) {
+      const retreat = this.retreat;
+      if (time >= retreat.until || (pressed && !incoming) || this.health < retreat.health) {
+        this.retreat = null;
+      } else if (Math.hypot(retreat.cover.x - this.x, retreat.cover.z - this.z) > 1.2) {
+        if (inside && !inside.doorOpen) buildings.toggleDoor(inside);
+        this._runToward(dt, retreat.cover, world, robots, buildings, time);
+      } else if (!world.hasLineOfSight(retreat.threat.x, retreat.threat.z, this.x, this.z)
+        && (!target || !world.hasLineOfSight(target.x, target.z, this.x, this.z))) {
+        retreat.healTime += dt;
+        if (retreat.healTime >= 1.4) {
+          if (needsHeal) {
+            this.health = Math.min(this.maxHealth, this.health + 30);
+            this.bandages--;
+          }
+          this.retreat = null;
+        }
+      } else {
+        this.retreat = null;
+      }
+    } else if (this.exitBuilding) {
+      const building = this.exitBuilding;
+      const exit = this._doorApproach(building);
+      if (!building.doorOpen) buildings.toggleDoor(building);
+      this._runToward(dt, exit, world, robots, buildings, time);
+      if (!inside && Math.hypot(exit.x - this.x, exit.z - this.z) < 2.5) {
+        this.exitBuilding = null;
+        this.lootCooldown = 4;
+        this.wanderPhase = 'moving';
+        this.wanderTimer = 2;
+        this.wanderAngle = 0;
+      }
+    } else if (target && melee) {
+      const weapon = melee;
+      this.angle = Math.atan2(target.x - this.x, target.z - this.z);
+      if (range > weapon.range) this._runToward(dt, target, world, robots, buildings, time);
+      else if (this.fireCooldown === 0) this.fireCooldown = attack(this, this.angle, target);
+    } else if (target) {
+      this.speed = this.baseSpeed * 1.5;
+      this.angle = Math.atan2(target.x - this.x, target.z - this.z);
+      this.combatStrafeTime = (this.combatStrafeTime ?? 0) - dt;
+      if (this.combatStrafeTime <= 0) {
+        this.combatStrafeTime = 0.65 + Math.random() * 0.75;
+        this.strafeSide = (this.strafeSide ?? -1) * -1;
+      }
+      const forward = range < 11 ? -0.8 : range > 21 ? 0.55 : 0;
+      const sin = Math.sin(this.angle);
+      const cos = Math.cos(this.angle);
+      const dodge = this.dodgeCooldown === 0 ? this._incomingShotDodge(bullets) : null;
+      if (dodge) this.dodgeCooldown = 0.95;
+      this._move(dt, world, player, robots,
+        dodge?.x ?? (sin * forward + cos * this.strafeSide),
+        dodge?.z ?? (cos * forward - sin * this.strafeSide), dodge ? 0.95 : 0.75, { buildings });
+      if (this.ammo > 0 && this.fireCooldown === 0) {
+        this.fireCooldown = attack(this, this.angle, target);
+        this.ammo--;
+        if (this.ammo === 0) this.reloadLeft = WEAPONS[this.weaponKey].reloadTime;
+      }
+    } else if (this.lastCombatSight && time < this.lastCombatSight.until) {
+      const goal = this.lastCombatSight;
+      const shelter = buildings.getEntityBuildingAt(goal);
+      if (shelter && !shelter.doorOpen) {
+        const door = this._doorApproach(shelter);
+        if (Math.hypot(door.x - this.x, door.z - this.z) < 4) buildings.toggleDoor(shelter);
+      }
+      if (Math.hypot(goal.x - this.x, goal.z - this.z) <= 2) goal.reached = true;
+      if (goal.reached) {
+        this.speed = this.baseSpeed;
+        this._updateWander(dt, world, player, robots, 0.8, true);
+      } else this._runToward(dt, goal, world, robots, buildings, time);
+    } else {
+      this.fireCooldown = Math.max(this.fireCooldown, 0.4);
+      this.lootCooldown -= dt;
+      if (this.lootCooldown <= 0 && !(this.lootTarget?.slots?.some(Boolean)
+        || (this.lootTarget?.item && groundDrops.drops.includes(this.lootTarget)))) {
+        this.lootCooldown = 1.5;
+        let nearest = 52;
+        this.lootTarget = null;
+        if (this.loot.length < 12) {
+          for (const chest of [...chests, ...corpses, ...groundDrops.drops]) {
+            if (this.lootedChests.has(chest) || !(chest.item || chest.slots?.some(Boolean))) continue;
+            const distance = Math.hypot(chest.x - this.x, chest.z - this.z);
+            if (distance >= nearest) continue;
+            if (!chest.homeBuilding && !world.hasLineOfSight(this.x, this.z, chest.x, chest.z)) continue;
+            nearest = distance;
+            this.lootTarget = chest;
+          }
+        }
+      }
+      const chest = this.lootTarget;
+      if (!chest) {
+        this.speed = this.baseSpeed;
+        this._updateWander(dt, world, player, robots, this.wanderTimer > 0.65 ? 1.5 : 0.85, true);
+      }
+      else {
+        this.speed = this.baseSpeed;
+        const building = chest.homeBuilding;
+        const door = building && this._doorApproach(building);
+        if (Math.hypot(chest.x - this.x, chest.z - this.z) < 3.5
+          && (building ? inside === building : world.hasLineOfSight(this.x, this.z, chest.x, chest.z))) {
+          const index = chest.slots?.findIndex(Boolean) ?? -1;
+          if (index >= 0) {
+            this.loot.push(chest.slots[index]);
+            chest.slots[index] = null;
+            chest.opened = true;
+          } else if (chest.item && groundDrops.drops.includes(chest)) {
+            this.loot.push(chest.item);
+            groundDrops.remove(chest);
+          }
+          this.lootedChests.add(chest);
+          this.lootTarget = null;
+          if (building) this.exitBuilding = building;
+        } else {
+          let goal = chest;
+          if (building && inside !== building) {
+            const atDoor = Math.hypot(door.x - this.x, door.z - this.z) < TILE;
+            if (atDoor && !building.doorOpen) buildings.toggleDoor(building);
+            const entering = building.doorOpen && (atDoor || this.enteringBuilding === building);
+            this.enteringBuilding = entering ? building : null;
+            const direction = building.doorFacing === 'north' ? 1 : -1;
+            goal = entering ? { x: door.x, z: door.z + direction * TILE * 2.25 } : door;
+          } else if (building) {
+            this.enteringBuilding = null;
+            goal = { x: chest.x, z: chest.z + TILE * 0.4 };
+          }
+          this._runToward(dt, goal, world, robots, buildings, time);
+          if (this.lootProgressTarget !== chest || didDisplace(startX, startZ, this.x, this.z, MOTION_IDLE_EPS)) {
+            this.lootProgressTarget = chest;
+            this.lootStuckTime = 0;
+          } else if ((this.lootStuckTime += dt) > 4) {
+            this.lootTarget = null;
+            this.enteringBuilding = null;
+            this.lootCooldown = 3;
+            this.lootStuckTime = 0;
+          }
+        }
+      }
+    }
+    const moving = didDisplace(startX, startZ, this.x, this.z, MOTION_IDLE_EPS);
+    this.isMoving = moving;
+    this.moveDirX = moving ? this.x - startX : 0;
+    this.isSprinting = moving && dt > 0 && Math.hypot(this.x - startX, this.z - startZ) / dt > this.baseSpeed * 1.15;
+    this._applyLocomotion(startX, startZ, dt, moving ? (this.isSprinting ? 14 : 8) : 0);
+  }
+
+  _incomingShotDodge(bullets) {
+    for (const shot of bullets) {
+      if (!shot.active || shot.enemyOwner === this) continue;
+      const dx = this.x - shot.x;
+      const dz = this.z - shot.z;
+      if (dx * dx + dz * dz > 625) continue;
+      const speed = Math.hypot(shot.vx, shot.vz);
+      if (!speed) continue;
+      const ahead = (dx * shot.vx + dz * shot.vz) / speed;
+      const side = (dx * shot.vz - dz * shot.vx) / speed;
+      if (ahead <= 0 || ahead / speed > 0.24 || Math.abs(side) > this.radius + 0.8) continue;
+      const sign = Math.sign(side) || this.strafeSide;
+      return {
+        x: shot.vz / speed * sign, z: -shot.vx / speed * sign,
+        threat: shot.enemyOwner ?? { x: shot.spawnX ?? shot.x, z: shot.spawnZ ?? shot.z },
+      };
+    }
+    return null;
+  }
+
+  _findBuildingCover(world, buildings, threat) {
+    let best = null;
+    let bestScore = 48;
+    const collider = this.getMoveCollider();
+    for (const building of buildings.buildings) {
+      const { originX, originZ } = building;
+      const maxX = originX + building.w * TILE;
+      const maxZ = originZ + building.h * TILE;
+      const x = (originX + maxX) / 2;
+      const z = (originZ + maxZ) / 2;
+      for (const point of [
+        { x, z: originZ - TILE }, { x, z: maxZ + TILE },
+        { x: originX - TILE, z }, { x: maxX + TILE, z },
+      ]) {
+        const score = Math.hypot(point.x - this.x, point.z - this.z);
+        if (score >= bestScore || world.checkCollisionShape(point.x, point.z, collider)) continue;
+        if (world.hasLineOfSight(threat.x, threat.z, point.x, point.z)) continue;
+        best = point;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  _doorApproach(building) {
+    return {
+      x: building.originX + (building.doorTx + 0.5) * TILE,
+      z: building.originZ + ((building.doorTz ?? building.h - 1)
+        + (building.doorFacing === 'north' ? -0.35 : 1.35)) * TILE,
+    };
+  }
+
+  _runToward(dt, goal, world, robots, buildings, time) {
+    this.speed = this.baseSpeed * 1.5;
+    this.angle = Math.atan2(goal.x - this.x, goal.z - this.z);
+    this.searchPhase = 'investigate';
+    this.hasLastKnown = true;
+    this.lastKnownX = goal.x;
+    this.lastKnownZ = goal.z;
+    this._chaseMove(dt, goal, world, robots, buildings, time);
+  }
+}
 
 export function createGroundSpew(x, z, intensity = 1) {
   const particles = [];

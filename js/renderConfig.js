@@ -14,6 +14,14 @@ export const RENDER_SCALE = 2;
 /** One screen pixel in world units. */
 export const PIXEL_STEP = 1 / PPU;
 
+/** Exponential follow for a target moving linearly during the frame. */
+export function followMovingAxis(current, previousTarget, target, rate, dt) {
+  if (dt <= 0) return current;
+  const blend = -Math.expm1(-rate * dt);
+  return current + (previousTarget - current) * blend
+    + (target - previousTarget) * (1 - blend / (rate * dt));
+}
+
 /** Foliage art grid — TILE/16; at PPU 8 each step is 2 screen pixels. */
 export const FOLIAGE_SNAP_STEP = 0.25;
 
@@ -106,15 +114,15 @@ function _getShadowStamp(rx, ry) {
 }
 
 /** Soft ellipse shadow drawn on the tile pixel grid — crisp pixels, no vector blur. */
-export function drawPixelEllipseShadow(ctx, cx, cy, rx, ry, tilePx) {
+export function drawPixelEllipseShadow(ctx, cx, cy, rx, ry, tilePx, gridOrigin = { x: 0, y: 0 }) {
   const step = Math.max(1, tilePx >> 4);
   const srx = Math.max(step * 3, Math.round(rx / step) * step);
   const sry = Math.max(step * 2, Math.round(ry / step) * step);
-  const sx = snapScreenAxis(cx, tilePx);
-  const sy = snapScreenAxis(cy, tilePx);
-  const stamp = _getShadowStamp(srx, sry);
+  const sx = gridOrigin.x + snapScreenAxis(cx - gridOrigin.x, tilePx);
+  const sy = gridOrigin.y + snapScreenAxis(cy - gridOrigin.y, tilePx);
+  const stamp = _getShadowStamp(srx / step, sry / step);
   const prev = ctx.imageSmoothingEnabled;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(stamp, sx - srx, sy - sry);
+  ctx.drawImage(stamp, sx - srx, sy - sry, srx * 2, sry * 2);
   ctx.imageSmoothingEnabled = prev;
 }

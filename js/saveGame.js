@@ -54,6 +54,8 @@ export function captureBuildings(buildings) {
     doorTx: b.doorTx,
     doorTz: b.doorTz ?? b.h - 1,
     doorOpen: !!b.doorOpen,
+    rearDoorTx: b.rearDoor?.doorTx,
+    rearDoorOpen: b.rearDoor?.doorOpen,
     shape: b.shape ?? 'rect',
     style: { ...b.style },
     homeCx: b.homeCx,

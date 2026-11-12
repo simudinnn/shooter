@@ -1,12 +1,12 @@
-import { RaidBase, challengeProgress, newRaidProfile, deployProfile, extractProfile, loseRaidProfile, normalizeRaidProfile, EXTRACT_RADIUS, EXTRACT_SECONDS } from './raidBase.js';
-import { collectWallOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
+import { RaidBase, raidLevel, challengeProgress, newRaidProfile, deployProfile, extractProfile, loseRaidProfile, normalizeRaidProfile, EXTRACT_RADIUS, EXTRACT_SECONDS } from './raidBase.js';
+import { collectWallOccluders, collectPropOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
 import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
-import { Robot, Scout, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
+import { Robot, Scout, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
-import { Player, BulletPool, WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
+import { Player, BulletPool, WEAPONS, MELEE_WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
 import {
   capturePlayerState,
   readSave,
@@ -15,13 +15,12 @@ import {
 import { SoundManager } from './audio.js';
 import { ItemManager } from './items.js';
 import { GroundDropManager, GROUND_DROP_DISPLAY_PX, GROUND_DROP_RES_PX } from './groundDrops.js';
-import { getEnemyStatusIcon, hearPlayerGunshot, tickTileFlowField } from './enemyNav.js';
+import { getEnemyStatusIcon, hearPlayerGunshot, tickTileFlowField, hasCombatSight } from './enemyNav.js';
 import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_H, CHEST_DRAW_PIVOT } from './chests.js';
 import {
   BuildingManager,
   drawBuildingFloors,
   drawBuildingWall,
-  drawBuildingRoof,
   drawBuildingDoor,
   drawBuildingDecor,
   drawDecorPiece,
@@ -48,7 +47,8 @@ import { VirtualJoystick } from './joystick.js';
 import { InventoryUI, INV_CURSOR_SRC } from './inventory.js';
 import { getWeaponAmmoType, AMMO_TYPES } from './ammo.js';
 import { DayNightCycle, applyNightOverlay } from './dayNight.js';
-import { snapCamLean, worldToScreen, camPixelsFromPlayer, leanPixelsFromOffset, drawPixelEllipseShadow, PPU, INTERNAL_W, INTERNAL_H, RENDER_SCALE } from './renderConfig.js';
+import { getWorldBoundsWorld } from './highwayGen.js';
+import { followMovingAxis, worldToScreen, camPixelsFromPlayer, drawPixelEllipseShadow, PPU, INTERNAL_W, INTERNAL_H, RENDER_SCALE } from './renderConfig.js';
 import {
   computeViewBounds,
   pointInViewBounds,
@@ -80,6 +80,7 @@ const MOBILE_STICK_DEADZONE = 0.15;
 const CAM_FOLLOW_STRENGTH = 0.15;
 const CAM_FOLLOW_MAX_PX = 64;
 const CAM_FOLLOW_SMOOTH = 50;
+const CAM_PLAYER_SMOOTH = 10;
 
 class Game {
   constructor() {
@@ -130,6 +131,7 @@ class Game {
     this.raidBase = new RaidBase(document.getElementById('raid-base'), {
       save: (profile) => this._writeRaidProfile(profile),
       deploy: () => this._deployRaid(),
+      playUi: (name) => this.audio.playUi(name),
       setSound: (enabled, volume) => this.audio.setEnabled(enabled, volume),
     });
     this._openSavedBase();
@@ -156,8 +158,14 @@ class Game {
     this._visibleHalfWidth = Math.min(INTERNAL_W, vw / (scale * this.renderScale)) / 2;
     this._visibleHalfHeight = Math.min(INTERNAL_H, vh / (scale * this.renderScale)) / 2;
     this.displayScale = scale;
-    this.canvas.style.width = `${bufW * scale}px`;
-    this.canvas.style.height = `${bufH * scale}px`;
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.ceil(bufW * scale * dpr) / dpr;
+    const height = Math.ceil(bufH * scale * dpr) / dpr;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    this.canvas.style.left = `${Math.round((vw - width) * 0.5 * dpr) / dpr}px`;
+    this.canvas.style.top = `${Math.round((vh - height) * 0.5 * dpr) / dpr}px`;
+    this.canvas.style.transform = 'none';
   }
 
   _initUI() {
@@ -356,6 +364,12 @@ class Game {
     this._setLoadingProgress(0, 'Preparing…');
   }
 
+  async _paintLoadingProgress(fraction, message) {
+    if (this.el.loadingScreen?.classList.contains('hidden')) return;
+    this._setLoadingProgress(fraction, message);
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  }
+
   _hideLoadingScreen() {
     this.el.loadingScreen?.classList.add('hidden');
   }
@@ -363,6 +377,7 @@ class Game {
   _setLoadingProgress(fraction, message) {
     const pct = Math.max(0, Math.min(1, fraction)) * 100;
     if (this.el.loadingBarFill) this.el.loadingBarFill.style.width = `${pct}%`;
+    this.el.loadingBarFill?.parentElement.setAttribute('aria-valuenow', String(Math.round(pct)));
     if (message && this.el.loadingStatus) this._setPixelText(this.el.loadingStatus, message, PIXEL_TEXT_SCALE);
   }
 
@@ -418,6 +433,8 @@ class Game {
         if (cleared.x !== this.player.x || cleared.z !== this.player.z) {
           this.player.x = cleared.x;
           this.player.z = cleared.z;
+          this.camFollow = { ...cleared };
+          this._previousCameraTarget = { ...cleared };
           this.world._cachedPlayerSpawn = { x: cleared.x, z: cleared.z };
         }
         const view = this.getViewBoundsWorld();
@@ -513,7 +530,7 @@ class Game {
   _requestBackToMenu() {
     this._showConfirm('Abandon this raid? You will lose all carried gear and loot.', () => {
       this._closeConfirm();
-      this._finishRaid(false);
+      this._finishRaid(false, true);
     }, () => this._closeConfirm());
   }
 
@@ -522,12 +539,35 @@ class Game {
     let profile = save?.profile ? normalizeRaidProfile(save.profile) : newRaidProfile(save);
     let message = '';
     if (profile.deployed) {
-      profile = loseRaidProfile(profile);
-      message = 'Previous raid abandoned. Your stash is safe.';
+      const { raidCheckpoint, ...previous } = profile;
+      const next = loseRaidProfile(previous);
+      this.raidProfile = next;
+      this._showRaidResult({
+        previous, next, abandoned: true,
+        carried: raidCheckpoint?.carried ?? previous.kit,
+        seconds: raidCheckpoint?.seconds,
+        kills: raidCheckpoint?.kills,
+        raiderKills: raidCheckpoint?.raiderKills,
+        onContinue: () => this._writeRaidProfile(next) ? '' : 'Could not save the profile.',
+      });
+      return;
     }
     if (!this._writeRaidProfile(profile)) message = 'Could not save the profile.';
     this.raidProfile = profile;
     this._showRaidBase(profile, message);
+  }
+
+  _saveRaidCheckpoint() {
+    if (!this.running || !this.raidProfile?.deployed || this.inventoryUI.drag) return;
+    this._writeRaidProfile({
+      ...this.raidProfile,
+      raidCheckpoint: {
+        carried: capturePlayerState(this.player),
+        seconds: Math.max(0, Math.floor((performance.now() - this.raidStartedAt) / 1000)),
+        kills: this.kills,
+        raiderKills: this.raiderKills,
+      },
+    });
   }
 
   async _deployRaid() {
@@ -538,8 +578,11 @@ class Game {
       return;
     }
     this._deploying = true;
+    this.audio.playUi('deploy');
     this.raidBase.hide();
+    this._showLoadingScreen();
     try {
+      await this._paintLoadingProgress(0.08, 'Preparing raid…');
       await this._bootGame(null, previous.kit);
     } catch (error) {
       console.error('Deploy failed:', error);
@@ -555,12 +598,14 @@ class Game {
     const origin = this.player;
     const startAngle = Math.random() * Math.PI * 2;
     const hatches = [];
+    const bounds = getWorldBoundsWorld();
     for (let sector = 0; sector < 4; sector++) {
       for (let attempt = 0; attempt < 16; attempt++) {
-        const angle = startAngle + sector * Math.PI / 2 + (attempt % 2 ? -1 : 1) * attempt * 0.09;
-        const radius = 145 + attempt * 16;
+        const angle = startAngle + sector * Math.PI / 2 + (attempt % 2 ? -1 : 1) * attempt * 0.055;
+        const radius = (101 + (attempt % 4) * 4) * TILE;
         const x = Math.round((origin.x + Math.sin(angle) * radius) / TILE) * TILE;
         const z = Math.round((origin.z + Math.cos(angle) * radius) / TILE) * TILE;
+        if (x < bounds.minX + 12 || x > bounds.maxX - 12 || z < bounds.minZ + 12 || z > bounds.maxZ - 12) continue;
         this.world.prewarmGround(x, z, 1);
         if (!this.world.isValidHatchSite(x, z)) continue;
         if (hatches.some((entry) => Math.hypot(x - entry.x, z - entry.z) < 140)) continue;
@@ -614,7 +659,7 @@ class Game {
     this.nearestHatch = nearest;
     const nearby = distance <= EXTRACT_RADIUS;
     const label = document.getElementById('raid-extract-distance');
-    const metres = 'Hatch / ' + Math.ceil(distance) + 'm';
+    const metres = 'Hatch / ' + Math.ceil(distance / TILE) + 'm';
     if (label.textContent !== metres) label.textContent = metres;
     const direction = document.getElementById('raid-hatch-direction');
     direction.style.rotate = Math.atan2(nearest.x - this.player.x, -(nearest.z - this.player.z)) + 'rad';
@@ -631,12 +676,12 @@ class Game {
     if (status.textContent !== message) status.textContent = message;
   }
 
-  _finishRaid(extracted) {
+  _finishRaid(extracted, abandoned = false) {
     if (!this.running) return;
     this.running = false;
     this.inventoryUI.forceClose();
     this._clearKeyboardInput();
-    const previous = this.raidProfile;
+    const { raidCheckpoint: _checkpoint, ...previous } = this.raidProfile;
     const carried = capturePlayerState(this.player);
     const next = extracted ? extractProfile(previous, this.player, this.kills) : loseRaidProfile(previous);
     const saved = this._writeRaidProfile(next);
@@ -649,6 +694,15 @@ class Game {
     document.body.classList.remove('game-active');
     this._hideGameCursor();
     this._disableMenuCursor();
+    this._showRaidResult({
+      previous, next, carried, extracted, abandoned, saved,
+      seconds: Math.max(0, Math.floor((performance.now() - this.raidStartedAt) / 1000)),
+      kills: this.kills, raiderKills: this.raiderKills,
+    });
+  }
+
+  _showRaidResult({ previous, next, carried, extracted = false, abandoned = false,
+    saved = true, seconds, kills, raiderKills, onContinue }) {
     const summary = document.getElementById('raid-results');
     summary.dataset.outcome = extracted ? 'success' : 'loss';
     const setLabel = (selector, text) => {
@@ -656,10 +710,10 @@ class Game {
       element.setAttribute('aria-label', text);
       this._setPixelText(element, text, PIXEL_TEXT_SCALE_SM);
     };
-    const seconds = Math.max(0, Math.floor((performance.now() - this.raidStartedAt) / 1000));
-    setLabel('h2', extracted ? 'Extraction successful' : 'Raid lost');
-    setLabel('#raid-result-duration', 'Time: ' + Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's');
-    setLabel('#raid-result-kills', 'Robots: ' + this.kills);
+    setLabel('h2', extracted ? 'Extraction successful' : abandoned ? 'Raid abandoned' : 'Raid lost');
+    setLabel('#raid-result-duration', seconds == null ? 'Time: —' : 'Time: ' + Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's');
+    setLabel('#raid-result-kills', 'Robots: ' + (kills ?? '—'));
+    setLabel('#raid-result-raiders', 'Raiders: ' + (raiderKills ?? '—'));
     setLabel('#raid-result-cash', '+' + (next.cash - previous.cash) + ' Cash');
     setLabel('#raid-result-xp', '+' + (next.xp - previous.xp) + ' XP');
     setLabel('#raid-result-items-title', extracted ? 'New loot extracted' : 'Items lost');
@@ -702,11 +756,12 @@ class Game {
     setLabel('#raid-result-note', notes.filter(Boolean).join(' / '));
     const button = summary.querySelector('#raid-result-continue');
     button.onclick = () => {
+      this.audio.stopLose();
       summary.classList.add('hidden');
-      this._showRaidBase(next);
+      this._showRaidBase(next, onContinue?.() ?? '');
     };
     summary.classList.remove('hidden');
-    button.focus();
+    button.focus({ preventScroll: true });
   }
 
   showWaveBanner(text, duration = 2) {
@@ -821,11 +876,26 @@ class Game {
   }
 
   _bindEvents() {
+    document.addEventListener('click', (event) => {
+      const control = event.target.closest?.('button, [role="button"], .inv-slot-sprite, input, select, label');
+      if (!control || control.disabled || control.getAttribute('aria-disabled') === 'true'
+        || control.closest('#mobile-controls') || control.dataset.uiCue === 'manual'
+        || control.id === 'raid-deploy-confirm') return;
+      this.audio.playUi(control.matches('.inv-slot-sprite, input, select, label') ? 'click1' : 'button1');
+    }, true);
     this.el.resumeBtn?.addEventListener('click', () => this._hidePauseMenu());
     this.el.backToMenuBtn?.addEventListener('click', () => this._requestBackToMenu());
     this.el.confirmYesBtn?.addEventListener('click', () => this._confirmYes?.());
     this.el.confirmNoBtn?.addEventListener('click', () => this._confirmNo?.());
     window.addEventListener('resize', () => this._resizeCanvas());
+    window.addEventListener('pagehide', () => {
+      if (!this.running) return;
+      this.inventoryUI.forceClose();
+      this._saveRaidCheckpoint();
+    });
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted && this.running && this.raidProfile?.deployed) this._finishRaid(false, true);
+    });
     window.visualViewport?.addEventListener('resize', () => this._resizeCanvas());
     window.visualViewport?.addEventListener('scroll', () => this._resizeCanvas());
 
@@ -1039,6 +1109,11 @@ class Game {
 
   _updateCameraFollow(dt) {
     if (!this.player) return;
+    const previous = this._previousCameraTarget;
+    this.camFollow.x = followMovingAxis(this.camFollow.x, previous.x, this.player.x, CAM_PLAYER_SMOOTH, dt);
+    this.camFollow.z = followMovingAxis(this.camFollow.z, previous.z, this.player.z, CAM_PLAYER_SMOOTH, dt);
+    previous.x = this.player.x;
+    previous.z = this.player.z;
     const decay = 1 - Math.exp(-CAM_FOLLOW_SMOOTH * dt);
     if (this.mobile || this._panelOpen()) {
       this.camOffset.x += (0 - this.camOffset.x) * decay;
@@ -1057,8 +1132,6 @@ class Game {
     }
     this.camOffset.x += (tx - this.camOffset.x) * decay;
     this.camOffset.z += (tz - this.camOffset.z) * decay;
-    this.camOffset.x = snapCamLean(this.camOffset.x);
-    this.camOffset.z = snapCamLean(this.camOffset.z);
   }
 
   _syncCamPixels() {
@@ -1069,12 +1142,12 @@ class Game {
       this._camLeanPxZ = 0;
       return;
     }
-    const cp = camPixelsFromPlayer(this.player.x, this.player.z);
+    const camera = this._camera();
+    const cp = camPixelsFromPlayer(camera.x, camera.z);
     this._camPxX = cp.x;
     this._camPxZ = cp.z;
-    const lean = leanPixelsFromOffset(this.camOffset.x, this.camOffset.z);
-    this._camLeanPxX = lean.x;
-    this._camLeanPxZ = lean.z;
+    this._camLeanPxX = 0;
+    this._camLeanPxZ = 0;
   }
 
   _camTranslate() {
@@ -1086,9 +1159,10 @@ class Game {
 
   _camera() {
     if (!this.player) return { x: 0, z: 0 };
+    const follow = this.camFollow ?? this.player;
     return {
-      x: this.player.x + this.camOffset.x,
-      z: this.player.z + this.camOffset.z,
+      x: follow.x + this.camOffset.x,
+      z: follow.z + this.camOffset.z,
     };
   }
 
@@ -1104,6 +1178,13 @@ class Game {
   }
 
   _worldToScreen(wx, wz) {
+    if (this.player && wx === this.player.x && wz === this.player.z) {
+      const camera = this._camera();
+      return {
+        x: (INTERNAL_W >> 1) + Math.round((wx - camera.x) * PPU),
+        y: (INTERNAL_H >> 1) + Math.round((wz - camera.z) * PPU),
+      };
+    }
     return worldToScreen(wx, wz, this._camPxX, this._camPxZ, this._camLeanPxX, this._camLeanPxZ);
   }
 
@@ -1131,7 +1212,7 @@ class Game {
       const spawn = findBulletSpawn(this.world, this.player.x, this.player.z, angle);
       let ss;
       if (spawn) {
-        ss = this._worldToScreen(spawn.x, spawn.z);
+        ss = this._worldToScreen(spawn.x, spawn.z - spawn.spriteLift);
       } else {
         const gun = this._gunWorldPos(angle);
         ss = this._worldToScreen(gun.x, gun.z);
@@ -1208,6 +1289,7 @@ class Game {
     this.audio.resume();
 
     await this._spritePreload;
+    await this._paintLoadingProgress(0.32, 'Generating terrain…');
 
     if (saveData?.worldSeed != null) {
       setWorldSeed(saveData.worldSeed);
@@ -1218,13 +1300,20 @@ class Game {
     this.world = new World();
     this.world.setSpriteBank(this.sprites);
     await this.world.build();
+    await this._paintLoadingProgress(0.56, 'Preparing spawn area…');
     this.bullets = new BulletPool();
     this.robots = [];
+    this.raiderSpawnSites = new Set();
+    this.nextRaiderSpawnCheck = 0;
     this.items = new ItemManager(this.world);
     this.chests = new ChestManager(this.world);
     this.corpses = new CorpseManager(this.world);
     this.groundDrops = new GroundDropManager(this.world);
-    this.buildings = new BuildingManager(this.world, this.chests);
+    this.buildings = new BuildingManager(this.world, this.chests, (opening, point) => {
+      const distance = Math.hypot(point.x - this.player.x, point.z - this.player.z);
+      const volume = Math.max(0, 1 - distance / 44);
+      if (volume > 0) this.audio.doorToggle(opening, this._soundOffset(point), volume);
+    });
     this.world.setFoliagePopulatedHook((chunk) => {
       this.buildings.reconcileFoliageInChunk(chunk, this.world);
     });
@@ -1250,6 +1339,7 @@ class Game {
       this.player.x = spawn.x;
       this.player.z = spawn.z;
     }
+    this.player.raidLevel = this.raidProfile ? raidLevel(this.raidProfile) : 1;
     this.world.prewarmGround(this.player.x, this.player.z, 4);
     this.player.canSeeEnemyOnScreen = (robot) => {
       const point = this._worldToScreen(robot.x, robot.z);
@@ -1257,9 +1347,14 @@ class Game {
         && Math.abs(point.y - (INTERNAL_H >> 1)) <= this._visibleHalfHeight;
     };
     this._nextTerrainWarmup = 0;
+    await this._paintLoadingProgress(0.82, 'Locating extraction hatches…');
     this.hatches = raidKit ? this._placeHatches() : [];
+    await this._paintLoadingProgress(1, 'Entering the Ruins…');
     this.nearestHatch = null;
     this.raidStartedAt = performance.now();
+    this.camFollow = { x: this.player.x, z: this.player.z };
+    this._previousCameraTarget = { ...this.camFollow };
+    this.nextRaidCheckpointAt = this.raidStartedAt + 3000;
     this.raidStartingKit = capturePlayerState(this.player);
     this._extractElapsed = 0;
     document.getElementById('raid-extract-distance').textContent = '';
@@ -1280,6 +1375,7 @@ class Game {
     this._lastWalkStep = -1;
     this._lastBounceLand = -1;
     this.kills = saveData?.kills ?? 0;
+    this.raiderKills = 0;
     this.playTimeBase = saveData?.playTimeMs ?? 0;
     this.startTime = performance.now();
     this.paused = false;
@@ -1294,6 +1390,7 @@ class Game {
     if (this.mobile) this.el.mobileControls?.classList.remove('hidden');
     if (this.mobile) document.body.classList.add('mobile-ui');
 
+    this._hideLoadingScreen();
     this.lastTime = performance.now();
 
     this._loop(this.lastTime);
@@ -1581,12 +1678,42 @@ class Game {
     tickTileFlowField(time, this.world, this.buildings, this.player, this.robots);
     const simView = this.getViewBoundsWorld();
     const simPad = TILE * 10;
-    for (const robot of this.robots) {
+    this._spawnRaiders(time);
+    const raiders = this.robots.filter((robot) => robot.type === 'raider' && robot.alive);
+    for (const robot of [...this.robots]) {
+      if (!robot.alive) continue;
       if (!pointInViewBounds(simView, robot.x, robot.z, simPad)) continue;
-      robot.update(dt, this.player, this.world, this.robots, (r) => {
+      if (robot.type === 'raider') {
+        const previousStep = Math.floor(robot.walkPhase / 2);
+        robot.updateRaider(dt, this.player, this.world, this.robots, this.chests.chests, this.corpses.corpses,
+          this.groundDrops, this.bullets.bullets, this.buildings, time,
+          (raider, angle, target) => this._raiderAttack(raider, angle, target, time));
+        if (robot.isMoving && Math.floor(robot.walkPhase / 2) > previousStep) {
+          const distance = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
+          const volume = 0.2 * Math.max(0, 1 - distance / 45);
+          if (volume > 0) this.audio.play('footstep', volume, 1.15 + Math.random() * 0.1, this._soundOffset(robot));
+        }
+        continue;
+      }
+      let target = this.player;
+      let targetRange = Math.min(24, Math.hypot(robot.x - target.x, robot.z - target.z));
+      for (const raider of raiders) {
+        const distance = Math.hypot(robot.x - raider.x, robot.z - raider.z);
+        if (!raider.alive || distance >= targetRange
+          || !hasCombatSight(this.world, robot, raider)) continue;
+        target = raider;
+        targetRange = distance;
+      }
+      robot.combatTarget = target;
+      robot.update(dt, target, this.world, this.robots, (r) => {
+        if (this.world.segmentBlocked(r.x, entityFeetZ(r), target.x, entityFeetZ(target), 0.16, false)) return;
+        if (target !== this.player) {
+          this._damageRobot(target, r.meleeDamage, r.x, r.z, null, false);
+          return;
+        }
         if (this.player.takeDamage(r.meleeDamage, time)) {
           this.player.applyMeleeKnockback(r.x, r.z, 2.2 + r.meleeDamage * 0.04);
-          this.audio.playerHurt();
+          this.audio.playerHurt(this._soundOffset(this.player));
           this.el.damageFlash.classList.add('active');
           setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
           this.particles.push(...createBloodSplatter(
@@ -1632,8 +1759,8 @@ class Game {
           robot._audioStep = step;
           if (step > 0) {
             const dist = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
-            if (robot.type === 'scout') this.audio.scoutStomp(dist);
-            else this.audio.enemyFootstep(dist);
+            if (robot.type === 'scout') this.audio.scoutStomp(dist, this._soundOffset(robot));
+            else this.audio.enemyFootstep(dist, this._soundOffset(robot));
           }
         }
       } else {
@@ -1644,7 +1771,7 @@ class Game {
         const phase = robot.shoot.phase;
         if (phase === 'charging' && robot._prevShootPhase !== 'charging') {
           const dist = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
-          this.audio.scoutChargeStart(dist);
+          this.audio.scoutChargeStart(dist, this._soundOffset(robot));
         }
         robot._prevShootPhase = phase;
       }
@@ -1655,7 +1782,7 @@ class Game {
     const breathTarget = getPlayerIdleBreathY(this.player, time);
     this._weaponBreathY += (breathTarget - this._weaponBreathY) * Math.min(1, dt * 18);
     updateParticles(this.particles, dt, this.world, {
-      onCasingLand: () => this.audio.casingLand(),
+      onCasingLand: (casing) => this.audio.casingLand(this._soundOffset(casing, casing.z)),
     });
     this.corpses?.update(dt, time, (x, z) => {
       this.particles.push(...createRobotSmoke(x, z - 0.15, 0.22));
@@ -1665,7 +1792,7 @@ class Game {
   _enemyShoot(robot, angle, damage = 10) {
     if (!robot?.alive || robot.emerging) return;
     const spread = robot.shoot?.bulletSpread ?? 0.28;
-    this.bullets.spawn(
+    const bullet = this.bullets.spawn(
       robot.x,
       robot.z,
       angle,
@@ -1673,29 +1800,132 @@ class Game {
       false,
       this.world,
     );
-    this.audio.enemyShot();
+    if (bullet) bullet.enemyOwner = robot;
+    const offset = this._soundOffset(robot);
+    this.audio.enemyShot(Math.hypot(offset.x, offset.z), offset);
   }
 
-  _damageRobot(robot, damage, fromX, fromZ, bullet = null) {
+  _soundOffset(entity, sourceZ = entityFeetZ(entity)) {
+    const shelter = this.buildings?.getEntityBuildingAt(this.player);
+    const nearOpening = shelter && (
+      [shelter, shelter.rearDoor].some((door) => door?.doorOpen
+        && Math.hypot(this.player.x - (door.originX + (door.doorTx + 0.5) * TILE),
+          entityFeetZ(this.player) - (door.originZ + (door.doorTz + 0.5) * TILE)) < TILE * 1.35)
+      || shelter.walls.some((wall) => wall.window
+        && Math.hypot(this.player.x - wall.x, entityFeetZ(this.player) - wall.z) < TILE * 1.35)
+    );
+    return {
+      x: entity.x - this.player.x,
+      z: entity.z - this.player.z,
+      outside: Boolean(shelter && !nearOpening && this.buildings.getEntityBuildingAt(entity) !== shelter),
+      nearOpening: Boolean(nearOpening),
+      occluded: !nearOpening && Math.hypot(entity.x - this.player.x, entity.z - this.player.z) >= TILE * 3
+        && this.world.segmentBlocked(this.player.x, entityFeetZ(this.player), entity.x, sourceZ,
+          0, false, null, { soundTrace: true }),
+    };
+  }
+
+  _spawnRaiders(time) {
+    if (time < this.nextRaiderSpawnCheck) return;
+    this.nextRaiderSpawnCheck = time + 11;
+    if (this.robots.filter((enemy) => enemy.type === 'raider' && enemy.alive
+      && Math.hypot(enemy.x - this.player.x, enemy.z - this.player.z) < 100).length >= 3) return;
+    for (const chest of this.chests.chests) {
+      const building = chest.homeBuilding;
+      if (!building || !chest.slots.some(Boolean)) continue;
+      const site = `${building.originX},${building.originZ}`;
+      if (this.raiderSpawnSites.has(site)) continue;
+      const x = building.originX + (building.doorTx + 0.5) * TILE;
+      const z = building.originZ + ((building.doorTz ?? building.h - 1) + 2) * TILE;
+      const distance = Math.hypot(x - this.player.x, z - this.player.z);
+      if (distance < 22 || distance > 70 || this.world.checkCollision(x, z, 1.3)) continue;
+      this.raiderSpawnSites.add(site);
+      this.robots.push(new Raider(x, z, chest));
+      return;
+    }
+  }
+
+  _raiderAttack(raider, angle, target, time) {
+    const melee = MELEE_WEAPONS[raider.weaponKey];
+    if (melee) {
+      if (this.world.segmentBlocked(raider.x, entityFeetZ(raider), target.x, entityFeetZ(target), 0.16, false)) return 0.25;
+      const damage = Math.round(melee.damage * 0.55);
+      this.audio.play('melee', 0.7, 1, this._soundOffset(raider));
+      if (target !== this.player) this._damageRobot(target, damage, raider.x, raider.z, null, false);
+      else if (target.takeDamage(damage, time)) {
+        this.audio.playerHurt(this._soundOffset(this.player));
+        this.el.damageFlash.classList.add('active');
+        setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
+        this.particles.push(...createBloodSplatter(target.x, target.z, raider.x, raider.z, damage));
+      }
+      return 0.85;
+    }
+    const weapon = WEAPONS[raider.weaponKey];
+    const bloom = Math.min(0.24, (raider.shotBloom ?? 0) + (weapon.automatic ? 0.045 : 0.08));
+    raider.shotBloom = bloom;
+    const shot = { ...weapon, damage: weapon.damage * (weapon.automatic ? 0.38 : 0.55), spread: Math.max(0.26, weapon.spread) + bloom };
+    for (let i = 0; i < weapon.pellets; i++) {
+      const bullet = this.bullets.spawn(raider.x, raider.z, angle, shot, false, this.world);
+      if (bullet) {
+        bullet.enemyOwner = raider;
+        bullet.raiderShotOrigin = { x: raider.x, z: entityFeetZ(raider) };
+      }
+    }
+    const distance = Math.hypot(raider.x - this.player.x, raider.z - this.player.z);
+    const volume = Math.max(0, 1 - distance / 80);
+    if (volume > 0) this.audio.play(weapon.sound, volume, 0.95 + Math.random() * 0.2, this._soundOffset(raider));
+    return weapon.automatic
+      ? Math.max(0.13, weapon.fireRate) + Math.random() * 0.07
+      : Math.max(0.48, weapon.fireRate) + Math.random() * 0.25;
+  }
+
+  _damageRobot(robot, damage, fromX, fromZ, bullet = null, playerCredit = true) {
     if (!robot.applyHit(damage, fromX, fromZ, this.world, {
       fromBullet: !!bullet,
       alert: this.player.canSeeEnemyOnScreen(robot),
     })) return;
-    this.audio.hitEnemy();
-    this.particles.push(...createRobotHitSparks(robot.x, robot.z, fromX, fromZ, damage));
+    const isRaider = robot.type === 'raider';
+    const soundOffset = this._soundOffset(robot);
+    if (isRaider) {
+      this.audio.playerHurt(soundOffset);
+      this.particles.push(...createBloodSplatter(robot.x, robot.z, fromX, fromZ, damage));
+    } else {
+      this.audio.hitEnemy(soundOffset);
+      this.particles.push(...createRobotHitSparks(robot.x, robot.z, fromX, fromZ, damage));
+    }
     if (bullet) bullet.active = false;
     if (!robot.alive) {
-      this.kills++;
-      if (this.raidProfile) {
-        const reached = challengeProgress(this.raidProfile, this.kills).find((challenge) =>
-          !challenge.claimed && challenge.metric === 'extractedKills' && challenge.progress >= challenge.goal && challengeProgress(this.raidProfile, this.kills - 1).some((entry) => entry.id === challenge.id && entry.progress < entry.goal));
-        if (reached) this.showWaveBanner(`${reached.title} · Extract to complete`, 3);
+      if (isRaider) {
+        if (playerCredit) this.raiderKills++;
+        const weapon = WEAPONS[robot.weaponKey];
+        const loot = [
+          ...robot.loot,
+          ...(Math.random() < 0.35 ? [{
+            kind: weapon ? 'weapon' : 'melee', key: robot.weaponKey, durability: 45 + Math.floor(Math.random() * 31),
+            ...(weapon && { ammo: robot.ammo }),
+          }] : []),
+          ...(robot.bandages > 0 ? [{ kind: 'consumable', key: 'bandage', amount: robot.bandages }] : []),
+          weapon ? { kind: 'ammo', ammoType: getWeaponAmmoType(robot.weaponKey), amount: weapon.magSize }
+            : { kind: 'material', key: 'mechanical_comp', amount: 2 },
+        ];
+        for (const item of loot) this.groundDrops.dropAt(robot.x, robot.z, item, null, { preserve: true });
+        const index = this.robots.indexOf(robot);
+        if (index >= 0) this.robots.splice(index, 1);
+        return;
+      }
+      if (playerCredit) {
+        this.kills++;
+        if (this.raidProfile) {
+          const reached = challengeProgress(this.raidProfile, this.kills).find((challenge) =>
+            !challenge.claimed && challenge.metric === 'extractedKills' && challenge.progress >= challenge.goal && challengeProgress(this.raidProfile, this.kills - 1).some((entry) => entry.id === challenge.id && entry.progress < entry.goal));
+          if (reached) this.showWaveBanner(`${reached.title} · Extract to complete`, 3);
+        }
       }
       const time = performance.now() / 1000;
       this.corpses.spawnFromRobot(robot, time);
       const idx = this.robots.indexOf(robot);
       if (idx >= 0) this.robots.splice(idx, 1);
-      this.audio.explosion();
+      this.audio.explosion(this._soundOffset(robot));
       this.particles.push(...createExplosion(robot.x, robot.z));
       this.particles.push(...createRobotDeathFx(robot.x, robot.z, robot.radius * 1.1));
       this.particles.push(...createRobotSmoke(robot.x, robot.z, 0.55));
@@ -1793,7 +2023,7 @@ class Game {
     let best = null;
     let bestD = Infinity;
     const worldToScreen = (wx, wz) => this._worldToScreen(wx, wz);
-    for (const building of this.buildings.buildings) {
+    for (const building of this.buildings.buildings.flatMap((house) => house.rearDoor ? [house, house.rearDoor] : [house])) {
       const box = getDoorScreenHitBox(building, worldToScreen);
       const dx = this.mouse.sx - box.x;
       const dy = this.mouse.sy - box.y;
@@ -1826,7 +2056,6 @@ class Game {
       }
       return false;
     }
-    this.audio.doorToggle(building.doorOpen);
     return true;
   }
 
@@ -2079,14 +2308,8 @@ class Game {
       const dz = robot.z - this.player.z;
       const dist = Math.hypot(dx, dz);
       if (dist > range + robot.radius) continue;
-      if (this.world.segmentBlocked(this.player.x, this.player.z, robot.x, robot.z, 0.2, false, null, {
-        losSeg: {
-          x0: this.player.x,
-          z0: this.player.z,
-          x1: robot.x,
-          z1: robot.z,
-        },
-      })) {
+      if (this.world.segmentBlocked(this.player.x, entityFeetZ(this.player),
+        robot.x, entityFeetZ(robot), 0.16, false)) {
         continue;
       }
       let diff = Math.atan2(dx, dz) - aim;
@@ -2104,28 +2327,37 @@ class Game {
 
   _onBulletHit(bullet) {
     const time = performance.now() / 1000;
-    if (bullet.fromPlayer) {
+    const origin = bullet.playerShotOrigin
+      ?? (bullet.enemyOwner?.type === 'raider' ? bullet.raiderShotOrigin : null);
+    const blocked = (target) => origin && this.world.segmentBlocked(
+      origin.x, origin.z, target.x, entityFeetZ(target), 0.06, false, null, { feetTrace: true });
+    if (bullet.fromPlayer || bullet.enemyOwner) {
       for (const robot of this.robots) {
         if (!robot.alive) continue;
+        if (!bullet.fromPlayer && (robot === bullet.enemyOwner
+          || (bullet.enemyOwner.type !== 'raider' && robot.type !== 'raider'))) continue;
         const dx = bullet.x - robot.x;
-        const dz = bullet.z - robot.z;
+        const hitZ = bullet.playerShotOrigin ? robot.z + (robot.getHitCollider()?.zOff ?? 0) : robot.z;
+        const dz = bullet.z - hitZ;
         if (dx * dx + dz * dz < (robot.radius + 0.5) ** 2) {
+          if (blocked(robot)) continue;
           const fromX = bullet.x - bullet.vx * 0.02;
           const fromZ = bullet.z - bullet.vz * 0.02;
-          this._damageRobot(robot, bullet.damage, fromX, fromZ, bullet);
-          return;
-            }
-          }
+          this._damageRobot(robot, bullet.damage, fromX, fromZ, bullet, bullet.fromPlayer);
           return;
         }
+      }
+      if (bullet.fromPlayer) return;
+    }
 
     if (!this.player?.alive) return;
       const dx = bullet.x - this.player.x;
       const dz = bullet.z - this.player.z;
     const hitR = this.player.radius + 0.45;
     if (dx * dx + dz * dz >= hitR * hitR) return;
+    if (blocked(this.player)) return;
     if (this.player.takeDamage(bullet.damage, time, { perBullet: true })) {
-          this.audio.playerHurt();
+          this.audio.playerHurt(this._soundOffset(this.player));
           this.el.damageFlash.classList.add('active');
           setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
       this.particles.push(...createBloodSplatter(
@@ -2198,8 +2430,9 @@ class Game {
     const trailWorld = Math.min(1.15, speed * 0.011);
     const nx = b.vx / speed;
     const nz = b.vz / speed;
-    const tail = this._worldToScreen(b.x - nx * trailWorld, b.z - nz * trailWorld);
-    const head = this._worldToScreen(b.x, b.z);
+    const spriteZ = b.z - (b.spriteLift ?? 0);
+    const tail = this._worldToScreen(b.x - nx * trailWorld, spriteZ - nz * trailWorld);
+    const head = this._worldToScreen(b.x, spriteZ);
     const dx = head.x - tail.x;
     const dy = head.y - tail.y;
     const len = Math.hypot(dx, dy);
@@ -2413,9 +2646,13 @@ class Game {
       return;
     }
 
-    const ctx = this.ctx;
+    let ctx = this.ctx;
     const nightFactor = this.dayNight?.getNightFactor() ?? 0;
     this._syncCamPixels();
+    ctx.resetTransform();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#2a3a32';
@@ -2477,34 +2714,49 @@ class Game {
       maxZ: Math.ceil(viewMaxZ / TILE) * TILE,
     };
     const occluders = collectWallOccluders(visibleBuildings, lightView);
+    occluders.push(...collectPropOccluders(visibleBuildings, this._cachedYsortFoliage, lightView, playerX, playerZ));
     const colliderZ = playerZ + this.player.getMoveCollider(PPU).zOff;
+    const floorPixel = TILE / BUILDING_ART_PX;
     const lightOrigin = resolveWallLightOrigin(
-      Math.round(playerX * PPU) / PPU, Math.round(colliderZ * PPU) / PPU,
+      Math.round(playerX / floorPixel) * floorPixel, Math.round(colliderZ / floorPixel) * floorPixel,
       playerX, colliderZ, occluders,
     );
-    const floorPixel = TILE / BUILDING_ART_PX;
     const lightKey = occluders.length ? JSON.stringify([lightOrigin, lightView, occluders]) : null;
     if (lightKey !== this._wallLightKey) {
       this._wallLightKey = lightKey;
-      this._wallLight = computeWallVisibility(lightOrigin.x, lightOrigin.z, lightView, occluders);
+      this._wallLightWithoutCaster = new Map();
+      this._wallLight = computeWallVisibility(lightOrigin.x, lightOrigin.z, lightView, occluders, this._wallLightWithoutCaster);
       if (this._wallLight) {
         this._wallShadowCanvas ??= document.createElement('canvas');
         rasterizeWallShadow(this._wallShadowCanvas, this._wallLight, lightView, floorPixel);
       }
     }
-    if (this._wallLight) {
-      const origin = worldToScreen(lightView.minX, lightView.minZ);
-      const mask = this._wallShadowCanvas;
+    const shadowMask = this._wallLight ? this._wallShadowCanvas : null;
+    const shadowOrigin = worldToScreen(lightView.minX, lightView.minZ);
+    const drawShadowMask = (context, mask = shadowMask) => {
+      context.imageSmoothingEnabled = false;
+      context.globalAlpha = 0.25;
+      context.drawImage(mask, shadowOrigin.x, shadowOrigin.y,
+        mask.width * floorPixel * PPU, mask.height * floorPixel * PPU);
+    };
+    if (shadowMask) {
       ctx.save();
-      ctx.imageSmoothingEnabled = false;
-      ctx.globalAlpha = 0.25;
-      ctx.drawImage(mask, origin.x, origin.y, mask.width * floorPixel * PPU, mask.height * floorPixel * PPU);
+      drawShadowMask(ctx);
       ctx.restore();
     }
     const lit = (x, z) => pointInWallLight(this._wallLight, x, z);
     const lightPath = this._wallLight && makeWallLightPath(this._wallLight, worldToScreen);
     const drawList = this._drawListScratch;
     drawList.length = 0;
+    const shadowBounds = (x, z, size) => {
+      const p = worldToScreen(x, z);
+      return { minX: p.x - size, minY: p.y - size, maxX: p.x + size, maxY: p.y + size };
+    };
+    const shadowGridOrigin = worldToScreen(0, 0);
+    const drawHumanShadow = (point, bounce) => {
+      const feetY = Math.round(point.y + bounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
+      drawPixelEllipseShadow(ctx, point.x, feetY, 10, 4, tilePx, shadowGridOrigin);
+    };
     const brightParticles = [];
     for (const building of visibleBuildings) {
       this.buildings?._ensureBuildingDecorSprites(building, this.sprites);
@@ -2514,6 +2766,9 @@ class Game {
         drawList.push({
           z: piece.sortZ,
           sortBias: piece.sortBias ?? SORT_ENTITY,
+          receivesShadow: true,
+          shadowSource: piece,
+          shadowBounds: shadowBounds(piece.x, piece.z, tilePx * 2),
           draw: () => drawDecorPiece(ctx, this.sprites, piece, tilePx, worldToScreen),
         });
       }
@@ -2537,6 +2792,7 @@ class Game {
               size * 0.36,
               size * 0.13,
               tilePx,
+              shadowGridOrigin,
             );
           },
         });
@@ -2544,6 +2800,9 @@ class Game {
       drawList.push({
         z: sortZ,
         sortBias: SORT_WALL_BACK,
+        receivesShadow: true,
+        shadowSource: f,
+        shadowBounds: shadowBounds(f.x, f.z, tilePx * (f.drawSize ?? 1) + 2),
         draw: () => {
           const s = this._worldToScreen(f.x, f.z);
           const size = tilePx * (f.drawSize ?? 1);
@@ -2598,21 +2857,23 @@ class Game {
           draw: () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites),
         });
       }
-      if (!doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
-        const doorWx = bOriginX + (building.doorTx ?? Math.floor(building.w / 2) + 0.5) * TILE;
-        const doorWz = bOriginZ + (building.doorTz ?? building.h - 1 + 0.5) * TILE;
+      for (const door of building.rearDoor ? [building, building.rearDoor] : [building]) {
+        if (doorDrawsInFront(door, playerSortZ, playerInside, playerX, playerZ)) continue;
+        const doorWx = bOriginX + ((door.doorTx ?? Math.floor(door.w / 2)) + 0.5) * TILE;
+        const doorWz = bOriginZ + ((door.doorTz ?? door.h - 1) + 0.5) * TILE;
         if (inView(doorWx, doorWz)) {
           drawList.push({
-            z: doorBackDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
+            z: doorBackDrawZ(door, playerSortZ, playerInside, playerX, playerZ),
             sortBias: SORT_WALL_BACK,
-            draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
+            draw: () => drawBuildingDoor(ctx, door, worldToScreen, tilePx, this.sprites),
           });
         }
       }
     }
     for (const chest of this.chests.chests) {
       if (!inView(chest.x, chest.z, TILE * 2)) continue;
-      drawList.push({ z: chest.z, sortBias: SORT_ENTITY, draw: () => {
+      drawList.push({ z: chest.z + 0.02, sortBias: SORT_ENTITY, receivesShadow: true,
+        shadowBounds: shadowBounds(chest.x, chest.z, tilePx * 2), draw: () => {
         const s = this._chestScreenPos(chest);
         this.sprites.draw(
           ctx,
@@ -2639,6 +2900,7 @@ class Game {
           GROUND_DROP_DISPLAY_PX * 0.45,
           GROUND_DROP_DISPLAY_PX * 0.15,
           tilePx,
+          shadowGridOrigin,
         );
         this.sprites.drawGroundItem(
           ctx,
@@ -2654,6 +2916,28 @@ class Game {
     for (const robot of this.robots) {
       if (!robot.alive && !robot.emerging) continue;
       if (!inView(robot.x, robot.z, spritePad) || !lit(robot.x, entityFeetZ(robot))) continue;
+      if (robot.type === 'raider') {
+        const z = this._feetSortZ(robot.x, robot.z, CHAR_NATIVE_PX, SPRITE_PLAYER);
+        const point = this._worldToScreen(robot.x, robot.z);
+        drawList.push({ z, sortBias: SORT_SHADOW, draw: () => drawHumanShadow(point, 0) });
+        drawList.push({ z, sortBias: SORT_ENTITY, draw: () => {
+          const flip = Math.sin(robot.angle) < 0;
+          this.sprites.draw(ctx, getPlayerSheet(robot), point.x, point.y, SPRITE_PLAYER, 0, flip, 'center', 0,
+            getPlayerAnim(robot, dropDrawTime));
+          const gun = WEAPONS[robot.weaponKey];
+          if (gun) {
+            const aim = gunAimTransform(robot.angle);
+            this.sprites.draw(ctx, gun.sprite, point.x + Math.sin(robot.angle) * 8,
+              point.y - 5 + Math.cos(robot.angle) * 5, 1.1, aim.angle, aim.flipX, 'center');
+          } else {
+            const melee = MELEE_WEAPONS[robot.weaponKey];
+            const pose = getMeleeHoldPose(robot);
+            const hold = worldToScreen(pose.worldX, pose.worldZ);
+            this.sprites.draw(ctx, melee.sprite, hold.x, hold.y - 5, 1.1, pose.angle, pose.flipX, 'center');
+          }
+        }});
+        continue;
+      }
       const enemyNativePx = getEnemyNativePx(robot.type);
       const enemyDrawScale = getEnemyDrawScale(robot.type);
       const robotSortZ = this._feetSortZ(robot.x, robot.z, enemyNativePx, enemyDrawScale);
@@ -2691,7 +2975,7 @@ class Game {
         const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
         const anchorY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob);
         const feetY = Math.round(anchorY + spriteFeetOffset(enemyNativePx, scale) + walkBouncePx);
-        drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx);
+        drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx, shadowGridOrigin);
       }});
       drawList.push({ z: robotSortZ, sortBias: SORT_ENTITY, draw: () => {
         const drawTime = performance.now() / 1000;
@@ -2779,8 +3063,7 @@ class Game {
     const playerAnim = getPlayerAnim(this.player, drawTime);
     drawList.push({ z: playerSortZ, sortBias: SORT_SHADOW, draw: () => {
       const s = this._worldToScreen(this.player.x, this.player.z);
-      const feetY = Math.round(s.y + playerBounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
-      drawPixelEllipseShadow(ctx, s.x, feetY, 10, 4, tilePx);
+      drawHumanShadow(s, playerBounce);
     }});
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, draw: () => {
       const s = this._worldToScreen(this.player.x, this.player.z);
@@ -2806,14 +3089,15 @@ class Game {
           draw: () => drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, this.sprites),
         });
       }
-      if (doorDrawsInFront(building, playerSortZ, playerInside, playerX, playerZ)) {
-        const doorWx = building.originX + (building.doorTx ?? Math.floor(building.w / 2) + 0.5) * TILE;
-        const doorWz = building.originZ + (building.doorTz ?? building.h - 1 + 0.5) * TILE;
+      for (const door of building.rearDoor ? [building, building.rearDoor] : [building]) {
+        if (!doorDrawsInFront(door, playerSortZ, playerInside, playerX, playerZ)) continue;
+        const doorWx = door.originX + ((door.doorTx ?? Math.floor(door.w / 2)) + 0.5) * TILE;
+        const doorWz = door.originZ + ((door.doorTz ?? door.h - 1) + 0.5) * TILE;
         if (inView(doorWx, doorWz)) {
           drawList.push({
-            z: doorFrontDrawZ(building, playerSortZ, playerInside, playerX, playerZ),
+            z: doorFrontDrawZ(door, playerSortZ, playerInside, playerX, playerZ),
             sortBias: SORT_WALL_FRONT,
-            draw: () => drawBuildingDoor(ctx, building, worldToScreen, tilePx, this.sprites),
+            draw: () => drawBuildingDoor(ctx, door, worldToScreen, tilePx, this.sprites),
           });
         }
       }
@@ -2851,16 +3135,73 @@ class Game {
         lightOnly: true,
         draw: () => {
           this._drawBulletTrail(ctx, b);
-      const s = this._worldToScreen(b.x, b.z);
-      const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
+          const s = this._worldToScreen(b.x, b.z - (b.spriteLift ?? 0));
+          const bScale = b.fromPlayer ? SPRITE_BULLET : 1;
           const bAngle = velToSpriteAngle(b.vx, b.vz);
           this.sprites.draw(ctx, 'bullet', s.x, s.y, bScale, bAngle);
         },
       });
     }
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
-    for (const entry of drawList) {
-      if (lightPath && entry.lightOnly) {
+    // Group consecutive props while keeping their depth relative to walls and entities.
+    const sceneContext = ctx;
+    const casterBySource = new Map(occluders.filter((box) => box.source).map((box) => [box.source, box]));
+    for (let i = 0; i < drawList.length; i++) {
+      const entry = drawList[i];
+      if (shadowMask && entry.receivesShadow) {
+        const caster = casterBySource.get(entry.shadowSource);
+        let mask = shadowMask;
+        if (caster) {
+          this._propShadowMasks ??= new WeakMap();
+          let cached = this._propShadowMasks.get(entry.shadowSource);
+          if (cached?.lightKey !== lightKey) {
+            const light = this._wallLightWithoutCaster.get(entry.shadowSource);
+            const canvas = cached?.canvas ?? document.createElement('canvas');
+            if (light) rasterizeWallShadow(canvas, light, lightView, floorPixel);
+            cached = { lightKey, canvas, hasShadow: Boolean(light) };
+            this._propShadowMasks.set(entry.shadowSource, cached);
+          }
+          mask = cached.hasShadow ? cached.canvas : null;
+        }
+        const first = i;
+        const bounds = { ...entry.shadowBounds };
+        while (!caster && drawList[i + 1]?.receivesShadow
+          && !casterBySource.has(drawList[i + 1].shadowSource)) {
+          const next = drawList[++i].shadowBounds;
+          bounds.minX = Math.min(bounds.minX, next.minX);
+          bounds.minY = Math.min(bounds.minY, next.minY);
+          bounds.maxX = Math.max(bounds.maxX, next.maxX);
+          bounds.maxY = Math.max(bounds.maxY, next.maxY);
+        }
+        const x = Math.max(0, Math.floor(bounds.minX));
+        const y = Math.max(0, Math.floor(bounds.minY));
+        const width = Math.min(INTERNAL_W, Math.ceil(bounds.maxX)) - x;
+        const height = Math.min(INTERNAL_H, Math.ceil(bounds.maxY)) - y;
+        if (width <= 0 || height <= 0) continue;
+        if (!mask) {
+          for (let j = first; j <= i; j++) drawList[j].draw();
+          continue;
+        }
+        if (!this._propShadowLayer) this._propShadowLayer = document.createElement('canvas');
+        const layer = this._propShadowLayer;
+        if (layer.width !== this.canvas.width) layer.width = this.canvas.width;
+        if (layer.height !== this.canvas.height) layer.height = this.canvas.height;
+        ctx = layer.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        const scale = this.renderScale;
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        ctx.clearRect(x, y, width, height);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.clip();
+        for (let j = first; j <= i; j++) drawList[j].draw();
+        ctx.globalCompositeOperation = 'source-atop';
+        drawShadowMask(ctx, mask);
+        ctx.restore();
+        ctx = sceneContext;
+        ctx.drawImage(layer, x * scale, y * scale, width * scale, height * scale, x, y, width, height);
+      } else if (lightPath && entry.lightOnly) {
         ctx.save();
         ctx.clip(lightPath);
         entry.draw();
@@ -2870,14 +3211,29 @@ class Game {
       }
     }
 
-    for (const building of visibleBuildings) {
-      const alpha = this.buildings?.roofAlphaFor(building) ?? 1;
-      drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, this.sprites);
-    }
-
     this._drawPlayerCooldown(ctx, performance.now() / 1000);
 
     applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);
+    const bounds = getWorldBoundsWorld();
+    const near = worldToScreen(bounds.minX, bounds.minZ);
+    const far = worldToScreen(bounds.maxX, bounds.maxZ);
+    const fogWidth = TILE * PPU * 7;
+    for (const [edge, direction, limit, horizontal] of [
+      [near.x, 1, INTERNAL_W, true], [far.x, -1, INTERNAL_W, true],
+      [near.y, 1, INTERNAL_H, false], [far.y, -1, INTERNAL_H, false],
+    ]) {
+      const inner = edge + direction * fogWidth;
+      if (direction > 0 ? inner <= 0 : inner >= limit) continue;
+      const gradient = horizontal ? ctx.createLinearGradient(edge, 0, inner, 0)
+        : ctx.createLinearGradient(0, edge, 0, inner);
+      gradient.addColorStop(0, '#353d39');
+      gradient.addColorStop(1, 'rgba(53, 61, 57, 0)');
+      ctx.fillStyle = gradient;
+      const start = direction > 0 ? 0 : Math.max(0, inner);
+      const size = direction > 0 ? Math.min(limit, inner) : limit - start;
+      if (horizontal) ctx.fillRect(start, 0, size, INTERNAL_H);
+      else ctx.fillRect(0, start, INTERNAL_W, size);
+    }
 
     brightParticles.sort((a, b) => a.z - b.z);
     ctx.save();
@@ -2887,6 +3243,22 @@ class Game {
     }
 
     ctx.restore();
+
+    const vignetteRadius = Math.hypot(this._visibleHalfWidth, this._visibleHalfHeight);
+    if (vignetteRadius > 0) {
+      if (this._vignetteRadius !== vignetteRadius) {
+        const x = INTERNAL_W / 2;
+        const y = INTERNAL_H / 2;
+        const gradient = ctx.createRadialGradient(x, y, vignetteRadius * 0.42, x, y, vignetteRadius);
+        gradient.addColorStop(0, 'rgba(12, 16, 14, 0)');
+        gradient.addColorStop(0.65, 'rgba(12, 16, 14, 0.09)');
+        gradient.addColorStop(1, 'rgba(12, 16, 14, 0.28)');
+        this._vignette = gradient;
+        this._vignetteRadius = vignetteRadius;
+      }
+      ctx.fillStyle = this._vignette;
+      ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
+    }
 
     if (this.debugCollision) {
       drawCollisionDebug(
@@ -3153,6 +3525,10 @@ class Game {
     this._checkGameOver();
     if (this.running) this._updateExtraction(dt);
     if (!this.running || this.paused) return;
+    if (now >= this.nextRaidCheckpointAt) {
+      this._saveRaidCheckpoint();
+      this.nextRaidCheckpointAt = now + 3000;
+    }
     this._draw();
     this._updateHUD();
     this._scheduleFrame();

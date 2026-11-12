@@ -93,7 +93,7 @@ export class ChunkEntityManager {
 
   _countNearbySpiders(player) {
     const d2 = this._despawnDist2();
-    return this._livingRobots().filter((r) => this._nearbyDist2(player, r.x, r.z) <= d2).length;
+    return this._livingRobots().filter((r) => r.type !== 'raider' && this._nearbyDist2(player, r.x, r.z) <= d2).length;
   }
 
   _countNearbyChests(player) {
@@ -186,6 +186,7 @@ export class ChunkEntityManager {
 
     this.game.robots = this.game.robots.filter((r) => {
       if (!r.alive && !r.emerging) return false;
+      if (r.type === 'raider') return true;
       if (this._nearbyDist2(player, r.x, r.z) <= d2) return true;
       if (r.homeCx !== undefined && r.homeCz !== undefined) {
         clearedSpiderChunks.add(`${r.homeCx},${r.homeCz}`);
@@ -375,7 +376,7 @@ export class ChunkEntityManager {
     }
 
     const roll = hash01(chunk.cx * 7 + 13, chunk.cz * 11 + 29);
-    const spawnChance = this._robotSpawnChanceForChunk(center.x, center.z);
+    const spawnChance = Math.min(1, this._robotSpawnChanceForChunk(center.x, center.z) * 1.25);
     if (roll >= spawnChance) {
       chunk.spidersSpawned = true;
       return;

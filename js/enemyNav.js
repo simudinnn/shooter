@@ -6,7 +6,6 @@ import {
   CELL_FLOOR,
   getDoorWorldPos,
   getBuildingCellAtWorld,
-  isInOpenDoorNavZone,
   isNavBlockedBuildingCell,
   shapeOverlapsOpenDoorNavZone,
   entityFeetZ,
@@ -75,13 +74,17 @@ export function getPlayerBuilding(buildings, player) {
 
 export function isPlayerBehindClosedDoor(player, buildings) {
   const bld = getPlayerBuilding(buildings, player);
-  return bld != null && !bld.doorOpen;
+  return bld != null && !bld.doorOpen && !bld.rearDoor?.doorOpen;
 }
+
+const buildingDoors = (building) => building.rearDoor ? [building, building.rearDoor] : [building];
+const doorIsOpen = ({ building, tx, tz }) => buildingDoors(building)
+  .some((door) => door.doorOpen && door.doorTx === tx && (door.doorTz ?? door.h - 1) === tz);
 
 function isClosedDoorTile(buildings, wx, wz) {
   const list = buildings?.buildings;
   if (!list) return false;
-  for (const b of list) {
+  for (const b of list.flatMap(buildingDoors)) {
     if (b.doorOpen) continue;
     const doorTx = b.doorTx ?? Math.floor(b.w / 2);
     const doorTz = b.doorTz ?? b.h - 1;
@@ -97,17 +100,25 @@ function getBuildingCellAt(buildings, wx, wz) {
   return getBuildingCellAtWorld(buildings, wx, wz);
 }
 
+function doorMouthZ(building) {
+  const doorTz = building.doorTz ?? building.h - 1;
+  return building.originZ + (doorTz + (building.doorFacing === 'north' ? 0 : 1)) * TILE;
+}
+
+function doorOutsideZ(building, tiles) {
+  return doorMouthZ(building) + (building.doorFacing === 'north' ? -1 : 1) * TILE * tiles;
+}
+
 function isExteriorDoorApproachTile(buildings, tx, tz) {
   const wx = (tx + 0.5) * TILE;
   const wz = (tz + 0.5) * TILE;
-  for (const b of buildings?.buildings ?? []) {
+  for (const b of (buildings?.buildings ?? []).flatMap(buildingDoors)) {
     if (!b.doorOpen) continue;
     const doorTx = b.doorTx ?? Math.floor(b.w / 2);
-    const doorTz = b.doorTz ?? b.h - 1;
     const doorWx = b.originX + (doorTx + 0.5) * TILE;
-    const mouthZ = b.originZ + (doorTz + 1) * TILE;
+    const depth = (wz - doorMouthZ(b)) * (b.doorFacing === 'north' ? -1 : 1);
     if (Math.abs(wx - doorWx) > TILE * 0.55) continue;
-    if (wz >= mouthZ - TILE * 0.1 && wz <= mouthZ + TILE * 0.75) return true;
+    if (depth >= -TILE * 0.1 && depth <= TILE * 0.75) return true;
   }
   return false;
 }
@@ -143,7 +154,6 @@ function isTileWalkable(world, buildings, tx, tz) {
   const wx = (tx + 0.5) * TILE;
   const wz = (tz + 0.5) * TILE;
   if (isClosedDoorTile(buildings, wx, wz)) return false;
-  if (isInOpenDoorNavZone(buildings, wx, wz)) return true;
 
   const info = getBuildingCellAt(buildings, wx, wz);
   if (info) {
@@ -152,7 +162,7 @@ function isTileWalkable(world, buildings, tx, tz) {
       return !world.checkCollisionShape(wx, wz, NAV_SHAPE, true, { forNav: true, buildings });
     }
     if (isNavBlockedBuildingCell(building, info.tx, info.tz)) return false;
-    if (cell === CELL_DOOR && building.doorOpen) return true;
+    if (cell === CELL_DOOR && doorIsOpen(info)) return true;
     if (cell === CELL_FLOOR) {
       return !world.checkCollisionShape(wx, wz, TIGHT_NAV_SHAPE, true, { forNav: true, buildings });
     }
@@ -178,7 +188,7 @@ function filterGoalCandidates(player, buildings, candidates) {
     if (info.cell === CELL_EMPTY) continue;
     if (!playerBld) continue;
     if (info.building !== playerBld) continue;
-    if (info.cell === CELL_FLOOR || (info.cell === CELL_DOOR && info.building.doorOpen)) {
+    if (info.cell === CELL_FLOOR || (info.cell === CELL_DOOR && doorIsOpen(info))) {
       filtered.push(t);
     }
   }
@@ -194,7 +204,7 @@ function isGoalTile(world, buildings, tx, tz) {
     if (cell === CELL_EMPTY) return false;
     // Floor/door goals include perimeter tiles (south/EW wall rows) where the player can stand.
     if (cell === CELL_FLOOR) return true;
-    if (cell === CELL_DOOR && building.doorOpen) return true;
+    if (cell === CELL_DOOR && doorIsOpen(info)) return true;
     return false;
   }
   return isTileWalkable(world, buildings, tx, tz);
@@ -209,11 +219,11 @@ function isFlowGoalSeed(world, buildings, tx, tz) {
   if (!info) return false;
   if (info.cell === CELL_EMPTY) return false;
   if (info.cell === CELL_FLOOR) return true;
-  if (info.cell === CELL_DOOR && info.building.doorOpen) return true;
+  if (info.cell === CELL_DOOR && doorIsOpen(info)) return true;
   return false;
 }
 
-export function canWalkDirect(world, ax, az, bx, bz, shape, buildings = null) {
+export function canWalkDirect(world, ax, az, bx, bz, shape, buildings = null, strict = false) {
   const dist = Math.hypot(bx - ax, bz - az);
   if (dist < 0.05) return true;
   const steps = Math.max(3, Math.ceil(dist / (TILE * 0.65)));
@@ -222,7 +232,9 @@ export function canWalkDirect(world, ax, az, bx, bz, shape, buildings = null) {
     const t = i / steps;
     const wx = ax + (bx - ax) * t;
     const wz = az + (bz - az) * t;
-    if (buildings) {
+    if (strict) {
+      if (world.checkCollisionShape(wx, wz, nav)) return false;
+    } else if (buildings) {
       const tx = Math.floor(wx / TILE);
       const tz = Math.floor(wz / TILE);
       if (!isTileWalkable(world, buildings, tx, tz)) return false;
@@ -316,17 +328,16 @@ function collectDoorSeedTiles(playerBld) {
   const doorTz = playerBld.doorTz ?? playerBld.h - 1;
   const doorWx = playerBld.originX + (doorTx + 0.5) * TILE;
   const doorWz = playerBld.originZ + (doorTz + 0.5) * TILE;
-  const mouthZ = playerBld.originZ + (doorTz + 1) * TILE;
   const seeds = new Map();
   const add = (wx, wz) => seeds.set(`${Math.floor(wx / TILE)},${Math.floor(wz / TILE)}`, {
     tx: Math.floor(wx / TILE),
     tz: Math.floor(wz / TILE),
   });
   add(doorWx, doorWz);
-  add(doorWx, mouthZ + TILE * 0.35);
-  add(doorWx, mouthZ + TILE * 0.85);
-  add(doorWx - TILE * 0.55, mouthZ + TILE * 0.55);
-  add(doorWx + TILE * 0.55, mouthZ + TILE * 0.55);
+  add(doorWx, doorOutsideZ(playerBld, 0.35));
+  add(doorWx, doorOutsideZ(playerBld, 0.85));
+  add(doorWx - TILE * 0.55, doorOutsideZ(playerBld, 0.55));
+  add(doorWx + TILE * 0.55, doorOutsideZ(playerBld, 0.55));
   return [...seeds.values()];
 }
 
@@ -361,8 +372,7 @@ function pickFlowLayer(wx, wz, buildings, robot = null) {
 
 function getDoorApproachGoal(building, robot, player, buildings) {
   const door = getDoorWorldPos(building);
-  const doorTz = building.doorTz ?? building.h - 1;
-  const mouthZ = building.originZ + (doorTz + 1) * TILE;
+  const mouthZ = doorMouthZ(building);
   const navShape = robot.getMoveCollider?.() ?? NAV_SHAPE;
   const distMouth = Math.hypot(robot.x - door.x, robot.z - mouthZ);
 
@@ -371,9 +381,9 @@ function getDoorApproachGoal(building, robot, player, buildings) {
     return { x: center.x, z: center.z, kind: 'door-through' };
   }
   if (distMouth <= TILE * 2.5) {
-    return { x: door.x, z: mouthZ + TILE * 0.4, kind: 'door-approach' };
+    return { x: door.x, z: doorOutsideZ(building, 0.4), kind: 'door-approach' };
   }
-  return { x: door.x, z: mouthZ + TILE * 0.85, kind: 'door-open' };
+  return { x: door.x, z: doorOutsideZ(building, 0.85), kind: 'door-open' };
 }
 
 function getPlayerFlowGoalTiles(player, world, buildings) {
@@ -385,7 +395,7 @@ function getPlayerFlowGoalTiles(player, world, buildings) {
     const door = getDoorWorldPos(bld);
     return resolveGoalTiles(world, buildings, player, [{
       tx: Math.floor(door.x / TILE),
-      tz: Math.floor((bld.originZ + bld.h * TILE + TILE * 0.5) / TILE),
+      tz: Math.floor((doorOutsideZ(bld, 0.5)) / TILE),
     }]);
   }
   const candidates = filterGoalCandidates(player, buildings, getEntityMoveGoalTiles(player, 8));
@@ -398,7 +408,7 @@ function computeFlowGoal(player, buildings) {
     const door = getDoorWorldPos(bld);
     return {
       x: door.x,
-      z: bld.originZ + bld.h * TILE + TILE * 0.5,
+      z: doorOutsideZ(bld, 0.5),
     };
   }
   return getEntityMoveGoalCenter(player, 8);
@@ -543,7 +553,7 @@ export function tickTileFlowField(time, world, buildings, player, robots) {
 
   let hasAggro = false;
   for (const r of robots ?? []) {
-    if (!r.alive || r.emerging) continue;
+    if (!r.alive || r.emerging || r.combatTarget !== player) continue;
     if (!r.chasing && !r.aggroByHit) continue;
     if (Math.hypot(r.x - player.x, r.z - player.z) <= FLOW_ACTIVATE_RANGE) {
       hasAggro = true;
@@ -557,9 +567,10 @@ export function tickTileFlowField(time, world, buildings, player, robots) {
   }
 
   if (_flow.active && time - _flow.builtAt < FLOW_INTERVAL) return;
+  _flow.target = player;
 
   const playerBld = getPlayerBuilding(buildings, player);
-  const splitInside = playerBld?.doorOpen ? playerBld : null;
+  const splitInside = playerBld && buildingDoors(playerBld).some((door) => door.doorOpen) ? playerBld : null;
 
   const goal = computeFlowGoal(player, buildings);
   const goalTx = Math.floor(goal.x / TILE);
@@ -572,7 +583,7 @@ export function tickTileFlowField(time, world, buildings, player, robots) {
 
   const playerGoals = getPlayerFlowGoalTiles(player, world, buildings);
   const doorGoals = splitInside
-    ? resolveGoalTiles(world, buildings, player, collectDoorSeedTiles(splitInside))
+    ? resolveGoalTiles(world, buildings, player, buildingDoors(splitInside).flatMap(collectDoorSeedTiles))
     : null;
 
   for (const { tx, tz } of playerGoals) {
@@ -591,7 +602,7 @@ export function tickTileFlowField(time, world, buildings, player, robots) {
   }
 
   for (const r of robots ?? []) {
-    if (!r.alive || (!r.chasing && !r.aggroByHit)) continue;
+    if (!r.alive || r.combatTarget !== player || (!r.chasing && !r.aggroByHit)) continue;
     if (Math.hypot(r.x - player.x, r.z - player.z) > FLOW_ACTIVATE_RANGE) continue;
     const rtx = Math.floor(r.x / TILE);
     const rtz = Math.floor(r.z / TILE);
@@ -1021,22 +1032,28 @@ export function getChaseGoal(robot, player, buildings, world) {
   const enemyBld = buildings?.getEntityBuildingAt?.(robot) ?? null;
 
   if (playerBld && playerBld !== enemyBld) {
-    const door = getDoorWorldPos(playerBld);
-    if (!playerBld.doorOpen) {
-      const outsideZ = playerBld.originZ + playerBld.h * TILE + TILE * 0.55;
+    const entrance = buildingDoors(playerBld).filter((door) => door.doorOpen)
+      .sort((a, b) => {
+        const pa = getDoorWorldPos(a);
+        const pb = getDoorWorldPos(b);
+        return Math.hypot(pa.x - robot.x, pa.z - robot.z) - Math.hypot(pb.x - robot.x, pb.z - robot.z);
+      })[0] ?? playerBld;
+    const door = getDoorWorldPos(entrance);
+    if (!entrance.doorOpen) {
+      const outsideZ = doorOutsideZ(entrance, 0.55);
       return { x: door.x, z: outsideZ, kind: 'door-closed' };
     }
     if (enemyBld === playerBld) {
       const center = getEntityMoveGoalCenter(player, 8);
       return { x: center.x, z: center.z, kind: 'player' };
     }
-    return getDoorApproachGoal(playerBld, robot, player, buildings);
+    return getDoorApproachGoal(entrance, robot, player, buildings);
   }
 
   if (enemyBld && enemyBld !== playerBld) {
     const door = getDoorWorldPos(enemyBld);
     if (!enemyBld.doorOpen) {
-      const outsideZ = enemyBld.originZ + enemyBld.h * TILE + TILE * 0.55;
+      const outsideZ = doorOutsideZ(enemyBld, 0.55);
       return { x: door.x, z: outsideZ, kind: 'door-closed' };
     }
     return { x: door.x, z: door.z, kind: 'door-exit' };
@@ -1048,13 +1065,6 @@ export function getChaseGoal(robot, player, buildings, world) {
 
 function getMindGoal(robot, player, buildings, world) {
   if ((robot.searchPhase === 'search' || robot.searchPhase === 'investigate') && robot.hasLastKnown) {
-    const playerBld = getPlayerBuilding(buildings, player);
-    const enemyBld = buildings?.getEntityBuildingAt?.(robot) ?? null;
-    if (playerBld && playerBld !== enemyBld && !playerBld.doorOpen) {
-      const door = getDoorWorldPos(playerBld);
-      const outsideZ = playerBld.originZ + playerBld.h * TILE + TILE * 0.55;
-      return { x: door.x, z: outsideZ, kind: 'door-closed' };
-    }
     return { x: robot.lastKnownX, z: robot.lastKnownZ, kind: 'last_known' };
   }
   return getChaseGoal(robot, player, buildings, world);
@@ -1087,16 +1097,12 @@ export function canEnemySeePlayer(robot, player, world, buildings, detectRange) 
   const dist = Math.hypot(player.x - robot.x, player.z - robot.z);
   if (dist >= detectRange || !isEnemyOnPlayerScreen(robot, player)) return false;
 
-  const robotFeetZ = entityFeetZ(robot);
-  const playerFeetZ = entityFeetZ(player);
-  if (!world.hasLineOfSight(robot.x, robot.z, player.x, player.z, 0.3, robotFeetZ, playerFeetZ)) {
-    return false;
-  }
+  return hasCombatSight(world, robot, player);
+}
 
-  const playerBld = getPlayerBuilding(buildings, player);
-  const enemyBld = buildings?.getEntityBuildingAt?.(robot) ?? null;
-  if (playerBld && playerBld !== enemyBld && !playerBld.doorOpen) return false;
-  return true;
+export function hasCombatSight(world, from, to) {
+  return !world.segmentBlocked(from.x, entityFeetZ(from), to.x, entityFeetZ(to),
+    0.12, false, null, { sightTrace: true });
 }
 
 export function updateEnemySpotTimer(robot, canSee, dt) {
@@ -1298,7 +1304,7 @@ export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 6
 
   const prefer = dirTo(robot.x, robot.z, goal.x, goal.z);
 
-  if (canWalkDirect(world, robot.x, robot.z, goal.x, goal.z, navShape, buildings)) {
+  if (canWalkDirect(world, robot.x, robot.z, goal.x, goal.z, navShape, buildings, robot.type === 'raider')) {
     return { dirX: prefer.dirX, dirZ: prefer.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
   }
 
@@ -1313,7 +1319,8 @@ export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 6
     }
   }
 
-  const flowDir = goal.kind === 'last_known' ? null : readChaseFlowDir(robot.x, robot.z, buildings, robot, world, dt);
+  const flowDir = goal.kind === 'last_known' || player !== _flow.target
+    ? null : readChaseFlowDir(robot.x, robot.z, buildings, robot, world, dt);
   if (flowDir) {
     return { dirX: flowDir.dirX, dirZ: flowDir.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
   }
@@ -1343,5 +1350,5 @@ export function noteChaseMoveResult(robot, moved, dt) {
 }
 
 export function canMeleeTarget(world, ax, az, tx, tz) {
-  return world.hasLineOfSight(ax, az, tx, tz, 0.3);
+  return !world.segmentBlocked(ax, az, tx, tz, 0.16, false);
 }

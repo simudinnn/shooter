@@ -45,6 +45,21 @@ export { TILE, CHUNK_TILES, CHUNK_WORLD, BASE_RADIUS } from './worldGen.js';
 export const PLAYER_RADIUS = 0.6;
 export const BULLET_RADIUS = 0.15;
 
+function segmentHitsCircle(x, z, dx, dz, lengthSq, cx, cz, radius) {
+  const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((cx - x) * dx + (cz - z) * dz) / lengthSq)) : 0;
+  return (x + dx * t - cx) ** 2 + (z + dz * t - cz) ** 2 <= radius * radius;
+}
+
+function segmentHitsBox(x, z, dx, dz, cx, cz, halfW, halfH) {
+  if ((!dx && Math.abs(x - cx) > halfW) || (!dz && Math.abs(z - cz) > halfH)) return false;
+  const tx0 = dx ? (cx - halfW - x) / dx : -Infinity;
+  const tx1 = dx ? (cx + halfW - x) / dx : Infinity;
+  const tz0 = dz ? (cz - halfH - z) / dz : -Infinity;
+  const tz1 = dz ? (cz + halfH - z) / dz : Infinity;
+  return Math.max(0, Math.min(tx0, tx1), Math.min(tz0, tz1))
+    <= Math.min(1, Math.max(tx0, tx1), Math.max(tz0, tz1));
+}
+
 const BAKE_VERSION = 101;
 const MAX_CACHED_CHUNKS = 256;
 const MAX_GROUND_OVERLAYS = 32;
@@ -476,6 +491,7 @@ export class World {
   }
 
   _touchChunk(cx, cz) {
+    if (!chunkOverlapsWorldBounds(cx, cz)) return this._outOfBoundsChunk(cx, cz);
     const key = this._chunkKey(cx, cz);
     if (this.chunks.has(key)) {
       this._bumpChunk(key);
@@ -899,15 +915,6 @@ export class World {
   collectObstaclesNear(x, z, radius) {
     const out = this._obstacleScratch;
     out.length = 0;
-    const { cx: ccx, cz: ccz } = worldToChunk(x, z);
-    const reach = Math.ceil(radius / CHUNK_WORLD) + 1;
-    for (let dz = -reach; dz <= reach; dz++) {
-      for (let dx = -reach; dx <= reach; dx++) {
-        const chunk = this.chunks.get(this._chunkKey(ccx + dx, ccz + dz));
-        if (!chunk) continue;
-        for (const obs of chunk.obstacles) out.push(obs);
-      }
-    }
     const pad = radius + 8;
     const minCX = Math.floor((x - pad) / CHUNK_WORLD);
     const maxCX = Math.floor((x + pad) / CHUNK_WORLD);
@@ -915,6 +922,10 @@ export class World {
     const maxCZ = Math.floor((z + pad) / CHUNK_WORLD);
     for (let gcz = minCZ; gcz <= maxCZ; gcz++) {
       for (let gcx = minCX; gcx <= maxCX; gcx++) {
+        const chunk = this.chunks.get(this._chunkKey(gcx, gcz));
+        for (const obs of chunk?.obstacles ?? []) {
+          if (Math.abs(obs.x - x) <= pad && Math.abs(obs.z - z) <= pad) out.push(obs);
+        }
         const bucket = this._dynamicGrid.get(`${gcx},${gcz}`);
         if (!bucket) continue;
         for (const obs of bucket) {
@@ -1132,6 +1143,7 @@ export class World {
   }
 
   _ignoreObstacleInDoorway(obs, px, pz, shape, buildings) {
+    if (obs.openingFrame) return false;
     if (!buildings || (!obs.floorEdge && !obs.doorSeal)) return false;
     return shapeOverlapsOpenDoorNavZone(buildings, px, pz, shape);
   }
@@ -1168,6 +1180,7 @@ export class World {
   _checkObstacleCollision(x, z, radius, obstacles, forBullets = false, soft = false, _wallSoft = null, bulletCtx = null, forNav = false, buildings = null, shape = null) {
     for (const obs of obstacles) {
       if (forBullets && obs.blocksBullets === false) continue;
+      if (bulletCtx?.losSeg && obs.blocksVision === false) continue;
       if (this._losIgnoresFloorEdge(obs, bulletCtx?.losSeg)) continue;
       if (forBullets && bulletCtx?.shooterX != null && bulletCtx?.aimAngle != null
         && obstacleBehindAlongAim(obs, bulletCtx.shooterX, bulletCtx.shooterZ, bulletCtx.aimAngle)) {
@@ -1243,6 +1256,8 @@ export class World {
   }
 
   checkCollisionShape(px, pz, shape, soft = false, opts = {}) {
+    const bounded = this._clampPos(px, pz);
+    if (bounded.x !== px || bounded.z !== pz) return true;
     const forNav = opts.forNav ?? false;
     const buildings = opts.buildings ?? null;
     const obstacles = this.collectObstaclesNear(px, pz, this._shapeReach(shape));
@@ -1268,11 +1283,37 @@ export class World {
 
   segmentBlocked(x0, z0, x1, z1, radius = BULLET_RADIUS, soft = true, aimAngle = null, opts = null) {
     const dist = Math.hypot(x1 - x0, z1 - z0);
-    const steps = Math.max(2, Math.ceil(dist / 0.25));
     const midX = (x0 + x1) * 0.5;
     const midZ = (z0 + z1) * 0.5;
     const collectPad = dist * 0.5 + 2 + (aimAngle != null ? BULLET_FOOT_Z_OFF + 1 : 0);
     const obstacles = this.collectObstaclesNear(midX, midZ, collectPad);
+    if (opts?.feetTrace || opts?.sightTrace || opts?.soundTrace) {
+      const dx = x1 - x0;
+      const dz = z1 - z0;
+      const lengthSq = dx * dx + dz * dz;
+      for (const obs of obstacles) {
+        if (opts.soundTrace && (!(obs.edgeDir || obs.isDoor || obs.doorSeal) || obs.blocksVision === false)) continue;
+        if (opts.feetTrace && obs.blocksBullets === false) continue;
+        if (opts.sightTrace && obs.blocksVision === false) continue;
+        if (obs.kind === 'circle') {
+          if (segmentHitsCircle(x0, z0, dx, dz, lengthSq, obs.x, obs.z, obs.radius + radius)) return true;
+          continue;
+        }
+        if (obs.kind !== 'aabb' || (!soft && !this._aabbHardEnabled(obs))) continue;
+        const { x, z } = this._aabbCenter(obs, soft);
+        const { halfW, halfH } = this._aabbHalfExtents(obs, soft);
+        if (!segmentHitsBox(x0, z0, dx, dz, x, z, halfW + radius, halfH + radius)) continue;
+        if (segmentHitsBox(x0, z0, dx, dz, x, z, halfW + radius, halfH)
+          || segmentHitsBox(x0, z0, dx, dz, x, z, halfW, halfH + radius)) return true;
+        for (const sideX of [-1, 1]) {
+          for (const sideZ of [-1, 1]) {
+            if (segmentHitsCircle(x0, z0, dx, dz, lengthSq, x + sideX * halfW, z + sideZ * halfH, radius)) return true;
+          }
+        }
+      }
+      return false;
+    }
+    const steps = Math.max(2, Math.ceil(dist / 0.25));
     const minStep = opts?.forwardOnly ? Math.max(1, Math.ceil(steps * 0.12)) : 1;
     const forBullets = aimAngle != null || !!opts?.forwardOnly;
     const bulletCtx = {

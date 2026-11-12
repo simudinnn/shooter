@@ -23,8 +23,9 @@
   <div id="overlay">
     <div id="loading-screen" class="hidden">
       <div class="menu-frame ui-slice-panel loading-frame">
-        <h2 class="menu-heading pixel-text-host">Loading World</h2>
-        <div class="loading-bar" aria-hidden="true">
+        <img class="loading-spinner" src="assets/ui/loading_circle.png" alt="">
+        <h2 class="menu-heading pixel-text-host">Loading Raid</h2>
+        <div class="loading-bar" role="progressbar" aria-label="Raid loading progress" aria-valuenow="0">
           <div id="loading-bar-fill"></div>
         </div>
         <p id="loading-status" class="loading-status pixel-text-host">Preparing…</p>
@@ -108,6 +109,7 @@
       <h2></h2>
       <div class="raid-result-stats">
         <span id="raid-result-duration"></span><span id="raid-result-kills"></span>
+        <span id="raid-result-raiders"></span>
         <span id="raid-result-cash"></span><span id="raid-result-xp"></span>
       </div>
       <h3 id="raid-result-items-title"></h3>

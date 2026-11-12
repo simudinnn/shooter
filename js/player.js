@@ -1,6 +1,5 @@
 import { customWeapons } from './customContent.js';
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
-import { bulletOwnerFeetZ } from './bulletCollision.js';
 import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX } from './sprites.js';
 import { AMMO_STACK_MAX, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
 import { MATERIAL_STACK_MAX, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
@@ -275,6 +274,18 @@ const RECOIL_PUSH = {
   fal: 0.3,
 };
 
+export function getHumanMoveCollider(ppu = 8) {
+  const halfW = (PLAYER_MOVE_W_PX / ppu) * 0.5;
+  const halfH = (PLAYER_MOVE_H_PX / ppu) * 0.5;
+  const feetSouth = spriteFeetOffset(CHAR_NATIVE_PX, PLAYER_SPRITE_SCALE) / ppu;
+  const radius = Math.sqrt(halfW * halfH);
+  return {
+    kind: 'circle',
+    radius,
+    zOff: feetSouth - radius,
+  };
+}
+
 export class Player {
   constructor() {
     this.x = 0;
@@ -409,15 +420,7 @@ export class Player {
 
   /** Feet-level movement circle — same footprint as the old 16×10 px AABB. */
   getMoveCollider(ppu = 8) {
-    const halfW = (PLAYER_MOVE_W_PX / ppu) * 0.5;
-    const halfH = (PLAYER_MOVE_H_PX / ppu) * 0.5;
-    const feetSouth = spriteFeetOffset(CHAR_NATIVE_PX, PLAYER_SPRITE_SCALE) / ppu;
-    const radius = Math.sqrt(halfW * halfH);
-    return {
-      kind: 'circle',
-      radius,
-      zOff: feetSouth - radius,
-    };
+    return getHumanMoveCollider(ppu);
   }
 
   /** Smaller feet-level circle for entity push / bump. */
@@ -1688,12 +1691,12 @@ export class Player {
     if (vest) {
       const resisted = Math.min(itemDurability(vest), remaining * (VEST_RESISTANCE[vest.key] ?? 0));
       remaining -= resisted;
-      vest.durability = Math.max(0, itemDurability(vest) - resisted);
+      vest.durability = Math.max(0, itemDurability(vest) - resisted * 0.5);
       if (vest.durability === 0) this.equipmentSlots[0] = null;
     }
     const backpack = this.equipmentSlots[1];
     if (backpack) {
-      backpack.durability = Math.max(0, itemDurability(backpack) - remaining * 0.25);
+      backpack.durability = Math.max(0, itemDurability(backpack) - remaining * 0.125);
       if (backpack.durability === 0) this.equipmentSlots[1] = null;
     }
     this.health = Math.max(0, this.health - remaining);
@@ -1712,22 +1715,14 @@ export class Player {
 }
 
 export function findBulletSpawn(world, px, pz, angle) {
-  const sin = Math.sin(angle);
-  const cos = Math.cos(angle);
-  const raiseZ = BULLET_SPAWN_RAISE_PX / 8;
-  const ownerFeetZ = bulletOwnerFeetZ(px, pz);
-  const spawnOpts = { ownerFeetZ };
-  for (const dist of [0.16, 0.22, 0.28]) {
-    const x = px + sin * dist;
-    const z = pz + cos * dist - raiseZ;
-    if (!world.checkBulletSpawnCollision(px, pz, x, z, BULLET_RADIUS, angle, spawnOpts)) {
-      return { x, z };
-    }
+  const x = px + Math.sin(angle) * 0.16;
+  const raise = BULLET_SPAWN_RAISE_PX / 8;
+  const feetZ = pz + getHumanMoveCollider().zOff;
+  const z = feetZ + Math.cos(angle) * 0.16;
+  if (world.segmentBlocked(px, feetZ, x, z, BULLET_RADIUS, false, null, { feetTrace: true })) {
+    return null;
   }
-  return {
-    x: px + sin * 0.16,
-    z: pz + cos * 0.16 - raiseZ,
-  };
+  return { x, z, feetZ, spriteLift: feetZ - pz + raise };
 }
 
 export const BULLET_MAX_DIST = 48;
@@ -1752,11 +1747,15 @@ export class BulletPool {
 
     let sx = x;
     let sz = z;
+    let playerShotOrigin = null;
+    let spriteLift = 0;
     if (fromPlayer && world) {
       const spawn = findBulletSpawn(world, x, z, a);
       if (!spawn) return null;
       sx = spawn.x;
       sz = spawn.z;
+      playerShotOrigin = { x, z: spawn.feetZ };
+      spriteLift = spawn.spriteLift;
     } else {
       const dist = fromPlayer ? 0.12 : 0.8;
       sx = x + Math.sin(a) * dist;
@@ -1768,12 +1767,15 @@ export class BulletPool {
     b.z = sz;
     b.spawnX = sx;
     b.spawnZ = sz;
-    b.ownerFeetZ = fromPlayer ? bulletOwnerFeetZ(x, z) : z;
+    b.ownerFeetZ = playerShotOrigin?.z ?? z;
+    b.playerShotOrigin = playerShotOrigin;
+    b.spriteLift = spriteLift;
     b.vx = Math.sin(a) * speed;
     b.vz = Math.cos(a) * speed;
     b.damage = weapon.damage;
     b.life = 2.5;
     b.fromPlayer = fromPlayer;
+    b.enemyOwner = null;
     b.aimAngle = fromPlayer ? a : null;
     return b;
   }
@@ -1799,12 +1801,16 @@ export class BulletPool {
 
       const nx = b.x + b.vx * dt;
       const nz = b.z + b.vz * dt;
-      if (world.segmentBlocked(b.x, b.z, nx, nz, BULLET_RADIUS, true, b.aimAngle, {
+      const blocked = b.playerShotOrigin
+        ? world.segmentBlocked(b.x, b.z, nx, nz,
+          BULLET_RADIUS, false, null, { feetTrace: true })
+        : world.segmentBlocked(b.x, b.z, nx, nz, BULLET_RADIUS, true, b.aimAngle, {
         forwardOnly: true,
         shooterX: b.spawnX ?? b.x,
         shooterZ: b.spawnZ ?? b.z,
         ownerFeetZ: b.ownerFeetZ,
-      })) {
+      });
+      if (blocked) {
         b.active = false;
         continue;
       }

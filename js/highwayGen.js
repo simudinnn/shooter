@@ -8,7 +8,7 @@ import { paintRoadStrip, fillCollinearRoadGaps, applyBevelCorner } from './roadP
 export const HIGHWAY_WIDTH_TILES = 3;
 export const PATH_WIDTH_TILES = 1;
 
-export const WORLD_SIZE_TILES = 400;
+export const WORLD_SIZE_TILES = 250;
 export const WORLD_HALF_TILES = WORLD_SIZE_TILES / 2;
 export const WORLD_MARGIN_TILES = 6;
 
@@ -1593,10 +1593,10 @@ function buildRoadNetwork() {
     towns: [],
     mainPoints: [],
     bounds: {
-      minTx: -1e9,
-      maxTx: 1e9,
-      minTz: -1e9,
-      maxTz: 1e9,
+      minTx: -WORLD_HALF_TILES,
+      maxTx: WORLD_HALF_TILES - 1,
+      minTz: -WORLD_HALF_TILES,
+      maxTz: WORLD_HALF_TILES - 1,
     },
   };
 }
@@ -1670,16 +1670,20 @@ export function getWorldBoundsWorld() {
   };
 }
 
-export function isInWorldBoundsTile() {
-  return true;
+export function isInWorldBoundsTile(tx, tz) {
+  const { minTx, maxTx, minTz, maxTz } = getWorldBoundsTiles();
+  return tx >= minTx && tx <= maxTx && tz >= minTz && tz <= maxTz;
 }
 
-export function chunkOverlapsWorldBounds() {
-  return true;
+export function chunkOverlapsWorldBounds(cx, cz) {
+  const { minTx, maxTx, minTz, maxTz } = getWorldBoundsTiles();
+  return cx * CHUNK_TILES <= maxTx && (cx + 1) * CHUNK_TILES > minTx
+    && cz * CHUNK_TILES <= maxTz && (cz + 1) * CHUNK_TILES > minTz;
 }
 
 export function clampWorldPosition(x, z) {
-  return { x, z };
+  const { minX, maxX, minZ, maxZ } = getWorldBoundsWorld();
+  return { x: Math.max(minX + 2, Math.min(maxX - 2, x)), z: Math.max(minZ + 2, Math.min(maxZ - 2, z)) };
 }
 
 export function getHighwayPlayerSpawn() {

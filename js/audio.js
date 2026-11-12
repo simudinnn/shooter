@@ -6,6 +6,11 @@ export class SoundManager {
     this.muted = false;
     this.volume = 0.45;
     this.buffers = {};
+    this.uiSounds = new Map(['click1', 'button1', 'buy', 'deploy'].map((name) => {
+      const audio = new Audio(`sounds/ui/${name}.ogg`);
+      audio.preload = 'auto';
+      return [name, audio];
+    }));
 
     this._lastCasingLand = 0;
     this._lastFootstep = 0;
@@ -37,6 +42,15 @@ export class SoundManager {
     if (this.master) this.master.gain.value = enabled ? volume : 0;
   }
 
+  playUi(name) {
+    if (this.muted || this.volume <= 0) return;
+    const audio = this.uiSounds.get(name);
+    if (!audio) return;
+    audio.volume = this.volume;
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+  }
+
   async loadSounds() {
     const sounds = {
       m16: ['sounds/guns/m16.ogg'],
@@ -59,6 +73,11 @@ export class SoundManager {
         'sounds/entities/hit-enemy-1.ogg',
         'sounds/entities/hit-enemy-2.ogg',
         'sounds/entities/hit-enemy-3.ogg',
+      ],
+      playerHurt: [
+        'sounds/player/hurt1.ogg',
+        'sounds/player/hurt2.ogg',
+        'sounds/player/hurt3.ogg',
       ],
       explosion: [
         'sounds/world/explosion-1.ogg',
@@ -124,8 +143,8 @@ export class SoundManager {
     }
   }
 
-  play(name, volume = 1, playbackRate = 1) {
-    if (!this.enabled || !this.ctx) return;
+  play(name, volume = 1, playbackRate = 1, offset = null) {
+    if (!this.enabled || !this.ctx || volume <= 0) return;
 
     const variants = this.buffers[name];
     if (!variants || variants.length === 0) return;
@@ -140,8 +159,30 @@ export class SoundManager {
     gain.gain.value = volume;
 
     src.connect(gain);
-    gain.connect(this.master);
+    let output = gain;
+    if (offset) {
+      const distance = Math.hypot(offset.x, offset.z);
+      if (!offset.nearOpening && (offset.occluded || offset.outside || distance > 60)) {
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        const distanceCutoff = Math.max(6200, 16000 / (1 + Math.max(0, distance - 60) * 0.018));
+        const wallCutoff = offset.outside ? 3000 : 4100;
+        filter.frequency.value = offset.occluded || offset.outside
+          ? Math.min(wallCutoff, distanceCutoff) : distanceCutoff;
+        filter.Q.value = 0.5;
+        output.connect(filter);
+        output = filter;
+      }
+    }
+    if (offset && this.ctx.createStereoPanner) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.value = 0.55 * offset.x / Math.max(6, Math.hypot(offset.x, offset.z));
+      output.connect(panner);
+      output = panner;
+    }
+    output.connect(this.master);
     src.start();
+    return src;
   }
 
   /** 0 beyond maxDist, 1 at or inside fullDist, smooth falloff between. */
@@ -173,28 +214,32 @@ export class SoundManager {
     this.play('weaponSwitch', 0.5);
   }
 
-  hitEnemy() {
-    this.play('hitEnemy', 0.6);
+  hitEnemy(offset = null) {
+    this.play('hitEnemy', 0.6 * this._effectVolume(offset, 32), 1, offset);
   }
 
-  explosion() {
-    this.play('explosion', 1);
+  explosion(offset = null) {
+    this.play('explosion', 1 * this._effectVolume(offset, 120), 1, offset);
   }
 
-  playerHurt() {
-    this.play('playerHurt', 0.9);
+  _effectVolume(offset, range) {
+    return offset ? this._distanceAtten(Math.hypot(offset.x, offset.z), 5, range) : 1;
+  }
+
+  playerHurt(offset = null) {
+    this.play('playerHurt', 0.9 * this._effectVolume(offset, 45), 1, offset);
   }
 
   pickup() {
     this.play('pickup', 0.75);
   }
 
-  chestOpen() {
-    this.play('chestOpen', 0.75);
+  chestOpen(offset = null) {
+    this.play('chestOpen', 0.75, 1, offset);
   }
 
-  doorToggle(opening) {
-    this.play(opening ? 'doorOpen' : 'doorClose', 0.75);
+  doorToggle(opening, offset = null, volume = 1) {
+    this.play(opening ? 'doorOpen' : 'doorClose', 0.75 * volume, 1, offset);
   }
 
   inventoryMove() {
@@ -224,7 +269,7 @@ export class SoundManager {
     this.play('footstep', volume, pitch);
   }
 
-  enemyFootstep(distance = 0) {
+  enemyFootstep(distance = 0, offset = null) {
     if (!this.enabled || !this.ctx) return;
 
     const vol = this._distanceAtten(distance);
@@ -235,10 +280,10 @@ export class SoundManager {
     this._lastEnemyStep = now;
 
     const pitch = 0.9 + Math.random() * 0.12;
-    this.play('enemyFootstep', 0.4 * vol, pitch);
+    this.play('enemyFootstep', 0.4 * vol, pitch, offset);
   }
 
-  scoutStomp(distance = 0) {
+  scoutStomp(distance = 0, offset = null) {
     if (!this.enabled || !this.ctx) return;
 
     const vol = this._distanceAtten(distance, 6, 32);
@@ -249,25 +294,25 @@ export class SoundManager {
     this._lastScoutStomp = now;
 
     const pitch = 0.9 + Math.random() * 0.08;
-    this.play('scoutStomp', 1 * vol, pitch);
+    this.play('scoutStomp', vol, pitch, offset);
   }
 
-  scoutChargeStart(distance = 0) {
+  scoutChargeStart(distance = 0, offset = null) {
     if (!this.enabled || !this.ctx) return;
 
     const vol = this._distanceAtten(distance, 10, 45);
     if (vol <= 0) return;
 
-    this.play('scoutChargeStart', 1.5 * vol);
+    this.play('scoutChargeStart', 1.5 * vol, 1, offset);
   }
 
-  enemyShot(distance = 0) {
+  enemyShot(distance = 0, offset = null) {
     if (!this.enabled || !this.ctx) return;
 
     const vol = this._distanceAtten(distance, 10, 45);
     if (vol <= 0) return;
     const pitch = 0.95 + Math.random() * 0.2
-    this.play('enemyShot', 1.5 * vol, pitch);
+    this.play('enemyShot', 1.5 * vol, pitch, offset);
   }
 
 
@@ -275,14 +320,14 @@ export class SoundManager {
     this.play('casingEject', 0.25, 0.95 + Math.random() * 0.15);
   }
 
-  casingLand() {
+  casingLand(offset = null) {
     if (!this.enabled || !this.ctx) return;
 
     const now = this.ctx.currentTime;
     if (now - this._lastCasingLand < 0.045) return;
 
     this._lastCasingLand = now;
-    this.play('casingLand', 0.25, 0.95 + Math.random() * 0.15);
+    this.play('casingLand', 0.25 * this._effectVolume(offset, 18), 0.95 + Math.random() * 0.15, offset);
   }
 
   regenStart() {
@@ -294,6 +339,17 @@ export class SoundManager {
   }
 
   lose() {
-    this.play('lose', 0.85);
+    this.stopLose();
+    const source = this.play('lose', 0.85);
+    this.loseSource = source;
+    source?.addEventListener('ended', () => {
+      if (this.loseSource === source) this.loseSource = null;
+    }, { once: true });
+  }
+
+  stopLose() {
+    const source = this.loseSource;
+    this.loseSource = null;
+    source?.stop();
   }
 }

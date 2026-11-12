@@ -1,15 +1,12 @@
-import { WALL_COLLISION_PAD } from './buildingGen.js';
-
 const ANGLE_OFFSET = 0.00015;
 const TAU = Math.PI * 2;
 
 export function collectWallOccluders(buildings, view) {
   const boxes = [];
   for (const building of buildings) {
-    for (const wall of [...(building.obstacles ?? []), ...(building.doorEdgeObstacles ?? [])]) {
-      if (wall.kind !== 'aabb') continue;
-      const halfW = Math.max(0.01, wall.halfW - WALL_COLLISION_PAD / 2);
-      const halfH = Math.max(0.01, wall.halfH - WALL_COLLISION_PAD / 2);
+    for (const wall of [...(building.obstacles ?? []), ...(building.doorEdgeObstacles ?? []), ...(building.rearDoor?.doorEdgeObstacles ?? [])]) {
+      if (wall.kind !== 'aabb' || wall.blocksVision === false) continue;
+      const { halfW, halfH } = wall;
       const minX = wall.x - halfW;
       const maxX = wall.x + halfW;
       const minZ = wall.z - halfH;
@@ -19,6 +16,31 @@ export function collectWallOccluders(buildings, view) {
     }
   }
   return boxes;
+}
+
+export function collectPropOccluders(buildings, foliage, view, playerX, playerZ) {
+  const candidates = [];
+  function add(obstacle, halfW, halfH, source) {
+    const { x, z } = obstacle;
+    const box = { minX: x - halfW, maxX: x + halfW, minZ: z - halfH, maxZ: z + halfH };
+    if (box.maxX < view.minX || box.minX > view.maxX || box.maxZ < view.minZ || box.minZ > view.maxZ) return;
+    Object.defineProperty(box, 'source', { value: source });
+    candidates.push({ box, distanceSq: (x - playerX) ** 2 + (z - playerZ) ** 2 });
+  }
+  for (const entry of foliage) {
+    const obstacle = entry._obstacle;
+    if (obstacle?.radius > 0) add(obstacle, obstacle.radius * 0.8, obstacle.radius * 0.6, entry);
+  }
+  for (const building of buildings) {
+    for (const piece of building.decor ?? []) {
+      const obstacle = piece.obstacle;
+      if (obstacle?.kind === 'aabb' && obstacle.blocksVision !== false) {
+        add(obstacle, obstacle.halfW * 0.75, obstacle.halfH * 0.75, piece);
+      }
+    }
+  }
+  // The visibility sweep checks every ray against every caster. Bound the cost in dense areas.
+  return candidates.sort((a, b) => a.distanceSq - b.distanceSq).slice(0, 12).map(({ box }) => box);
 }
 
 export function resolveWallLightOrigin(x, z, playerX, playerZ, boxes) {
@@ -50,7 +72,7 @@ function rayEntry(box, x, z, dx, dz) {
   return entry >= 0 && entry <= exit ? entry : Infinity;
 }
 
-export function computeWallVisibility(x, z, view, boxes) {
+export function computeWallVisibility(x, z, view, boxes, withoutCaster = null) {
   if (!boxes.length) return null;
   const angles = new Set();
   const addCorners = (box) => {
@@ -65,6 +87,9 @@ export function computeWallVisibility(x, z, view, boxes) {
   };
   addCorners(view);
   for (const box of boxes) addCorners(box);
+  if (withoutCaster) {
+    for (const box of boxes) if (box.source) withoutCaster.set(box.source, []);
+  }
   return [...angles].sort((a, b) => a - b).map((angle) => {
     const dx = Math.cos(angle);
     const dz = Math.sin(angle);
@@ -72,8 +97,24 @@ export function computeWallVisibility(x, z, view, boxes) {
       ((dx < 0 ? view.minX : view.maxX) - x) / dx,
       ((dz < 0 ? view.minZ : view.maxZ) - z) / dz,
     );
-    for (const box of boxes) distance = Math.min(distance, rayEntry(box, x, z, dx, dz));
-    return { x: x + dx * distance, z: z + dz * distance };
+    let nextDistance = distance;
+    let nearest = null;
+    for (const box of boxes) {
+      const hit = rayEntry(box, x, z, dx, dz);
+      if (hit < distance) {
+        nextDistance = distance;
+        distance = hit;
+        nearest = box;
+      } else if (hit < nextDistance) nextDistance = hit;
+    }
+    const point = { x: x + dx * distance, z: z + dz * distance };
+    if (withoutCaster) {
+      for (const [source, polygon] of withoutCaster) {
+        polygon.push(source === nearest?.source
+          ? { x: x + dx * nextDistance, z: z + dz * nextDistance } : point);
+      }
+    }
+    return point;
   });
 }
 

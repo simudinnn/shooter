@@ -1,10 +1,11 @@
+import economy from './economy-data.js';
 import { Player, WEAPONS } from './player.js';
 import { capturePlayerState } from './saveGame.js';
 import { getItemDescription, getItemDisplayName, getItemIconSrc } from './loot.js';
 import { INV_LOCK_SRC } from './inventory.js';
-import { equipmentSlotFor, itemDurability } from './equipment.js';
+import { equipmentSlotFor, itemDurability, MAX_DURABILITY } from './equipment.js';
 import { setElementPixelText, setElementWrappedPixelText, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
-import { applyRecycleYields, canCraftRecipe, canRecycleItem, craftRecipe, getCraftableRecipes, getRecycleYields, SHOP_RECIPES } from './crafting.js';
+import { applyRecycleYields, canCraftRecipe, canRecycleItem, craftRecipe, getCraftableRecipes, getRecycleYields, recycleBatchSize } from './crafting.js';
 
 export const EXTRACT_RADIUS = 5;
 export const EXTRACT_SECONDS = 3;
@@ -19,12 +20,36 @@ const CATALOG_CATEGORIES = [
 function catalogCategory(item) {
   return CATALOG_CATEGORIES.findIndex(([, kinds]) => kinds.includes(item.kind));
 }
+
+export function getSellPrice(item) {
+  const price = economy.sellPrices[item.kind]?.[item.key];
+  if (item.kind === 'material') return price ?? economy.economy.materialSellCash;
+  return price ? Math.max(1, Math.floor(price * itemDurability(item) / MAX_DURABILITY)) : 0;
+}
 const XP_PER_LEVEL = 100;
-export const raidLevel = (profile) => 1 + Math.floor(profile.xp / XP_PER_LEVEL);
+const XP_LEVEL_INCREMENT = 25;
+const EQUIPMENT_REPAIR_MATERIALS = {
+  backpack_1: { cloth: 2 },
+  backpack2: { fabric: 2 },
+  backpack3: { fabric: 2, rubber: 1 },
+  tool_belt: { cloth: 2 },
+  vest: { cloth: 2 },
+  hunting_vest: { fabric: 2 },
+  police_vest: { fabric: 2, metal: 1 },
+  military_vest: { fabric: 2, metal: 2 },
+};
+const levelCost = (level) => XP_PER_LEVEL + (level - 1) * XP_LEVEL_INCREMENT;
+const levelStart = (level) => (level - 1) * (XP_PER_LEVEL + (level - 2) * XP_LEVEL_INCREMENT / 2);
+
+export function raidLevel(profile) {
+  let level = 1;
+  while (profile.xp >= levelStart(level + 1)) level++;
+  return level;
+}
 
 export function stashLimit(profile) {
   const level = raidLevel(profile);
-  return level >= 50 ? 120 : level >= 40 ? 100 : level >= 30 ? 80 : level >= 20 ? 60 : level >= 10 ? 50 : 40;
+  return level >= 40 ? 100 : level >= 30 ? 80 : level >= 20 ? 60 : level >= 10 ? 50 : 40;
 }
 
 function freshKit(empty = false) {
@@ -39,7 +64,7 @@ function freshKit(empty = false) {
 }
 
 export function newRaidProfile(previous = null) {
-  const profile = { xp: 0, cash: 100, extractions: 0, losses: 0, extractedKills: 0, crafts: 0, claimed: [], stash: [], stashStackVersion: 1, kit: freshKit() };
+  const profile = { xp: 0, xpCurveVersion: 1, cash: economy.economy.startingCash, extractions: 0, losses: 0, extractedKills: 0, crafts: 0, claimed: [], stash: [], stashStackVersion: 1, kit: freshKit() };
   if (previous?.player) {
     const player = new Player();
     player.applySaveData(previous.player);
@@ -55,7 +80,7 @@ export function newRaidProfile(previous = null) {
 export function deployProfile(profile) {
   const kit = freshKit(true);
   kit.learnedBlueprints = [...profile.kit.learnedBlueprints];
-  return { ...profile, kit, deployed: true };
+  return { ...profile, kit, deployed: true, raidCheckpoint: { carried: profile.kit, seconds: 0, kills: 0, raiderKills: 0 } };
 }
 
 export function extractProfile(profile, player, kills) {
@@ -63,7 +88,6 @@ export function extractProfile(profile, player, kills) {
     ...profile,
     deployed: false,
     xp: profile.xp + 120 + kills * 25,
-    cash: profile.cash + 75 + kills * 10,
     extractedKills: profile.extractedKills + kills,
     extractions: profile.extractions + 1,
     kit: capturePlayerState(player),
@@ -74,33 +98,25 @@ export function loseRaidProfile(profile) {
   return { ...profile, deployed: false, losses: profile.losses + 1 };
 }
 
-const SHOP = [
-  { level: 1, price: 20, item: { kind: 'ammo', ammoType: 'pistol', amount: 24 } },
-  { level: 1, price: 15, item: { kind: 'consumable', key: 'bandage', amount: 2 } },
-  { level: 4, price: 32, item: { kind: 'ammo', ammoType: 'shotgun', amount: 12 } },
-  { level: 8, price: 44, item: { kind: 'ammo', ammoType: 'rifle', amount: 30 } },
-  { level: 12, price: 52, item: { kind: 'ammo', ammoType: 'sniper', amount: 12 } },
-  { level: 2, price: 25, item: { kind: 'material', key: 'cloth', amount: 5 } },
-  { level: 3, price: 30, item: { kind: 'material', key: 'metal', amount: 5 } },
-  { level: 5, price: 38, item: { kind: 'material', key: 'chemicals', amount: 4 } },
-  { level: 8, price: 48, item: { kind: 'material', key: 'repair_kit', amount: 1 } },
-  { level: 5, price: 48, item: { kind: 'melee', key: 'wooden_bat' } },
-  { level: 20, price: 90, item: { kind: 'weapon', key: 'glock', ammo: WEAPONS.glock.magSize } },
-  { level: 20, price: 100, item: { kind: 'equipment', key: 'backpack_1' } },
-  { level: 20, price: 110, item: { kind: 'equipment', key: 'vest' } },
-  ...SHOP_RECIPES.map((offer) => offer.item.kind === 'weapon'
-    ? { ...offer, item: { ...offer.item, ammo: WEAPONS[offer.item.key].magSize } } : offer),
-];
+const SHOP = economy.shop.map((offer) => offer.item.kind === 'weapon'
+  ? { ...offer, item: { ...offer.item, ammo: WEAPONS[offer.item.key]?.magSize ?? 0 } }
+  : offer);
 
 export function normalizeRaidProfile(profile) {
   const { credits, ...saved } = profile;
   const normalized = {
     ...saved,
-    cash: saved.cash ?? credits ?? 100,
+    cash: saved.cash ?? credits ?? economy.economy.startingCash,
     extractedKills: saved.extractedKills ?? 0,
     crafts: saved.crafts ?? 0,
     claimed: saved.claimed ?? [],
   };
+  if (!normalized.xpCurveVersion) {
+    const oldXP = Math.max(0, Number(saved.xp) || 0);
+    const level = 1 + Math.floor(oldXP / XP_PER_LEVEL);
+    normalized.xp = levelStart(level) + Math.floor((oldXP % XP_PER_LEVEL) / XP_PER_LEVEL * levelCost(level));
+    normalized.xpCurveVersion = 1;
+  }
   if (!normalized.stashStackVersion) {
     const previous = normalized.stash;
     const player = new Player();
@@ -180,6 +196,7 @@ function stashInventory(profile, player) {
   const limit = stashLimit(profile);
   inventory.itemSlots = Array.from({ length: Math.max(limit, profile.stash.length) }, (_, i) =>
     profile.stash[i] ? { ...profile.stash[i] } : null);
+  inventory.raidLevel = raidLevel(profile);
   inventory.isItemSlotUnlocked = (i) => i >= 0 && i < limit;
   return inventory;
 }
@@ -196,7 +213,7 @@ export function storeInStash(profile, player, items) {
 
 export function craftAtBase(profile, player, recipe) {
   const inventory = stashInventory(profile, player);
-  if (!getCraftableRecipes(player).includes(recipe) || !craftRecipe(inventory, recipe)) {
+  if (!getCraftableRecipes(inventory).includes(recipe) || !craftRecipe(inventory, recipe)) {
     return 'Need materials and space in your stash.';
   }
   profile.stash = inventory.itemSlots;
@@ -209,7 +226,7 @@ export function recycleAtBase(profile, player, index, count) {
   const total = item?.amount ?? 1;
   const quantity = count ?? total;
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > total) return 'Invalid recycle quantity.';
-  const yields = getRecycleYields(item, quantity);
+  const yields = getRecycleYields(item, quantity, raidLevel(profile));
   if (!yields?.length) return 'This item cannot be recycled.';
   inventory.itemSlots[index] = quantity === total ? null : { ...item, amount: total - quantity };
   if (applyRecycleYields(inventory, yields).length) return 'Make space for the recovered materials.';
@@ -217,7 +234,7 @@ export function recycleAtBase(profile, player, index, count) {
 }
 
 export class RaidBase {
-  constructor(root, { save, deploy, setSound }) {
+  constructor(root, { save, deploy, setSound, playUi }) {
     this.root = root;
     this.save = save;
     this.status = root.querySelector('[role=status]');
@@ -225,21 +242,27 @@ export class RaidBase {
     this.selection = root.querySelector('#raid-selection');
     this.slotPositions = new WeakMap();
     document.addEventListener('pointerdown', (event) => {
+      if (event.target === this.workspace || event.target === this.root.querySelector('#raid-stash')) return;
       if (!this.selection.classList.contains('hidden') && !this.selection.contains(event.target)) {
         this.closeSelection();
       }
     }, true);
     this.stashPanel = root.querySelector('[data-base-panel="stash"]');
     this.workspace = this.stashPanel.parentElement;
-    this.workspace.addEventListener('scroll', () => {
-      if (this.selectionAnchor?.isConnected && !this.selection.classList.contains('hidden')
-        && matchMedia('(hover: none) and (pointer: coarse)').matches) {
+    const repositionSelection = (event) => {
+      if (event?.target === this.selection) return;
+      if (this.selectionAnchor?.isConnected && !this.selection.classList.contains('hidden')) {
         this.positionSelection(this.selectionAnchor);
       }
-    }, { passive: true });
+    };
+    root.addEventListener('scroll', repositionSelection, { capture: true, passive: true });
+    window.addEventListener('resize', repositionSelection, { passive: true });
+    window.visualViewport?.addEventListener('resize', repositionSelection, { passive: true });
+    new ResizeObserver(() => repositionSelection()).observe(this.selection);
     this.deployDialog = root.querySelector('#raid-deploy-dialog');
     this.station = 'deploy';
     this.catalogSelection = null;
+    this.playUi = playUi;
     this.music = new Audio('sounds/ui/menu_song.ogg');
     this.music.loop = true;
     this.music.preload = 'none';
@@ -293,10 +316,6 @@ export class RaidBase {
     }
     root.addEventListener('click', () => this.startMusic(true));
     root.addEventListener('keydown', () => this.startMusic(true));
-    root.addEventListener('click', (event) => {
-      const button = event.target.closest('button');
-      if (button && button.id !== 'raid-deploy-confirm') this.playCue([520]);
-    }, true);
     root.querySelector('#raid-deploy').addEventListener('click', () => {
       const review = this.deployDialog.querySelector('.raid-deploy-review');
       review.append(this.stashPanel, this.selection);
@@ -309,7 +328,6 @@ export class RaidBase {
     });
     root.querySelector('#raid-deploy-cancel').addEventListener('click', () => this.deployDialog.close());
     root.querySelector('#raid-deploy-confirm').addEventListener('click', () => {
-      this.playCue([330, 440, 660]);
       this.deployDialog.close();
       deploy();
     });
@@ -382,33 +400,6 @@ export class RaidBase {
     }
   }
 
-  playCue(notes) {
-    if (!this.soundEnabled || this.soundVolume === 0) return;
-    const Context = window.AudioContext || window.webkitAudioContext;
-    if (!Context) return;
-    const context = this.audioContext ??= new Context();
-    const play = () => {
-      const now = context.currentTime;
-      for (const [index, frequency] of notes.entries()) {
-        const start = now + index * 0.075;
-        const tone = context.createOscillator();
-        const gain = context.createGain();
-        tone.type = 'triangle';
-        tone.frequency.value = frequency;
-        gain.gain.setValueAtTime(0.001, start);
-        gain.gain.exponentialRampToValueAtTime(Math.max(0.001,
-          (notes.length === 1 ? 0.025 : 0.065) * this.soundVolume / 0.45), start + 0.008);
-        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.07);
-        tone.connect(gain);
-        gain.connect(context.destination);
-        tone.start(start);
-        tone.stop(start + 0.075);
-      }
-    };
-    if (context.state === 'running') play();
-    else context.resume().then(play).catch(() => {});
-  }
-
   refreshChallenges() {
     const next = structuredClone(this.profile);
     let changed = false;
@@ -434,29 +425,34 @@ export class RaidBase {
     this.pixelLabel(this.dialogStatus, message);
   }
 
-  transact(change) {
+  transact(change, reportError = (message) => this.setStatus(message)) {
     this.refreshChallenges();
     const next = structuredClone(this.profile);
     const player = new Player();
     player.applySaveData(next.kit);
+    player.raidLevel = raidLevel(next);
     const error = change(next, player);
     if (error) {
-      this.setStatus(error);
+      reportError(error);
       return;
     }
     next.kit = capturePlayerState(player);
     if (!this.save(next)) {
-      this.setStatus('Could not save the change.');
+      reportError('Could not save the change.');
       return;
     }
+    const scrollTop = this.workspace.scrollTop;
+    this.workspace.scrollTo({ top: scrollTop, behavior: 'instant' });
     this.show(next);
+    this.workspace.scrollTo({ top: scrollTop, behavior: 'instant' });
     return true;
   }
 
   render() {
     const profile = this.profile;
+    const level = raidLevel(profile);
     this.pixelLabel(this.root.querySelector('#raid-stats'),
-      `Level ${raidLevel(profile)}  /  ${profile.xp % XP_PER_LEVEL}/${XP_PER_LEVEL} XP`);
+      `Level ${level}  /  ${profile.xp - levelStart(level)}/${levelCost(level)} XP`);
     this.pixelLabel(this.root.querySelector('#raid-extract-count'), `Extracts: ${profile.extractions}`);
     this.pixelLabel(this.root.querySelector('#raid-loss-count'), `Lost raids: ${profile.losses}`);
     this.pixelLabel(this.root.querySelector('#raid-cash'), `${profile.cash.toLocaleString()} Cash`);
@@ -546,11 +542,14 @@ export class RaidBase {
   }
 
   rearrangeSlots(from, to) {
-    if (from.key === to.key && from.index === to.index) return;
+    if (from.source === to.source && from.key === to.key && from.index === to.index) return;
     this.transact((next, player) => {
       const slots = (position) => position.source === 'stash' ? next.stash : player[position.key];
-      const item = slots(from)[from.index];
-      const displaced = slots(to)[to.index] ?? null;
+      const read = (position) => position.key === 'handSlots'
+        ? player.getHandSlotItem(position.index)
+        : slots(position)[position.index] ?? null;
+      const item = read(from);
+      const displaced = read(to);
       const accepts = ({ source, key, index }, entry) => {
         if (source === 'stash') return !entry || index < stashLimit(next);
         if (key === 'itemSlots') return player.isItemSlotUnlocked(index);
@@ -584,9 +583,8 @@ export class RaidBase {
       };
       write(from, displaced);
       write(to, item);
-      if (player.itemSlots.some((entry, index) => entry && !player.isItemSlotUnlocked(index))) {
-        return 'Empty the backpack slots before removing it.';
-      }
+      const overflow = player.drainLockedInventory();
+      if (overflow.length && !storeInStash(next, player, overflow)) return 'Not enough stash space.';
     });
   }
 
@@ -635,7 +633,7 @@ export class RaidBase {
       cleanup();
       if (moved) this._suppressSlotClick = slot;
       if (!commit) return;
-      if (destination?.source === source) this.rearrangeSlots({ source, key, index }, destination);
+      if (destination) this.rearrangeSlots({ source, key, index }, destination);
       else if (target.contains(hovered)) transfer();
     };
     slot.addEventListener('pointerdown', (event) => {
@@ -669,7 +667,6 @@ export class RaidBase {
     const kitGrid = this.root.querySelector('#raid-kit');
     const gearGrid = this.root.querySelector('#raid-gear');
     const stashGrid = this.root.querySelector('#raid-stash');
-    stashGrid.style.setProperty('--raid-stash-rows', Math.max(1, Math.ceil(Math.max(limit, stash.length) / 10)));
     const stashScroll = stashGrid.scrollTop;
     kitGrid.replaceChildren();
     gearGrid.replaceChildren();
@@ -699,6 +696,7 @@ export class RaidBase {
         const description = document.createElement('p');
         description.textContent = getItemDescription(item);
         detail.append(description);
+        this.addRepairAction(item, actions, (next) => next.stash[i]);
         this.addRecycleAction(item, actions, (next, player, quantity) => recycleAtBase(next, player, i, quantity));
         this.addSplitAction(item, actions, (next, amount) => {
           const empty = Array.from({ length: stashLimit(next) }).findIndex((_, index) => !next.stash[index]);
@@ -707,13 +705,11 @@ export class RaidBase {
           next.stash[empty] = { ...source, amount };
           next.stash[i] = { ...source, amount: source.amount - amount };
         });
-        if (raidLevel(this.profile) >= 10 && item.kind === 'material') {
-          actions.push(['Sell', () => this.openQuantityDialog('Sell', item, item.amount ?? 1, (next, player, quantity) => {
-            const remaining = (item.amount ?? 1) - quantity;
-            next.stash[i] = remaining ? { ...item, amount: remaining } : null;
-            next.cash += quantity * 2;
-          })]);
-        }
+        this.addSellAction(item, actions, (next, _player, quantity) => {
+          const current = next.stash[i];
+          const remaining = (current.amount ?? 1) - quantity;
+          next.stash[i] = remaining ? { ...current, amount: remaining } : null;
+        });
         this.inspect(item, actions, detail, anchor, { showClose: false });
       } : null);
       this.slotPositions.set(slot, { source: 'stash', key: null, index: i });
@@ -723,11 +719,14 @@ export class RaidBase {
   }
 
   inspectKit(item, key, index, anchor) {
-    const actions = [['Move to stash', () => this.transferItem('kit', key, index)]];
+    const actions = [];
     const detail = document.createElement('div');
     const description = document.createElement('p');
     description.textContent = getItemDescription(item);
     detail.append(description);
+    this.addRepairAction(item, actions,
+      (_, player) => key === 'handSlots' ? player.getHandSlotItem(index) : player[key][index],
+      key === 'handSlots' ? (player, repaired) => player.restoreHandSlot(index, repaired) : null);
     if (key === 'itemSlots') {
       this.addSplitAction(item, actions, (next, amount, player) => {
         const empty = player.itemSlots.findIndex((entry, i) => !entry && player.isItemSlotUnlocked(i));
@@ -737,25 +736,63 @@ export class RaidBase {
         player.itemSlots[index] = { ...source, amount: source.amount - amount };
       });
     }
+    const removeFromKit = (player, quantity) => {
+      if (key === 'handSlots') return player.suspendHandSlotForDrag(index);
+      if (key === 'equipmentSlots') return player.suspendEquipmentForDrag(index);
+      const current = player.itemSlots[index];
+      const remaining = (current.amount ?? 1) - quantity;
+      player.itemSlots[index] = remaining > 0 ? { ...current, amount: remaining } : null;
+      return current;
+    };
     this.addRecycleAction(item, actions, (next, player, quantity) => {
-        const current = key === 'handSlots' ? player.suspendHandSlotForDrag(index)
-          : key === 'equipmentSlots' ? player.suspendEquipmentForDrag(index) : player.itemSlots[index];
-        const yields = getRecycleYields(current, quantity);
-        if (!yields?.length) return 'This item cannot be recycled.';
-        const remaining = (current.amount ?? 1) - quantity;
-        if (key === 'itemSlots') player.itemSlots[index] = remaining > 0 ? { ...current, amount: remaining } : null;
-        const stash = stashInventory(next, player);
-        if (applyRecycleYields(stash, yields).length) return 'Make space for the recovered materials.';
-        next.stash = stash.itemSlots;
-        if (!storeInStash(next, player, player.drainLockedInventory())) return 'Not enough stash space.';
+      const current = removeFromKit(player, quantity);
+      const yields = getRecycleYields(current, quantity, raidLevel(next));
+      if (!yields?.length) return 'This item cannot be recycled.';
+      const stash = stashInventory(next, player);
+      if (applyRecycleYields(stash, yields).length) return 'Make space for the recovered materials.';
+      next.stash = stash.itemSlots;
+      if (!storeInStash(next, player, player.drainLockedInventory())) return 'Not enough stash space.';
+    });
+    this.addSellAction(item, actions, (next, player, quantity) => {
+      removeFromKit(player, quantity);
+      if (!storeInStash(next, player, player.drainLockedInventory())) return 'Not enough stash space.';
     });
     this.inspect(item, actions, detail, anchor);
   }
 
+  addRepairAction(item, actions, getItem, equip = null) {
+    if (itemDurability(item) >= MAX_DURABILITY) return;
+    const equipment = item.kind === 'equipment';
+    if (!equipment && item.kind !== 'weapon' && item.kind !== 'melee') return;
+    const costs = equipment
+      ? { sewing_kit: 1, ...(EQUIPMENT_REPAIR_MATERIALS[item.key] ?? { cloth: 2 }) }
+      : { repair_kit: 1, metal: 2, ...(item.kind === 'weapon' ? { gun_parts: 1 } : { wood: 1 }) };
+    actions.push(['Repair', () => this.openQuantityDialog('Repair', item, 1, (next, player) => {
+      const current = getItem(next, player);
+      if (!current || itemDurability(current) >= MAX_DURABILITY) return 'Item does not need repair.';
+      const inventory = stashInventory(next, player);
+      if (!inventory.consumeMaterials(costs)) return 'Missing repair materials in stash.';
+      next.stash = inventory.itemSlots;
+      const repaired = getItem(next, player);
+      repaired.durability = MAX_DURABILITY;
+      if (equip) equip(player, repaired);
+    }, costs)]);
+  }
+
   addRecycleAction(item, actions, recycle) {
-    if (canRecycleItem(item)) {
+    if (canRecycleItem(item, raidLevel(this.profile))) {
       actions.push(['Recycle', () => this.openQuantityDialog('Recycle', item, item.amount ?? 1, recycle)]);
     }
+  }
+
+  addSellAction(item, actions, remove) {
+    const price = getSellPrice(item);
+    if (!price) return;
+    actions.push(['Sell', () => this.openQuantityDialog('Sell', item, item.amount ?? 1, (next, player, quantity) => {
+      const error = remove(next, player, quantity);
+      if (error) return error;
+      next.cash += quantity * price;
+    })]);
   }
 
   addSplitAction(item, actions, split) {
@@ -764,7 +801,7 @@ export class RaidBase {
       (next, player, quantity) => split(next, quantity, player))]);
   }
 
-  openQuantityDialog(action, item, maximum, change) {
+  openQuantityDialog(action, item, maximum, change, repairCosts = null) {
     const anchor = this.selectionAnchor;
     this.closeSelection();
     const dialog = document.createElement('dialog');
@@ -772,17 +809,46 @@ export class RaidBase {
     dialog.setAttribute('aria-label', action + ' ' + getItemDisplayName(item));
     const slider = document.createElement('input');
     slider.type = 'range';
-    slider.min = '1';
-    slider.max = String(maximum);
-    slider.value = '1';
+    const batch = action === 'Recycle' ? recycleBatchSize(item) : 1;
+    const sliderMax = Math.floor(maximum / batch) * batch;
+    slider.min = String(batch);
+    slider.max = String(sliderMax);
+    slider.step = String(batch);
+    slider.value = String(batch);
     slider.setAttribute('aria-label', 'Quantity');
     const preview = document.createElement('div');
     preview.className = 'raid-recycle-preview';
     const status = document.createElement('div');
     status.setAttribute('role', 'status');
+    let repairUnavailable = false;
     const update = () => {
+      if (repairCosts) {
+        const stash = stashInventory(this.profile, new Player());
+        const terms = [...Object.entries(repairCosts).map(([key, amount]) => ({
+          item: { kind: 'material', key }, label: String(amount), missing: stash.countMaterial(key) < amount,
+        })), { item, label: '100%' }];
+        repairUnavailable = terms.some((term) => term.missing);
+        terms.forEach(({ item: term, label, missing }, index) => {
+          if (index > 0) {
+            const operator = document.createElement('span');
+            this.pixelLabel(operator, index === terms.length - 1 ? '=' : '+');
+            preview.append(operator);
+          }
+          const group = document.createElement('div');
+          if (missing) group.classList.add('raid-repair-missing');
+          const icon = document.createElement('img');
+          icon.src = getItemIconSrc(term);
+          icon.alt = getItemDisplayName(term);
+          icon.title = missing ? `${icon.alt} (${stash.countMaterial(term.key)}/${label})` : icon.alt;
+          const amount = document.createElement('span');
+          this.pixelLabel(amount, label);
+          group.append(icon, amount);
+          preview.append(group);
+        });
+        return;
+      }
       const count = slider.valueAsNumber;
-      const fill = maximum > 1 ? (count - 1) / (maximum - 1) * 100 : 100;
+      const fill = sliderMax > batch ? (count - batch) / (sliderMax - batch) * 100 : 100;
       slider.style.setProperty('--raid-slider-fill', fill + '%');
       const original = document.createElement('div');
       const originalIcon = document.createElement('img');
@@ -801,7 +867,7 @@ export class RaidBase {
           icon.src = 'assets/items/misc/cash.png';
           icon.alt = 'Cash';
         }
-        this.pixelLabel(result.querySelector('span'), String(action === 'Sell' ? count * 2 : maximum + 1 - count));
+        this.pixelLabel(result.querySelector('span'), String(action === 'Sell' ? count * getSellPrice(item) : maximum + 1 - count));
         preview.append(result);
         return;
       }
@@ -830,11 +896,11 @@ export class RaidBase {
     const controls = document.createElement('div');
     controls.className = 'raid-quantity-actions';
     controls.append(this.button('Cancel', () => dialog.close()), this.button(action, () => {
-      if (this.transact((next, player) => change(next, player, slider.valueAsNumber))) dialog.close();
-      else this.pixelLabel(status, this.status.getAttribute('aria-label'), 270);
-    }));
+      if (this.transact((next, player) => change(next, player, slider.valueAsNumber),
+        (message) => this.pixelLabel(status, message, 270))) dialog.close();
+    }, repairUnavailable));
     dialog.append(preview);
-    if (maximum > 1) dialog.append(slider);
+    if (sliderMax > batch) dialog.append(slider);
     dialog.append(status, controls);
     let pressedBackdrop = false;
     const outsideDialog = (event) => {
@@ -853,7 +919,7 @@ export class RaidBase {
     }, { once: true });
     this.root.append(dialog);
     dialog.showModal();
-    if (maximum > 1) slider.focus({ preventScroll: true });
+    if (sliderMax > batch) slider.focus({ preventScroll: true });
   }
 
   renderCraft() {
@@ -861,6 +927,7 @@ export class RaidBase {
     grid.replaceChildren();
     const player = new Player();
     player.applySaveData(this.profile.kit);
+    player.raidLevel = raidLevel(this.profile);
     const inventory = stashInventory(this.profile, player);
     const recipes = getCraftableRecipes(player).map((recipe) => ({ recipe, ready: canCraftRecipe(inventory, recipe) }));
     recipes.sort((a, b) => catalogCategory(a.recipe.output) - catalogCategory(b.recipe.output)
@@ -925,7 +992,7 @@ export class RaidBase {
             if (!storeInStash(next, player, [offer.item])) return 'Stash is full.';
             next.cash -= offer.price;
           })) return;
-          this.playCue([660, 880]);
+          this.playUi('buy');
           if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
             this.root.querySelector('.raid-base-balance').animate(
               [{ transform: 'scale(1)' }, { transform: 'scale(1.12)', color: '#f5ce86' }, { transform: 'scale(1)' }],
@@ -979,7 +1046,6 @@ export class RaidBase {
     this.selectionAnchor = anchor;
     const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
     const catalog = touch && anchor.closest('#raid-shop, #raid-recipes');
-    if (keepPosition && !catalog) return;
     if (catalog && !keepPosition) {
       const workspace = this.workspace.getBoundingClientRect();
       const item = anchor.getBoundingClientRect();
@@ -994,8 +1060,6 @@ export class RaidBase {
   positionSelection(anchor) {
     const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
     const rect = anchor.getBoundingClientRect();
-    const width = this.selection.offsetWidth;
-    const height = this.selection.offsetHeight;
     const viewport = window.visualViewport;
     const maxX = viewport?.width ?? window.innerWidth;
     const maxY = viewport?.height ?? window.innerHeight;
@@ -1013,6 +1077,9 @@ export class RaidBase {
       this.selection.style.top = `${Math.max(topEdge, Math.min(rect.top + (rect.height - box.height) / 2, bottomEdge - box.height))}px`;
       return;
     }
+    this.selection.style.maxWidth = `${maxX - 16}px`;
+    this.selection.style.maxHeight = `${maxY - 16}px`;
+    const { width, height } = this.selection.getBoundingClientRect();
     const left = rect.right + width + 8 <= maxX ? rect.right + 5 : rect.left - width - 5;
     this.selection.style.left = `${Math.max(8, Math.min(left, maxX - width - 8))}px`;
     this.selection.style.top = `${Math.max(8, Math.min(rect.top, maxY - height - 8))}px`;
@@ -1155,6 +1222,7 @@ export class RaidBase {
       icon.alt = '';
       button.append(icon);
     }
+    if (label === 'BUY') button.dataset.uiCue = 'manual';
     button.disabled = disabled;
     button.addEventListener('click', action);
     return button;

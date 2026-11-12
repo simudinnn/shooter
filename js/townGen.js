@@ -32,11 +32,11 @@ export const TOWN_CROSS_HALF_TILES = 24;
 export const TOWN_EXCLUSION_RADIUS = 48;
 
 const TOWN_HOUSE_SIZES = [
-  { w: 5, h: 4 },
-  { w: 5, h: 4 },
-  { w: 5, h: 4 },
-  { w: 6, h: 4 },
-  { w: 5, h: 4 },
+  { w: 6, h: 5 },
+  { w: 7, h: 5 },
+  { w: 7, h: 6 },
+  { w: 8, h: 6 },
+  { w: 8, h: 5 },
 ];
 
 function rollTownHouseSize(seedA, seedB) {
