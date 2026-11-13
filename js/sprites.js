@@ -1034,8 +1034,8 @@ export function getWalkBounceY(walkPhase, moving, amp = 1.8) {
 }
 
 export function getPlayerBounceY(player) {
-  if (!player.isMoving || player.isSprinting) return 0;
-  return -0.65 * (1 - Math.cos(player.walkPhase * Math.PI));
+  if (!player.isMoving) return 0;
+  return -(player.isSprinting ? 1.25 : 0.65) * (1 - Math.cos(player.walkPhase * Math.PI));
 }
 
 /** Subtle idle bob for held weapon — syncs with standing/breathing (screen px, negative = up). */

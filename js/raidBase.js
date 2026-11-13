@@ -237,6 +237,48 @@ export class RaidBase {
   constructor(root, { save, deploy, setSound, playUi }) {
     this.root = root;
     this.save = save;
+    const transferAll = root.querySelector('#raid-transfer-all');
+    this.pixelLabel(transferAll, 'Transfer all');
+    transferAll.addEventListener('click', () => {
+      this.transact((next, player) => {
+        const items = player.itemSlots.filter(Boolean);
+        if (!items.length) return 'Loadout inventory is empty.';
+        if (!storeInStash(next, player, items)) return 'Not enough stash space.';
+        player.itemSlots.fill(null);
+      });
+    });
+    const sort = root.querySelector('#raid-stash-sort');
+    this.pixelLabel(sort, 'Sort stash');
+    const sortModes = [['cash', 'Cash value'], ['type', 'Type'], ['amount', 'Quantity']];
+    let sortIndex = -1;
+    sort.addEventListener('click', () => {
+      const nextIndex = (sortIndex + 1) % sortModes.length;
+      const [mode, label] = sortModes[nextIndex];
+      if (!this.transact((next) => {
+        const amount = (item) => item.amount ?? 1;
+        const value = (item) => amount(item) * getSellPrice(item);
+        next.stash = next.stash.filter(Boolean).sort((a, b) => {
+          if (mode === 'cash') return value(b) - value(a);
+          if (mode === 'amount') return amount(b) - amount(a);
+          return a.kind.localeCompare(b.kind) || getItemDisplayName(a).localeCompare(getItemDisplayName(b));
+        });
+      })) return;
+      sortIndex = nextIndex;
+      sort.dataset.label = 'Sort: ' + label;
+      this.pixelLabel(sort, sort.dataset.label);
+    });
+    const reset = root.querySelector('#raid-reset-dialog');
+    root.querySelector('#raid-reset-open').addEventListener('click', () => {
+      reset.returnValue = '';
+      reset.showModal();
+    });
+    reset.addEventListener('close', () => {
+      if (reset.returnValue !== 'reset') return;
+      const profile = newRaidProfile();
+      root.querySelector('#raid-settings').close();
+      if (this.save(profile)) this.show(profile);
+      else this.setStatus('Could not reset progress.');
+    });
     this.status = root.querySelector('[role=status]');
     this.dialogStatus = root.querySelector('#raid-deploy-status');
     this.selection = root.querySelector('#raid-selection');
@@ -496,6 +538,9 @@ export class RaidBase {
 
   render() {
     this.hideItemName();
+    this.pixelLabel(this.root.querySelector('#raid-transfer-all'), 'Transfer all');
+    const sort = this.root.querySelector('#raid-stash-sort');
+    this.pixelLabel(sort, sort.dataset.label || 'Sort stash');
     const profile = this.profile;
     const level = raidLevel(profile);
     const xpProgress = this.root.querySelector('#raid-xp-progress');
@@ -862,9 +907,9 @@ export class RaidBase {
       (next, player, quantity) => split(next, quantity, player))]);
   }
 
-  openQuantityDialog(action, item, maximum, change, repairCosts = null) {
-    const anchor = this.selectionAnchor;
-    this.closeSelection();
+  openQuantityDialog(action, item, maximum, change, repairCosts = null, raid = null) {
+    const anchor = raid?.anchor ?? this.selectionAnchor;
+    if (!raid) this.closeSelection();
     const dialog = document.createElement('dialog');
     dialog.className = 'raid-quantity-dialog';
     dialog.setAttribute('aria-label', action + ' ' + getItemDisplayName(item));
@@ -931,7 +976,7 @@ export class RaidBase {
         preview.append(result);
         return;
       }
-      const materials = getRecycleYields(item, count);
+      const materials = getRecycleYields(item, count, raid?.level);
       if (!materials?.length) {
         const empty = document.createElement('span');
         this.pixelLabel(empty, 'No materials');
@@ -956,13 +1001,15 @@ export class RaidBase {
     const controls = document.createElement('div');
     controls.className = 'raid-quantity-actions';
     controls.append(this.button('Cancel', () => dialog.close()), this.button(action, () => {
-      if (this.transact((next, player) => change(next, player, slider.valueAsNumber),
-        (message) => {
+      const report = (message) => {
           this.pixelLabel(status, message, 270);
           status.animate([{ opacity: 0, translate: '0 5px' }, { opacity: 1, offset: 0.15 },
             { opacity: 1, offset: 0.75 }, { opacity: 0, translate: '0 -12px' }],
           { duration: 1800, easing: 'ease-out' });
-        })) dialog.close();
+      };
+      const committed = raid ? change(slider.valueAsNumber, report)
+        : this.transact((next, player) => change(next, player, slider.valueAsNumber), report);
+      if (committed) dialog.close();
     }, repairUnavailable));
     dialog.append(preview);
     if (sliderMax > batch) {
@@ -985,9 +1032,10 @@ export class RaidBase {
       dialog.remove();
       if (anchor?.isConnected) anchor.focus({ preventScroll: true });
     }, { once: true });
-    this.root.append(dialog);
+    (raid?.host ?? this.root).append(dialog);
     dialog.showModal();
     if (sliderMax > batch) slider.focus({ preventScroll: true });
+    return dialog;
   }
 
   renderCraft() {

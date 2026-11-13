@@ -7,7 +7,7 @@ import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
 import { Robot, Scout, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
-import { Player, BulletPool, WEAPONS, MELEE_WEAPONS, GUN_HOLD_OFFSET, findBulletSpawn } from './player.js';
+import { Player, BulletPool, WEAPONS, MELEE_WEAPONS, GUN_HOLD_OFFSET, HUMAN_WALK_RATE, HUMAN_SPRINT_RATE, findBulletSpawn } from './player.js';
 import {
   capturePlayerState,
   readSave,
@@ -139,7 +139,11 @@ class Game {
       playUi: (name) => this.audio.playUi(name),
       setSound: (enabled, volume) => this.audio.setEnabled(enabled, volume),
     });
-    this._openSavedBase();
+    this._loadGameAssets().catch((error) => {
+      console.error('Game startup failed:', error);
+      this._hideLoadingScreen();
+      document.getElementById('startup-error').classList.remove('hidden');
+    });
   }
 
   _initCanvas() {
@@ -363,7 +367,18 @@ class Game {
     this._menuCursorEl.style.top = `${e.clientY}px`;
   }
 
+  async _loadGameAssets() {
+    await this._paintLoadingProgress(0.1, 'Loading sprites and fonts');
+    await Promise.all([this._spritePreload, preloadPixelTextAtlas()]);
+    await this._paintLoadingProgress(0.8, 'Loading sounds');
+    await this.audio.init();
+    await this._paintLoadingProgress(1, 'Opening Safe Zone');
+    this._openSavedBase();
+    this._hideLoadingScreen();
+  }
+
   _showLoadingScreen() {
+    this._setPixelText(document.getElementById('loading-heading'), 'Loading Raid', PIXEL_TEXT_SCALE);
     this._disableMenuCursor();
     this.el.loadingScreen?.classList.remove('hidden');
     this._setLoadingProgress(0, 'Preparing…');
@@ -803,6 +818,24 @@ class Game {
   }
 
   _onGameKeyDown(e) {
+    if (this.inventoryUI?.quantityDialog?.open) {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        this.inventoryUI.quantityDialog.close();
+      }
+      return;
+    }
+    if (e.code === 'F7') {
+      e.preventDefault();
+      if (!e.repeat && this.raidProfile && !this._deploying) {
+        const profile = { ...this.raidProfile, cash: this.raidProfile.cash + 1000 };
+        if (this._writeRaidProfile(profile) && !this.raidBase.root.classList.contains('hidden')) {
+          this.raidBase.profile = profile;
+          this.raidBase.render();
+        }
+      }
+      return;
+    }
     const confirmOpen = this.el.confirmDialog && !this.el.confirmDialog.classList.contains('hidden');
     const menu = confirmOpen ? this.el.confirmDialog : this.running ? this.el.pauseMenu : undefined;
     if ((!this.running || this.paused || confirmOpen) && this.raidBase?.handleMenuKey(e, menu)) {
@@ -1596,7 +1629,7 @@ class Game {
         const sprintSpeed = walkSpeed * this.player.sprintMult;
         this.player.isSprinting = isSprintAnimSpeed(this.player.moveSpeed, walkSpeed, sprintSpeed);
 
-        const walkRate = this.player.isSprinting ? 9 : 6;
+        const walkRate = this.player.isSprinting ? HUMAN_SPRINT_RATE : HUMAN_WALK_RATE;
         this.player.walkPhase += dt * walkRate;
 
         const walkStep = Math.floor(this.player.walkPhase);
@@ -1949,7 +1982,8 @@ class Game {
       if (item.key === 'grenade' && item.age >= 3) {
         this.audio.explosion(this._soundOffset(item, item.z));
         this.particles.push(...createExplosion(item.x, item.z), ...createExplosion(item.x, item.z),
-          ...createRobotSmoke(item.x, item.z, 1.6));
+          ...createExplosion(item.x, item.z), ...createRobotSmoke(item.x, item.z, 1.6));
+        this._damagePlayerFromThrowable(item, TILE * 2, 85, time, blocked);
         for (const npc of [...this.robots]) {
           const z = npcCollisionZ(npc);
           if (npc.alive && Math.hypot(npc.x - item.x, z - item.z) < TILE * 2
@@ -1958,35 +1992,53 @@ class Game {
         item.done = true;
       }
       if (item.flight > 0 || item.done || item.key === 'grenade') continue;
-      item.tick -= dt;
-      if (item.tick > 0) continue;
-      item.tick = 0.4;
-      if (item.key === 'flare') {
-        item.done = item.age >= 10;
-      } else {
-        const radius = TILE * 2;
-        for (let i = 0; i < 22; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const distance = Math.sqrt(Math.random()) * radius;
-          const x = item.x + Math.cos(angle) * distance;
-          const z = item.z + Math.sin(angle) * distance;
-          if (!blocked(item.x, item.z, x, z)) {
-            for (const flame of createRobotFire(x, z, 0)) {
-              flame.vx = 0;
-              flame.vz = 0;
-              this.particles.push(flame);
-            }
-          }
+      const flare = item.key === 'flare';
+      item.done = item.age >= (flare ? 10 : 6);
+      if (item.done) continue;
+      const radius = TILE * 2;
+      item.fxTimer = (item.fxTimer ?? 0) - dt;
+      while (item.fxTimer <= 0) {
+        item.fxTimer += flare ? 0.045 + Math.random() * 0.025 : 0.009 + Math.random() * 0.009;
+        const angle = Math.random() * Math.PI * 2;
+        if (flare) {
+          this.particles.push(...createRobotHitSparks(item.x, item.z,
+            item.x - Math.cos(angle), item.z - Math.sin(angle), 14));
+          continue;
         }
+        const distance = Math.sqrt(Math.random()) * radius;
+        const x = item.x + Math.cos(angle) * distance;
+        const z = item.z + Math.sin(angle) * distance;
+        if (blocked(item.x, item.z, x, z)) continue;
+        for (const flame of createRobotFire(x, z, 0)) {
+          flame.vx = 0;
+          flame.vz = 0;
+          this.particles.push(flame);
+        }
+      }
+      if (!flare) {
+        item.tick -= dt;
+        if (item.tick > 0) continue;
+        item.tick += 0.4;
+        this._damagePlayerFromThrowable(item, radius, 8, time, blocked);
         for (const npc of [...this.robots]) {
           const z = npcCollisionZ(npc);
           if (npc.alive && Math.hypot(npc.x - item.x, z - item.z) <= radius
             && !blocked(item.x, item.z, npc.x, z)) this._damageRobot(npc, 8, item.x, item.z);
         }
       }
-      item.done ||= item.age >= (item.key === 'flare' ? 10 : 6);
     }
     this.thrownItems = this.thrownItems.filter((item) => !item.done);
+  }
+
+  _damagePlayerFromThrowable(item, radius, damage, time, blocked) {
+    const player = this.player;
+    const z = npcCollisionZ(player);
+    if (!player.alive || Math.hypot(player.x - item.x, z - item.z) > radius
+      || blocked(item.x, item.z, player.x, z) || !player.takeDamage(damage, time)) return;
+    this.audio.playerHurt(this._soundOffset(player));
+    this.el.damageFlash.classList.add('active');
+    setTimeout(() => this.el.damageFlash.classList.remove('active'), 150);
+    this.particles.push(...createBloodSplatter(player.x, player.z, item.x, item.z, damage));
   }
 
   _raiderAttack(raider, angle, target, time) {

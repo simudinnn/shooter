@@ -22,10 +22,10 @@
   </div>
 
   <div id="overlay">
-    <div id="loading-screen" class="hidden">
+    <div id="loading-screen">
       <div class="menu-frame ui-slice-panel loading-frame">
         <span class="loading-spinner" aria-hidden="true"></span>
-        <h2 class="menu-heading pixel-text-host">Loading Raid</h2>
+        <h2 id="loading-heading" class="menu-heading pixel-text-host">Loading Game</h2>
         <div class="loading-bar" role="progressbar" aria-label="Raid loading progress" aria-valuenow="0">
           <div id="loading-bar-fill"></div>
         </div>
@@ -65,13 +65,13 @@
             <div class="raid-base-section"><h2>Challenges</h2><div id="raid-challenges"></div></div>
           </section>
           <section data-base-panel="stash" class="raid-base-columns hidden">
-            <div class="raid-base-section"><h2>Loadout</h2><p class="raid-station-description raid-mobile-loadout-description" hidden>Gear and supplies you take into your next raid.</p><p class="raid-transfer-hint">Drag or Shift-click to transfer. Right-click for details.</p>
+            <div class="raid-base-section"><div class="raid-stash-tools"><h2>Loadout</h2><button type="button" id="raid-transfer-all" class="ui-slice-button">Transfer all</button></div><p class="raid-station-description">Gear and supplies you take into your next raid.</p><p class="raid-transfer-hint">Drag or Shift-click to transfer. Right-click for details.</p>
               <div class="raid-loadout-layout">
                 <div id="raid-gear" class="raid-base-grid" aria-label="Equipment and weapons"></div>
                 <div id="raid-kit" class="raid-base-grid" aria-label="Backpack inventory"></div>
               </div>
             </div>
-            <div class="raid-base-section"><h2 id="raid-stash-title">Stash</h2><p class="raid-station-description">Keep spare gear and materials here between raids.</p><div id="raid-stash" class="raid-base-grid"></div></div>
+            <div class="raid-base-section"><div class="raid-stash-tools"><h2 id="raid-stash-title">Stash</h2><button type="button" id="raid-stash-sort" class="ui-slice-button">Sort stash</button></div><p class="raid-station-description">Keep spare gear and materials here between raids.</p><div id="raid-stash" class="raid-base-grid"></div></div>
           </section>
           <section data-base-panel="craft" class="raid-base-section hidden"><h2>Crafting station</h2><p class="raid-station-description">Select a recipe to see which materials it needs from your stash.</p><div id="raid-recipes" class="raid-base-grid raid-recipe-grid"></div></section>
           <section data-base-panel="shop" class="raid-base-section hidden"><h2>Quartermaster</h2><p class="raid-station-description">Buy supplies with cash. Purchases go straight to your stash.</p><div id="raid-shop" class="raid-base-grid"></div></section>
@@ -92,7 +92,15 @@
               <div id="raid-extract-count"></div>
               <div id="raid-loss-count"></div>
             </fieldset>
+            <button type="button" id="raid-reset-open" class="ui-slice-button">Reset progress</button>
             <button class="ui-slice-button">Close</button>
+          </form>
+        </dialog>
+        <dialog id="raid-reset-dialog" class="raid-quantity-dialog" aria-label="Reset progress">
+          <p>Reset your level, cash, stash and raid record?</p>
+          <form method="dialog" class="raid-quantity-actions">
+            <button class="ui-slice-button" value="cancel" autofocus>Cancel</button>
+            <button class="ui-slice-button" value="reset">Reset progress</button>
           </form>
         </dialog>
         <dialog id="raid-deploy-dialog" aria-labelledby="raid-deploy-title">

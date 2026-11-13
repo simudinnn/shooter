@@ -26,7 +26,6 @@ import {
   getCraftableRecipes,
   getRecipeLabel,
   getRecycleYields,
-  recycleBatchSize,
   recipeMaterialCosts,
   CRAFT_RECIPES,
   CRAFT_MAX_MATERIALS,
@@ -132,7 +131,8 @@ export class InventoryUI {
       e.stopPropagation();
       const player = this.game.player;
       if (!player) return;
-      const recipe = getCraftableRecipes(player).find((r) => r.id === this.selectedCraftRecipeId);
+      const recipe = getCraftableRecipes(player).filter(({ output }) => output.kind === 'ammo'
+      || ['wooden_bat', 'bandage', 'backpack_1'].includes(output.key)).find((r) => r.id === this.selectedCraftRecipeId);
       this._tryCraftRecipe(recipe);
     });
     this._ensureCraftPickerResizeObserver();
@@ -328,6 +328,7 @@ export class InventoryUI {
   }
 
   forceClose() {
+    if (this.quantityDialog?.open) this.quantityDialog.close();
     this._cancelDrag();
     this._hideContextMenu();
     this._disableInvCursor();
@@ -741,80 +742,6 @@ export class InventoryUI {
     if (btn.classList.contains('inv-context-btn')) btn.classList.add('ui-slice-button');
   }
 
-  _makeAmountSliderRow(labelPrefix, amount, maxAmount, onAmountChange, step = 1) {
-    const row = document.createElement('div');
-    row.className = 'inv-context-amount-row';
-    const label = document.createElement('span');
-    label.className = 'inv-context-amount-label';
-    const setLabel = (next) => setElementPixelText(label, `${labelPrefix}: ${next}`, PIXEL_TEXT_SCALE);
-    setLabel(amount);
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.className = 'inv-context-amount-slider';
-    slider.min = String(step);
-    slider.max = String(maxAmount);
-    slider.step = String(step);
-    slider.value = String(amount);
-    const track = document.createElement('div');
-    track.className = 'inv-context-slider-track';
-    const thumb = document.createElement('span');
-    thumb.className = 'inv-context-slider-thumb';
-    thumb.setAttribute('aria-hidden', 'true');
-    const updateThumb = () => track.style.setProperty('--slider-progress',
-      `${(slider.valueAsNumber - step) / Math.max(1, maxAmount - step) * 100}%`);
-    updateThumb();
-    const moveSlider = (e) => {
-      const rect = slider.getBoundingClientRect();
-      const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      slider.value = String(step * (1 + Math.round(progress * (maxAmount / step - 1))));
-      slider.dispatchEvent(new Event('input'));
-    };
-    slider.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || this._sliderPointerId != null) return;
-      e.preventDefault();
-      this._sliderPointerId = e.pointerId;
-      slider.focus({ preventScroll: true });
-      slider.setPointerCapture(e.pointerId);
-      moveSlider(e);
-      const gesture = new AbortController();
-      this._sliderGesture = gesture;
-      const options = { capture: true, signal: gesture.signal };
-      window.addEventListener('pointermove', (event) => {
-        if (event.pointerId === e.pointerId) moveSlider(event);
-      }, options);
-      const end = (event) => {
-        if (event.pointerId !== e.pointerId) return;
-        if (event.type === 'pointerup') moveSlider(event);
-        this._sliderPointerId = null;
-        this._sliderGesture = null;
-        gesture.abort();
-      };
-      window.addEventListener('pointerup', end, options);
-      window.addEventListener('pointercancel', end, options);
-    });
-    slider.addEventListener('input', () => {
-      const next = Math.max(1, Math.min(maxAmount, Number(slider.value) | 0));
-      slider.value = String(next);
-      updateThumb();
-      setLabel(next);
-      onAmountChange(next);
-    });
-    row.appendChild(label);
-    track.append(thumb, slider);
-    row.appendChild(track);
-    return { row, slider, label };
-  }
-
-  _renderRecycleYieldIcons(container, yields) {
-    container.innerHTML = '';
-    for (const entry of yields ?? []) {
-      const matItem = { kind: 'material', key: entry.key, amount: entry.amount };
-      const icon = this._slotIcon(getItemIconSrc(matItem));
-      icon.classList.add('inv-context-recycle-icon');
-      container.appendChild(icon);
-    }
-  }
-
   _getContextAnchorEl(container, index) {
     const hand = this._handIndexFromZone(container);
     if (hand >= 0) {
@@ -999,33 +926,8 @@ export class InventoryUI {
     }
 
     if (canRecycleItem(item, this.game.player?.raidLevel ?? 1) && container === 'item') {
-      const batch = recycleBatchSize(item);
-      const maxRecycle = Math.floor(this._stackAmountForSplit(item) / batch) * batch;
-      let recycleCount = batch;
-      const row = document.createElement('div');
-      row.className = 'inv-context-recycle-row';
-      const icons = document.createElement('div');
-      icons.className = 'inv-context-recycle-icons';
-      this._renderRecycleYieldIcons(icons, getRecycleYields(item, recycleCount));
-      row.appendChild(icons);
-      if (maxRecycle > batch) {
-        const { row: amountRow } = this._makeAmountSliderRow('Recycle', recycleCount, maxRecycle, (next) => {
-          recycleCount = next;
-          this._renderRecycleYieldIcons(icons, getRecycleYields(item, recycleCount));
-        }, batch);
-        row.appendChild(amountRow);
-      }
-      const recycleBtn = document.createElement('button');
-      recycleBtn.type = 'button';
-      recycleBtn.className = 'inv-context-btn';
-      this._setBtnLabel(recycleBtn, 'Recycle');
-      this._bindContextAction(recycleBtn, () => {
-        if (this._tryRecycleItem(index, container, recycleCount)) {
-          this._renderAfterContextAction();
-        }
-      });
-      row.appendChild(recycleBtn);
-      actions.appendChild(row);
+      this._appendRaidQuantityAction(actions, 'Recycle', item, this._stackAmountForSplit(item) || 1,
+        (count) => this._tryRecycleItem(index, container, count));
     }
 
     if ((normalizeConsumableItem(item) || normalizeThrowableItem(item)) && container === 'item') {
@@ -1042,30 +944,29 @@ export class InventoryUI {
     }
 
     if (this._canSplitStack(item) && (container === 'item' || container === 'chest')) {
-      const total = this._stackAmountForSplit(item);
-      const maxSplit = total - 1;
-      let splitAmount = Math.max(1, Math.floor(total / 2));
-      const splitRow = document.createElement('div');
-      splitRow.className = 'inv-context-split-row';
-      const splitBtn = document.createElement('button');
-      splitBtn.type = 'button';
-      splitBtn.className = 'inv-context-btn';
-      this._setBtnLabel(splitBtn, 'Split');
-      this._bindContextAction(splitBtn, () => {
-        if (!this._splitStack(container, index, splitAmount)) {
-          this.game.items.setPickupMsg('No empty slot', { error: true });
-        }
-        this._renderAfterContextAction();
-      });
-      if (maxSplit > 1) {
-        const { row: amountRow } = this._makeAmountSliderRow('Split', splitAmount, maxSplit, (next) => {
-          splitAmount = next;
-        });
-        splitRow.appendChild(amountRow);
-      }
-      splitRow.appendChild(splitBtn);
-      actions.appendChild(splitRow);
+      this._appendRaidQuantityAction(actions, 'Split', item, this._stackAmountForSplit(item) - 1,
+        (count) => this._splitStack(container, index, count));
     }
+  }
+
+  _appendRaidQuantityAction(actions, action, item, maximum, apply) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'inv-context-btn';
+    this._setBtnLabel(button, action);
+    this._bindContextAction(button, () => {
+      const anchor = this._contextAnchorEl;
+      this._hideContextMenu();
+      this.quantityDialog = this.game.raidBase.openQuantityDialog(action, item, maximum, (count, report) => {
+        if (!apply(count)) {
+          report(action === 'Split' ? 'No empty slot' : 'Cannot recycle this item');
+          return false;
+        }
+        this.render();
+        return true;
+      }, null, { host: this.root, anchor, level: this.game.player.raidLevel });
+    });
+    actions.append(button);
   }
 
   _syncInvCursorAt(clientX, clientY) {
@@ -2194,7 +2095,8 @@ export class InventoryUI {
 
   _renderCraftPanel(player) {
     if (!this.craftPickerEl || !this.craftCostGridEl) return;
-    const recipes = getCraftableRecipes(player);
+    const recipes = getCraftableRecipes(player).filter(({ output }) => output.kind === 'ammo'
+      || ['wooden_bat', 'bandage', 'backpack_1'].includes(output.key));
     if (!recipes.length) {
       this.selectedCraftRecipeId = null;
       this.craftPickerEl.innerHTML = '';

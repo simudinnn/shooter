@@ -21,6 +21,9 @@ export const BULLET_SPAWN_RAISE_PX = 6;
 /** 24px diameter damage / melee hit circle at PPU 8. */
 export const PLAYER_HIT_RADIUS = 1.5;
 /** Movement collision around the legs (screen pixels). */
+export const HUMAN_WALK_RATE = 6;
+export const HUMAN_SPRINT_RATE = 9;
+
 export const PLAYER_MOVE_W_PX = 16;
 export const PLAYER_MOVE_H_PX = 10;
 export const PLAYER_SPRITE_SCALE = 1.5;

@@ -379,7 +379,11 @@ function getDoorApproachGoal(building, robot, player, buildings) {
   if (Math.abs(robot.x - door.x) < TILE * 0.12 && depth < TILE * 0.95) {
     return { x: door.x, z: door.z - outward * TILE * 1.1 - (shape.zOff ?? 0), kind: 'door-through' };
   }
-  return { x: door.x, z: door.z + outward * TILE * 0.85 - (shape.zOff ?? 0), kind: 'door-approach' };
+  const stagingDepth = TILE * 0.85;
+  if (depth < stagingDepth - TILE * 0.1 && Math.abs(robot.x - door.x) >= TILE * 0.12) {
+    return { x: robot.x, z: door.z + outward * stagingDepth - (shape.zOff ?? 0), kind: 'door-approach' };
+  }
+  return { x: door.x, z: door.z + outward * stagingDepth - (shape.zOff ?? 0), kind: 'door-approach' };
 }
 
 function getPlayerFlowGoalTiles(player, world, buildings) {

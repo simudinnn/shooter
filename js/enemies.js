@@ -24,7 +24,7 @@ import {
   SCOUT_DETECT_RANGE,
 } from './enemyNav.js';
 import { getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, resolveFlipX } from './sprites.js';
-import { PLAYER_MOVE_W_PX, PLAYER_MOVE_H_PX, WEAPONS, MELEE_WEAPONS, getHumanMoveCollider } from './player.js';
+import { PLAYER_MOVE_W_PX, PLAYER_MOVE_H_PX, WEAPONS, MELEE_WEAPONS, getHumanMoveCollider, HUMAN_WALK_RATE, HUMAN_SPRINT_RATE } from './player.js';
 import { PPU } from './renderConfig.js';
 import { TILE } from './worldGen.js';
 
@@ -262,7 +262,7 @@ export class Robot {
     let r = move(stepX, stepZ);
     const stepSq = stepX * stepX + stepZ * stepZ;
     const progress = (r.x - prevX) * stepX + (r.z - prevZ) * stepZ;
-    if (stepSq > 1e-8 && progress < stepSq * 0.2) {
+    if (!opts.doorCrossing && stepSq > 1e-8 && progress < stepSq * 0.2) {
       const preferred = this._avoidSide ?? 1;
       for (const side of [preferred, -preferred]) {
         const slide = move(-stepZ * side, stepX * side);
@@ -279,7 +279,7 @@ export class Robot {
     if (!ignoreRobots) {
       applyApproachPush(this, prevX, prevZ, this.x, this.z, entityPushRadius(this, PPU), targets, 0.24, world, PPU);
     }
-    if (ignoreRobots) this._softSeparateFromRobots(robots, world, worldCol, moveOpts);
+    if (ignoreRobots && !opts.doorCrossing) this._softSeparateFromRobots(robots, world, worldCol, moveOpts);
     if (world.checkCollisionShape(this.x, this.z, worldCol, false, moveOpts)) {
       if (this.type === 'raider' && !world.checkCollisionShape(prevX, prevZ, worldCol)) {
         this.x = prevX;
@@ -945,8 +945,7 @@ export class Raider extends Robot {
     } else if (this.exitBuilding) {
       const building = this.exitBuilding;
       const exit = this._doorApproach(building);
-      if (!building.doorOpen) buildings.toggleDoor(building);
-      this._runToward(dt, exit, world, robots, buildings, time);
+      this._crossDoor(dt, building, false, world, robots, buildings, time);
       if (!inside && Math.hypot(exit.x - this.x, exit.z - this.z) < 2.5) {
         this.exitBuilding = null;
         this.lootCooldown = 4;
@@ -1066,7 +1065,7 @@ export class Raider extends Robot {
     this.isMoving = moving;
     this.moveDirX = moving ? this.x - startX : 0;
     this.isSprinting = moving && dt > 0 && Math.hypot(this.x - startX, this.z - startZ) / dt > this.baseSpeed * 1.15;
-    this._applyLocomotion(startX, startZ, dt, moving ? (this.isSprinting ? 14 : 8) : 0);
+    this._applyLocomotion(startX, startZ, dt, moving ? (this.isSprinting ? HUMAN_SPRINT_RATE : HUMAN_WALK_RATE) : 0);
   }
 
   _incomingShotDodge(bullets) {
@@ -1124,17 +1123,38 @@ export class Raider extends Robot {
       });
     this.enteringBuilding = building;
     this.entryDoor = door;
-    const approach = this._doorApproach(door);
+    this._crossDoor(dt, door, true, world, robots, buildings, time);
+  }
+
+  _crossDoor(dt, door, entering, world, robots, buildings, time) {
     const center = getDoorWorldPos(door);
-    const direction = door.doorFacing === 'north' ? 1 : -1;
-    const depth = (this.z - approach.z) * direction;
-    const aligned = Math.abs(this.x - center.x) < TILE * 0.12;
-    const close = Math.hypot(this.x - center.x, this.z - center.z) < TILE * 1.35;
+    const shape = this.getMoveCollider();
+    const outward = door.doorFacing === 'north' ? -1 : 1;
+    const fromSide = entering ? outward : -outward;
+    const feetZ = this.z + shape.zOff;
+    const depth = (feetZ - center.z) * fromSide;
+    const sideX = this.x - center.x;
+    const stagingDepth = TILE * 0.95;
+    const aligned = Math.abs(sideX) < TILE * 0.045;
+    const close = Math.hypot(sideX, depth) < TILE * 1.45;
     if (close && !door.doorOpen && !buildings.toggleDoor(door)) return;
-    const goal = door.doorOpen && aligned && depth > -TILE * 0.25
-      ? { x: center.x, z: center.z + direction * TILE * 1.15 - this.getMoveCollider().zOff }
-      : approach;
-    this._runToward(dt, goal, world, robots, buildings, time);
+
+    if (door.doorOpen && aligned && depth <= stagingDepth + TILE * 0.1) {
+      const endZ = center.z - fromSide * TILE * 1.05 - shape.zOff;
+      const remaining = endZ - this.z;
+      if (remaining * fromSide >= 0) return;
+      this.speed = this.baseSpeed * 1.5;
+      this.angle = remaining < 0 ? Math.PI : 0;
+      this._move(dt, world, null, robots, 0, Math.sign(remaining),
+        Math.min(1, Math.abs(remaining) / Math.max(0.001, dt * this.speed)),
+        { ignoreRobots: true, buildings, doorCrossing: true });
+      return;
+    }
+
+    const stagingZ = center.z + fromSide * stagingDepth - shape.zOff;
+    // Back out onto the approach line before moving sideways along the wall.
+    const x = !aligned && depth < stagingDepth - TILE * 0.08 ? this.x : center.x;
+    this._runToward(dt, { x, z: stagingZ }, world, robots, buildings, time);
   }
 
   _doorApproach(building) {
