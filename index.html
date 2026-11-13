@@ -17,13 +17,14 @@
   <canvas id="game-canvas"></canvas>
 
   <div id="spawn-curtain" class="hidden" aria-hidden="true">
+    <span class="loading-spinner" aria-hidden="true"></span>
     <p id="spawn-curtain-status" class="spawn-curtain-status pixel-text-host"></p>
   </div>
 
   <div id="overlay">
     <div id="loading-screen" class="hidden">
       <div class="menu-frame ui-slice-panel loading-frame">
-        <img class="loading-spinner" src="assets/ui/loading_circle.png" alt="">
+        <span class="loading-spinner" aria-hidden="true"></span>
         <h2 class="menu-heading pixel-text-host">Loading Raid</h2>
         <div class="loading-bar" role="progressbar" aria-label="Raid loading progress" aria-valuenow="0">
           <div id="loading-bar-fill"></div>
@@ -40,7 +41,7 @@
     <div id="raid-base" class="hidden">
       <section class="raid-base-frame" aria-label="Safe base">
         <header class="raid-base-top">
-          <div id="raid-stats"></div>
+          <div class="raid-level-progress"><div id="raid-stats"></div><progress id="raid-xp-progress" aria-label="Level XP"></progress></div>
 
           <nav aria-label="Base stations">
             <button type="button" data-station="deploy">Deploy</button>
@@ -53,7 +54,7 @@
             <button type="button" id="raid-settings-open">Settings</button>
           </div>
         </header>
-        <div class="raid-base-strip"><span role="status"></span></div>
+        <span class="raid-floating-status" role="status"></span>
         <main class="raid-base-workspace">
           <section data-base-panel="deploy" class="raid-base-overview">
             <div class="raid-base-mission">
@@ -110,7 +111,7 @@
       <div class="raid-result-stats">
         <span id="raid-result-duration"></span><span id="raid-result-kills"></span>
         <span id="raid-result-raiders"></span>
-        <span id="raid-result-cash"></span><span id="raid-result-xp"></span>
+        <span id="raid-result-xp"></span>
       </div>
       <h3 id="raid-result-items-title"></h3>
       <div id="raid-result-items"></div>
@@ -164,11 +165,12 @@
         <span class="ammo-sep pixel-text-host">/</span>
         <span id="ammo-reserve" class="pixel-text-host">36</span>
       </div>
-      <div id="reload-indicator" class="hidden pixel-text-host">Reloading…</div>
+      <div id="reload-indicator" class="hidden"><span class="filling-spinner" aria-hidden="true"></span><span id="reload-label" class="pixel-text-host">Reloading</span></div>
     </div>
     <div id="kill-counter"><span id="zone-label" class="pixel-text-host">Base</span></div>
     <div id="wave-banner" class="hidden pixel-text-host"></div>
     <div id="damage-flash"></div>
+    <pre id="raid-performance" aria-hidden="true"></pre>
   </div>
 
   <div id="inventory" class="hidden">

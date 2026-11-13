@@ -14,7 +14,7 @@ import {
 
 /** One flow cell = one ground tile (see tile-based flow fields). */
 const FLOW_INTERVAL = 0.5;
-const FLOW_PAD_TILES = 24;
+const FLOW_PAD_TILES = 12;
 const FLOW_ACTIVATE_RANGE = 56;
 const MAX_FIELD_TILES = 96;
 const UNREACHABLE = 32767;
@@ -372,18 +372,14 @@ function pickFlowLayer(wx, wz, buildings, robot = null) {
 
 function getDoorApproachGoal(building, robot, player, buildings) {
   const door = getDoorWorldPos(building);
-  const mouthZ = doorMouthZ(building);
-  const navShape = robot.getMoveCollider?.() ?? NAV_SHAPE;
-  const distMouth = Math.hypot(robot.x - door.x, robot.z - mouthZ);
-
-  if (shapeOverlapsOpenDoorNavZone(buildings, robot.x, robot.z, navShape) || distMouth <= TILE * 1.35) {
-    const center = getEntityMoveGoalCenter(player, 8);
-    return { x: center.x, z: center.z, kind: 'door-through' };
+  const shape = robot.getMoveCollider?.() ?? NAV_SHAPE;
+  const outward = building.doorFacing === 'north' ? -1 : 1;
+  const feetZ = robot.z + (shape.zOff ?? 0);
+  const depth = (feetZ - door.z) * outward;
+  if (Math.abs(robot.x - door.x) < TILE * 0.12 && depth < TILE * 0.95) {
+    return { x: door.x, z: door.z - outward * TILE * 1.1 - (shape.zOff ?? 0), kind: 'door-through' };
   }
-  if (distMouth <= TILE * 2.5) {
-    return { x: door.x, z: doorOutsideZ(building, 0.4), kind: 'door-approach' };
-  }
-  return { x: door.x, z: doorOutsideZ(building, 0.85), kind: 'door-open' };
+  return { x: door.x, z: door.z + outward * TILE * 0.85 - (shape.zOff ?? 0), kind: 'door-approach' };
 }
 
 function getPlayerFlowGoalTiles(player, world, buildings) {
@@ -414,7 +410,7 @@ function computeFlowGoal(player, buildings) {
   return getEntityMoveGoalCenter(player, 8);
 }
 
-function buildTileFlowField(world, buildings, goalTiles, minTx, minTz, maxTx, maxTz) {
+function buildTileFlowField(world, buildings, goalTiles, minTx, minTz, maxTx, maxTz, walkableCache = new Map()) {
   const gw = maxTx - minTx + 1;
   const gh = maxTz - minTz + 1;
   if (gw > MAX_FIELD_TILES || gh > MAX_FIELD_TILES) return null;
@@ -434,7 +430,8 @@ function buildTileFlowField(world, buildings, goalTiles, minTx, minTz, maxTx, ma
     if (!inGrid(tx, tz)) return false;
     const idx = gridIdx(tx, tz);
     if (blocked[idx]) return blocked[idx] === 2;
-    const ok = isTileWalkable(world, buildings, tx, tz);
+    if (!walkableCache.has(idx)) walkableCache.set(idx, isTileWalkable(world, buildings, tx, tz));
+    const ok = walkableCache.get(idx);
     blocked[idx] = ok ? 2 : 1;
     return ok;
   };
@@ -613,8 +610,9 @@ export function tickTileFlowField(time, world, buildings, player, robots) {
   }
 
   if (splitInside) {
-    const exterior = buildTileFlowField(world, buildings, doorGoals, minTx, minTz, maxTx, maxTz);
-    const interior = buildTileFlowField(world, buildings, playerGoals, minTx, minTz, maxTx, maxTz);
+    const walkable = new Map();
+    const exterior = buildTileFlowField(world, buildings, doorGoals, minTx, minTz, maxTx, maxTz, walkable);
+    const interior = buildTileFlowField(world, buildings, playerGoals, minTx, minTz, maxTx, maxTz, walkable);
     if (!exterior || !interior) {
       _flow.active = false;
       return;
@@ -921,6 +919,14 @@ function findTileAstar(world, buildings, field, startTx, startTz, goalTx, goalTz
   gScore[startIdx] = 0;
   fScore[startIdx] = astarHeuristic(startTx, startTz, goal.tx, goal.tz);
   const open = [startIdx];
+  const queued = new Uint8Array(size);
+  const walkable = new Uint8Array(size);
+  queued[startIdx] = 1;
+  const canWalk = (tx, tz) => {
+    const index = fieldTileIdx(field, tx, tz);
+    if (!walkable[index]) walkable[index] = isTileWalkable(world, buildings, tx, tz) ? 2 : 1;
+    return walkable[index] === 2;
+  };
 
   while (open.length > 0) {
     let bestI = 0;
@@ -930,6 +936,7 @@ function findTileAstar(world, buildings, field, startTx, startTz, goalTx, goalTz
     const cur = open[bestI];
     open[bestI] = open[open.length - 1];
     open.pop();
+    queued[cur] = 0;
 
     if (cur === goalIdx) {
       const path = [];
@@ -952,11 +959,8 @@ function findTileAstar(world, buildings, field, startTx, startTz, goalTx, goalTz
       const nx = tx + dx;
       const nz = tz + dz;
       if (!fieldInBounds(field, nx, nz)) continue;
-      if (!isTileWalkable(world, buildings, nx, nz)) continue;
-      if (dx !== 0 && dz !== 0) {
-        if (!isTileWalkable(world, buildings, tx + dx, tz)
-          || !isTileWalkable(world, buildings, tx, tz + dz)) continue;
-      }
+      if (!canWalk(nx, nz)) continue;
+      if (dx !== 0 && dz !== 0 && (!canWalk(tx + dx, tz) || !canWalk(tx, tz + dz))) continue;
       const ni = fieldTileIdx(field, nx, nz);
       const step = (dx !== 0 && dz !== 0) ? ASTAR_DIAG_COST : ASTAR_STEP_COST;
       const tentative = curG + step;
@@ -964,7 +968,10 @@ function findTileAstar(world, buildings, field, startTx, startTz, goalTx, goalTz
       cameFrom[ni] = cur;
       gScore[ni] = tentative;
       fScore[ni] = tentative + astarHeuristic(nx, nz, goal.tx, goal.tz);
-      if (!open.includes(ni)) open.push(ni);
+      if (!queued[ni]) {
+        open.push(ni);
+        queued[ni] = 1;
+      }
     }
   }
   return null;
@@ -977,6 +984,9 @@ function clearAstarPlan(nav) {
   nav.astarAt = -999;
 }
 
+let lastAstarWorld;
+let lastAstarTime;
+
 function maybeRefreshAstarPath(robot, world, buildings, goal, nav, time, threshold) {
   const stuck = nav.stuckTime ?? 0;
   if (stuck < threshold) return;
@@ -986,13 +996,21 @@ function maybeRefreshAstarPath(robot, world, buildings, goal, nav, time, thresho
     return;
   }
 
-  const field = pickFlowLayer(robot.x, robot.z, buildings, robot);
-  if (!field) return;
-
   const startTx = Math.floor(robot.x / TILE);
   const startTz = Math.floor(robot.z / TILE);
   const goalTx = Math.floor(goal.x / TILE);
   const goalTz = Math.floor(goal.z / TILE);
+  if (Math.max(Math.abs(goalTx - startTx), Math.abs(goalTz - startTz)) > 32) return;
+  const pad = 5;
+  const field = {
+    minTx: Math.min(startTx, goalTx) - pad, maxTx: Math.max(startTx, goalTx) + pad,
+    minTz: Math.min(startTz, goalTz) - pad, maxTz: Math.max(startTz, goalTz) + pad,
+    gw: Math.abs(goalTx - startTx) + pad * 2 + 1,
+    gh: Math.abs(goalTz - startTz) + pad * 2 + 1,
+  };
+  if (lastAstarWorld === world && lastAstarTime === time) return;
+  lastAstarWorld = world;
+  lastAstarTime = time;
   const path = findTileAstar(world, buildings, field, startTx, startTz, goalTx, goalTz);
 
   nav.astarPath = path;
@@ -1056,7 +1074,10 @@ export function getChaseGoal(robot, player, buildings, world) {
       const outsideZ = doorOutsideZ(enemyBld, 0.55);
       return { x: door.x, z: outsideZ, kind: 'door-closed' };
     }
-    return { x: door.x, z: door.z, kind: 'door-exit' };
+    const outward = enemyBld.doorFacing === 'north' ? -1 : 1;
+    const offset = robot.getMoveCollider().zOff ?? 0;
+    const aligned = Math.abs(robot.x - door.x) < TILE * 0.12;
+    return { x: door.x, z: door.z + outward * TILE * (aligned ? 1.15 : -0.85) - offset, kind: 'door-exit' };
   }
 
   const center = getEntityMoveGoalCenter(player, 8);
@@ -1294,38 +1315,51 @@ export function updateEnemyLastKnown(robot, player, canSee) {
 export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 60) {
   const nav = ensureNavState(robot);
   const goal = getMindGoal(robot, player, buildings, world);
-  const navShape = robot.getMoveCollider();
-  const goalKey = `${goal.kind}:${Math.floor(goal.x / TILE)}:${Math.floor(goal.z / TILE)}`;
-  if (nav.goalKey !== goalKey) {
-    nav.goalKey = goalKey;
-    nav.stuckTime = 0;
-    clearAstarPlan(nav);
+  const shape = robot.getMoveCollider();
+  const dx = goal.x - robot.x;
+  const dz = goal.z - robot.z;
+  const distance = Math.hypot(dx, dz);
+  const heading = Math.atan2(dx, dz);
+  const reach = Math.min(distance, TILE * 1.15);
+  const nearOpening = goal.kind.startsWith('door-') || robot.enteringBuilding;
+  const clearance = !nearOpening && shape.kind === 'circle'
+    ? { ...shape, radius: shape.radius + TILE / 16 } : shape;
+  const clear = (angle, length, collider = clearance) => {
+    const vx = Math.sin(angle) * length;
+    const vz = Math.cos(angle) * length;
+    for (const fraction of [0.25, 0.5, 0.75, 1]) {
+      if (world.checkCollisionShape(robot.x + vx * fraction, robot.z + vz * fraction,
+        collider, false, { buildings })) return false;
+    }
+    return true;
+  };
+  const result = (angle) => ({
+    dirX: distance > 0.03 ? Math.sin(angle) : 0,
+    dirZ: distance > 0.03 ? Math.cos(angle) : 0,
+    forget: false, goalX: goal.x, goalZ: goal.z,
+  });
+  const escaping = (nav.idleTime ?? 0) > 0.25;
+  if (!escaping && clear(heading, reach)) {
+    nav.detourSide = 0;
+    return result(heading);
   }
-
-  const prefer = dirTo(robot.x, robot.z, goal.x, goal.z);
-
-  if (canWalkDirect(world, robot.x, robot.z, goal.x, goal.z, navShape, buildings, robot.type === 'raider')) {
-    return { dirX: prefer.dirX, dirZ: prefer.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
-  }
-
-  const nearWall = isNearNavObstacle(world, robot.x, robot.z, buildings);
-  const astarAfter = nearWall ? STUCK_ASTAR_NEAR_WALL : STUCK_ASTAR_THRESHOLD;
-
-  maybeRefreshAstarPath(robot, world, buildings, goal, nav, time, astarAfter);
-  if (nav.astarPath) {
-    const astarDir = followAstarPath(robot, nav, goal);
-    if (astarDir) {
-      return { dirX: astarDir.dirX, dirZ: astarDir.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
+  const side = nav.detourSide || 1;
+  const offsets = escaping ? [Math.PI / 2, Math.PI * 2 / 3, Math.PI * 5 / 6, Math.PI] 
+    : [Math.PI / 6, Math.PI / 3, Math.PI / 2, Math.PI * 2 / 3, Math.PI * 5 / 6];
+  for (const turn of [side, -side]) {
+    for (const offset of offsets) {
+      const angle = heading + turn * offset;
+      if (!clear(angle, TILE * 0.65, escaping ? shape : clearance)) continue;
+      nav.detourSide = turn;
+      return result(angle);
     }
   }
-
-  const flowDir = goal.kind === 'last_known' || player !== _flow.target
-    ? null : readChaseFlowDir(robot.x, robot.z, buildings, robot, world, dt);
-  if (flowDir) {
-    return { dirX: flowDir.dirX, dirZ: flowDir.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
+  // The clearance probe can start against a wall; try a short escape using the real collider.
+  for (const offset of [0, side * Math.PI / 2, -side * Math.PI / 2, Math.PI]) {
+    const angle = heading + offset;
+    if (clear(angle, Math.min(reach, TILE * 0.28), shape)) return result(angle);
   }
-
-  return { dirX: prefer.dirX, dirZ: prefer.dirZ, forget: false, goalX: goal.x, goalZ: goal.z };
+  return { ...result(heading), dirX: 0, dirZ: 0 };
 }
 
 export function noteChaseMoveResult(robot, moved, dt) {

@@ -1080,8 +1080,10 @@ export function barrelCollisionHalfExtents() {
   return { halfW: half, halfH: half };
 }
 
-export function makeBarrelObstacle(x, z) {
-  const { halfW, halfH } = barrelCollisionHalfExtents();
+export function makeBarrelObstacle(x, z, sprite) {
+  const ratios = { bld_barrel_red: 10 / 16, bld_barrel_green: 12 / 13, bld_barrel_blue: 12 / 15 };
+  const halfH = TILE / 2;
+  const halfW = halfH * (ratios[sprite] ?? 1);
   return {
     kind: 'aabb',
     x,
@@ -1252,11 +1254,11 @@ export function buildBuildingInteriorProps(
         tx: fridge.tx,
         tz: fridge.tz,
         interior: true,
-        obstacle: makePropObstacle(pos.x, pos.z + TILE * 0.26, {
+        obstacle: makePropObstacle(pos.x, pos.z, {
           blocksBullets: true,
           blocksVision: false,
-          sizeFrac: 0.48,
-          widthFrac: 1,
+          sizeFrac: 1,
+          widthFrac: 10 / 16,
         }),
       });
     }
@@ -1299,7 +1301,7 @@ export function buildBuildingInteriorProps(
       tx: table.tx,
       tz: table.tz,
       interior: true,
-      obstacle: makePropObstacle(center.x, center.z, { blocksBullets: false }),
+      obstacle: makePropObstacle(center.x, center.z, { sizeFrac: 14 / 16, widthFrac: 12 / 16 }),
     });
   }
 
@@ -1387,7 +1389,7 @@ export function buildBuildingDecor(
       tx: pick.otx,
       tz: pick.otz,
       exterior: true,
-      obstacle: makeBarrelObstacle(pick.x, pick.z),
+      obstacle: makeBarrelObstacle(pick.x, pick.z, sprite),
     });
   }
   return decor;

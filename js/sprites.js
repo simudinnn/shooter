@@ -121,6 +121,9 @@ const CORE_ASSETS = {
   ...DEAD_ENEMY_ASSET_PATHS,
   ...WORLD_ASSET_PATHS,
   ...BUILDING_ASSET_PATHS,
+  grenade: 'assets/items/weapons/grenade.png',
+  flare: 'assets/items/weapons/flare.png',
+  molotov: 'assets/items/weapons/molotov.png',
   ammo: 'assets/items/weapons/pistol_ammo.png',
   pistol_ammo: 'assets/items/weapons/pistol_ammo.png',
   rifle_ammo: 'assets/items/weapons/rifle_ammo.png',
@@ -1005,14 +1008,14 @@ export function getHandHoldPose(player, punchExtend = 0) {
   };
 }
 
-export function getPlayerSheet(player) {
-  const state = !player.isMoving ? 'idle' : player.isSprinting ? 'run' : 'walk';
+export function getPlayerSheet(player, moving = player.isMoving) {
+  const state = !moving ? 'idle' : player.isSprinting ? 'run' : 'walk';
   return player.spriteVariant ? `raider_${state}${player.spriteVariant}` : `player_${state}`;
 }
 
 /** Animation state for flipbook player sheets. */
-export function getPlayerAnim(player, time = 0) {
-  if (!player.isMoving) return { time };
+export function getPlayerAnim(player, time = 0, moving = player.isMoving) {
+  if (!moving) return { time };
   return {
     phase: player.walkPhase,
     reverse: !isMovingForward(player),
@@ -1342,7 +1345,7 @@ export class SpriteBank {
     });
   }
 
-  draw(ctx, name, sx, sy, scale = 2, angle = 0, flipX = false, pivot = 'center', chopTilt = 0, anim = null) {
+  draw(ctx, name, sx, sy, scale = 2, angle = 0, flipX = false, pivot = 'center', chopTilt = 0, anim = null, subpixel = false) {
     const img = this.images[name] ?? this._getImage(name);
     if (!img) return;
     const fb = this.flipbooks[name];
@@ -1377,7 +1380,7 @@ export class SpriteBank {
     const oy = Math.round(pivotY * scale);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    ctx.translate(Math.round(sx), Math.round(sy));
+    ctx.translate(subpixel ? sx : Math.round(sx), subpixel ? sy : Math.round(sy));
     if (flipX) ctx.scale(-1, 1);
     if (angle) ctx.rotate(angle);
     if (chopTilt) ctx.rotate(chopTilt);
@@ -1396,10 +1399,15 @@ export class SpriteBank {
     const srcW = img.width || 16;
     const srcH = img.height || 16;
     const c = document.createElement('canvas');
-    c.width = resPx;
-    c.height = resPx;
+    c.width = resPx + 2;
+    c.height = resPx + 2;
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
+    g.drawImage(img, 0, 0, srcW, srcH, 1, 2, resPx, resPx);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = 'rgba(0, 0, 0, 0.24)';
+    g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = 'source-over';
     g.drawImage(img, 0, 0, srcW, srcH, 0, 0, resPx, resPx);
     this._groundItemBitmaps.set(key, c);
     return c;
@@ -1417,7 +1425,7 @@ export class SpriteBank {
     const drawX = Math.round(sx - dw * 0.5);
     const drawY = Math.round(sy - dh + bobY);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(bitmap, 0, 0, resPx, resPx, drawX, drawY, dw, dh);
+    ctx.drawImage(bitmap, drawX, drawY, dw * bitmap.width / resPx, dh * bitmap.height / resPx);
   }
 
   drawGroundItemLabel(ctx, label, sx, sy, bobY = 0, itemDisplayPx = 20) {

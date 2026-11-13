@@ -196,16 +196,16 @@ export class ChestManager {
   }
 
   _registerObstacle(chest) {
+    const width = chest.variant === 'chest_metal' ? 14 : 12;
+    const halfW = Math.round(width * CHEST_DRAW_SCALE) / CHEST_GAME_PPU / 2;
+    const halfH = Math.round(13 * CHEST_DRAW_SCALE) / CHEST_GAME_PPU / 2;
+    const pivot = Math.round(8 * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
     chest.obstacle = {
       kind: 'aabb',
-      x: chest.x,
-      z: chest.z + TILE * 0.26,
-      halfW: CHEST_COLLISION_HALF_W,
-      halfH: CHEST_COLLISION_HALF_H,
-      softHalfW: CHEST_COLLISION_HALF_W,
-      softHalfH: CHEST_COLLISION_HALF_H,
-      softX: chest.x,
-      softZ: chest.z + TILE * 0.26,
+      x: chest.x + halfW - pivot,
+      z: chest.z + halfH - pivot,
+      halfW,
+      halfH,
       blocksBullets: false,
     };
     this.world.addDynamicObstacle(chest.obstacle);

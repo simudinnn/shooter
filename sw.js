@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v457';
+const CACHE = 'robot-ruins-v472';
 
 function buildingKitSprites() {
   return [
@@ -179,6 +179,7 @@ const SHELL = [
 
 const ASSETS = [
   './assets/ui/loading_circle.png',
+  './assets/ui/filling_circle.png',
   './sounds/ui/click1.ogg',
   './sounds/ui/button1.ogg',
   './sounds/ui/buy.ogg',
@@ -230,6 +231,9 @@ const ASSETS = [
   './assets/items/materials/upgrade_kit.png',
   './assets/items/materials/wires.png',
   './assets/items/materials/wood.png',
+  './assets/items/weapons/grenade.png',
+  './assets/items/weapons/flare.png',
+  './assets/items/weapons/molotov.png',
   './assets/items/weapons/pistol_ammo.png',
   './assets/items/weapons/rifle_ammo.png',
   './assets/items/weapons/shotgun_ammo.png',

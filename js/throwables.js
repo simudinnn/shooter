@@ -7,9 +7,9 @@ const DISPLAY_NAMES = {
 };
 
 const DESCRIPTIONS = {
-  grenade: 'Throwable explosive. (Throwing coming soon.)',
-  molotov: 'Throwable fire bomb. (Throwing coming soon.)',
-  flare: 'Throwable signal flare. (Throwing coming soon.)',
+  grenade: 'Explodes three seconds after throwing.',
+  molotov: 'Breaks on impact and ignites the area.',
+  flare: 'Attracts robots after landing.',
 };
 
 export function throwableSpritePath(key) {

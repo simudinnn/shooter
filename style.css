@@ -150,14 +150,14 @@ body.mobile-ui .menu-cursor-follow {
   display: block;
   width: clamp(32px, 12dvh, 72px);
   aspect-ratio: 1;
-  object-fit: contain;
   margin: 0 auto 12px;
+  background: url('assets/ui/loading_circle.png') 0 0 / 100% 800% no-repeat;
   image-rendering: pixelated;
-  animation: raid-loading-spin 1.15s linear infinite;
+  animation: raid-loading-spin 800ms steps(8, jump-none) infinite;
 }
 
 @keyframes raid-loading-spin {
-  to { transform: rotate(1turn); }
+  to { background-position-y: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -214,9 +214,11 @@ body.game-active.mobile-ui {
   opacity: 1;
   pointer-events: auto;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
-  padding-bottom: 12vh;
+  flex-direction: column;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
 #spawn-curtain.hidden {
@@ -666,6 +668,13 @@ body.game-active.mobile-ui #hud-time {
   filter: brightness(0.75) saturate(0.4);
 }
 
+#reload-indicator:not(.hidden) { display: flex; align-items: center; gap: 6px; }
+.filling-spinner {
+  width: 15px;
+  height: 15px;
+  background: url('assets/ui/filling_circle.png') 0 var(--fill-frame, 0%) / 100% 800% no-repeat;
+  image-rendering: pixelated;
+}
 #reload-indicator {
   margin-top: 6px;
   justify-content: flex-end;
@@ -1833,10 +1842,6 @@ body.inv-custom-cursor * {
   align-items: center;
   justify-content: center;
   padding: 4px;
-  border: 1px solid rgba(240, 160, 48, 0.6);
-  border-radius: 4px;
-  background: rgba(12, 18, 14, 0.92);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
   opacity: 0.92;
 }
 
@@ -2822,6 +2827,24 @@ body.mobile-ui #raid-extract-hud {
 }
 #raid-results :is(h2, h3, p) { margin: 0 0 10px; }
 #raid-results p:empty { display: none; }
+.raid-level-progress { display: grid; justify-items: start; gap: 3px; min-width: 0; }
+#raid-xp-progress {
+  appearance: none;
+  width: min(100%, 11rem);
+  height: 5px;
+  border: 0;
+  background: #422523;
+}
+#raid-xp-progress::-webkit-progress-bar { background: #422523; }
+#raid-xp-progress::-webkit-progress-value { background: #c73930; }
+#raid-xp-progress::-moz-progress-bar { background: #c73930; }
+#raid-base .raid-smooth-slider input.inv-context-amount-slider {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+}
+
 .raid-result-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2857,7 +2880,7 @@ body.mobile-ui #raid-extract-hud {
   padding: 6px 14px;
 }
 @media (min-width: 900px) {
-  .raid-result-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .raid-result-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (hover: none) and (pointer: coarse) {
   #raid-results .raid-result-content {
@@ -2945,7 +2968,24 @@ body.mobile-ui #raid-extract-hud {
 #raid-deploy-dialog > header { padding: 16px 20px 0; }
 .raid-deploy-review { padding: 16px 20px; }
 #raid-deploy-dialog footer { position: sticky; bottom: 0; z-index: 2; }
+#raid-performance {
+  position: absolute;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  right: max(8px, env(safe-area-inset-right));
+  margin: 0;
+  padding: 5px 7px;
+  background: #101412d9;
+  color: #e3e7e3;
+  font: 11px/1.35 monospace;
+  pointer-events: none;
+}
+body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-inset-top)); }
+:is(.inv-slot-icon:not(.inv-slot-label), .raid-base-slot > img:not(.raid-gear-placeholder), .raid-result-item > img, .raid-drag-ghost) {
+  filter: drop-shadow(2px 4px 0 #0004);
+}
 .raid-drag-ghost {
+  object-fit: contain;
+  image-rendering: pixelated;
   position: fixed;
   z-index: 1000;
   transform: translate(-50%, -50%);
@@ -3455,7 +3495,7 @@ body.mobile-ui #raid-extract-hud {
 }
 #raid-settings label { justify-content: space-between; }
 #raid-settings input { accent-color: #bd4137; }
-#raid-settings input[type="range"] { width: min(40%, 180px); }
+#raid-settings .raid-smooth-slider { width: min(40%, 180px); }
 #raid-settings form > button { justify-self: end; }
 #raid-base .raid-base-strip:has([role="status"][aria-label=""]) { display: none; }
 #raid-base .inv-pixel-text-img {
@@ -3900,4 +3940,74 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
     min-height: 46px;
     margin-inline-end: clamp(12px, 3vw, 28px);
   }
+}
+
+.raid-floating-status, #raid-base #raid-deploy-status {
+  position: fixed;
+  z-index: 1500;
+  top: max(54px, calc(env(safe-area-inset-top) + 34px));
+  left: 50%;
+  width: max-content;
+  max-width: min(86vw, 420px);
+  height: auto;
+  block-size: auto;
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--tooltip-bg);
+  border: 1px solid var(--tooltip-border);
+  pointer-events: none;
+  translate: -50% 0;
+  opacity: 0;
+  white-space: normal;
+}
+#pickup-status {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: max-content;
+  max-width: 80vw;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .inv-context-menu:not(.hidden) { animation: item-context-in 140ms ease-out; }
+  .inv-drag-ghost, .raid-drag-ghost { animation: item-context-in 120ms ease-out; }
+  :is(.inv-item-slot, .inv-chest-slot, .inv-equip-slot, .inv-weapon-slot, .raid-base-slot) {
+    transition: opacity 140ms ease-out, background-color 140ms ease-out;
+  }
+  :is(.inv-item-slot, .inv-chest-slot, .inv-equip-slot, .inv-weapon-slot, .raid-transfer-slot) > img:not(.inv-slot-label):not(.raid-gear-placeholder) {
+    animation: item-context-in 120ms ease-out;
+  }
+  @supports (transition-behavior: allow-discrete) {
+    .inv-context-menu { transition: opacity 130ms ease-out, display 130ms allow-discrete; }
+    .inv-context-menu.hidden { opacity: 0; pointer-events: none; }
+  }
+}
+@keyframes item-context-in {
+  from { opacity: 0; scale: .96; }
+  to { opacity: 1; scale: 1; }
+}
+
+.raid-quantity-notice {
+  position: absolute;
+  inset: auto 8px 100%;
+  background: var(--tooltip-bg);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.inv-raid-context {
+  width: clamp(250px, 26vw, 354px);
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+}
+.inv-cursor-follow { width: 64px; height: 64px; }
+.inv-drag-ghost { width: 80px; height: 80px; }
+.inv-drag-ghost .inv-slot-icon {
+  width: 72px;
+  height: 72px;
+  max-width: 72px;
+  max-height: 72px;
 }

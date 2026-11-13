@@ -140,7 +140,8 @@ export class World {
 
   _foliageSkipTile(tx, tz, tile) {
     if (this._foliageBlocked.has(`${tx},${tz}`)) return true;
-    if (this._townFloorTiles.has(`${tx},${tz}`)) return true;
+    const townFloor = this._townFloorTiles.get(`${tx},${tz}`);
+    if (townFloor && townFloor !== FLOOR_KIND) return true;
     if (isHighwayTile(tx, tz)) return true;
     tile ??= this.getTile(tx, tz);
     if (tile?.floorKind === 'road' || tile?.floorKind === 'path') return true;
@@ -172,7 +173,7 @@ export class World {
   registerTownFloorTiles(tiles) {
     for (const { tx, tz, kind } of tiles) {
       this._townFloorTiles.set(`${tx},${tz}`, kind);
-      this._foliageBlocked.add(`${tx},${tz}`);
+      if (kind !== FLOOR_KIND) this._foliageBlocked.add(`${tx},${tz}`);
     }
   }
 
@@ -205,7 +206,16 @@ export class World {
 
   populateFoliageForChunk(chunk) {
     if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
-    populateChunkFoliage(chunk, (tx, tz, tile) => this._foliageSkipTile(tx, tz, tile));
+    populateChunkFoliage(chunk, (tx, tz, tile) => this._foliageSkipTile(tx, tz, tile),
+      (tx, tz) => {
+        if (!this._townFloorTiles.size) return false;
+        for (let dz = -2; dz <= 2; dz++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            if (this._townFloorTiles.has(`${tx + dx},${tz + dz}`)) return true;
+          }
+        }
+        return false;
+      });
     this._pruneFoliageWithoutSprites(chunk);
     this._onFoliagePopulated?.(chunk);
   }
@@ -1287,7 +1297,7 @@ export class World {
     const midZ = (z0 + z1) * 0.5;
     const collectPad = dist * 0.5 + 2 + (aimAngle != null ? BULLET_FOOT_Z_OFF + 1 : 0);
     const obstacles = this.collectObstaclesNear(midX, midZ, collectPad);
-    if (opts?.feetTrace || opts?.sightTrace || opts?.soundTrace) {
+    if (opts?.feetTrace || opts?.sightTrace || opts?.soundTrace || opts?.solidTrace) {
       const dx = x1 - x0;
       const dz = z1 - z0;
       const lengthSq = dx * dx + dz * dz;

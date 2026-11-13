@@ -290,7 +290,7 @@ const BUSH_PATCH_CHANCE = 0.09;
 const TALL_GRASS_PATCH_FILL = 0.58;
 const BUSH_PATCH_FILL = 0.52;
 /** Short ground grass — disabled for performance (too many tiny sprites). */
-const ENABLE_SHORT_GRASS = false;
+const ENABLE_SHORT_GRASS = true;
 
 function patchRoll(tx, tz, patchTiles, salt) {
   const px = Math.floor(tx / patchTiles);
@@ -329,7 +329,7 @@ function pickFoliageForTile(tx, tz, foliage, obstacles, reserved, wx, wz) {
     if (tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickFromVariants(tx, tz, 53, ['pebble', 'pebble2']), 53)) return;
   }
 
-  if (ENABLE_SHORT_GRASS && scatter < 0.7) {
+  if (ENABLE_SHORT_GRASS && scatter < 0.18) {
     tryPushFoliage(foliage, obstacles, reserved, tx, tz, wx, wz, pickGrassVariant(tx, tz, 23), 23);
   }
 }
@@ -349,7 +349,7 @@ export function generateChunk(cx, cz) {
 }
 
 /** Fill chunk foliage — skip blocked/building tiles; buildings also reconcile after load. */
-export function populateChunkFoliage(chunk, shouldSkipTile = null) {
+export function populateChunkFoliage(chunk, shouldSkipTile = null, nearRoad = null) {
   if (!chunk || chunk.foliagePopulated || chunk.outOfBounds) return;
   const reserved = new Set();
   for (const f of chunk.foliage) {
@@ -363,6 +363,12 @@ export function populateChunkFoliage(chunk, shouldSkipTile = null) {
       if (shouldSkipTile?.(tx, tz, chunk.tiles[lz * CHUNK_TILES + lx])) continue;
       const wx = tx * TILE + TILE * 0.5;
       const wz = tz * TILE + TILE * 0.5;
+      if (nearRoad?.(tx, tz)) {
+        if (tileRoll(tx, tz, 41) < 0.045 && !isFoliageReserved(reserved, tx, tz)) {
+          tryPushFoliage(chunk.foliage, chunk.obstacles, reserved, tx, tz, wx, wz, pickTallGrassVariant(tx, tz, 41), 41);
+        }
+        continue;
+      }
       pickFoliageForTile(tx, tz, chunk.foliage, chunk.obstacles, reserved, wx, wz);
     }
   }

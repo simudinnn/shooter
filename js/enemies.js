@@ -1,3 +1,4 @@
+import { getDoorWorldPos } from './buildingGen.js';
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, didDisplace, MOTION_IDLE_EPS, entityPushRadius } from './collision.js';
 import { customEnemies } from './customContent.js';
 import { RAIDER_SPRITE_VARIANTS } from './sprites.js';
@@ -254,20 +255,25 @@ export class Robot {
       ? [player]
       : targets;
     const worldCol = this.getMoveCollider();
-    const moveOpts = this.type === 'raider' ? {}
-      : { axisSlide: true, ...(opts.buildings ? { buildings: opts.buildings } : {}) };
-    const r = moveWithEntityCollision(
-      world,
-      this.x,
-      this.z,
-      stepX,
-      stepZ,
-      worldCol,
-      worldCol,
-      blockTargets,
-      this,
-      moveOpts,
+    const moveOpts = { axisSlide: this.type !== 'raider', buildings: opts.buildings };
+    const move = (dx, dz) => moveWithEntityCollision(
+      world, prevX, prevZ, dx, dz, worldCol, worldCol, blockTargets, this, moveOpts,
     );
+    let r = move(stepX, stepZ);
+    const stepSq = stepX * stepX + stepZ * stepZ;
+    const progress = (r.x - prevX) * stepX + (r.z - prevZ) * stepZ;
+    if (stepSq > 1e-8 && progress < stepSq * 0.2) {
+      const preferred = this._avoidSide ?? 1;
+      for (const side of [preferred, -preferred]) {
+        const slide = move(-stepZ * side, stepX * side);
+        const slideProgress = ((slide.z - prevZ) * stepX - (slide.x - prevX) * stepZ) * side;
+        if (slideProgress < stepSq * 0.35
+          || world.checkCollisionShape(slide.x, slide.z, worldCol, false, moveOpts)) continue;
+        r = slide;
+        this._avoidSide = side;
+        break;
+      }
+    }
     this.x = r.x;
     this.z = r.z;
     if (!ignoreRobots) {
@@ -314,9 +320,12 @@ export class Robot {
     const dirX = nav.dirX;
     const dirZ = nav.dirZ;
     const len = Math.hypot(dirX, dirZ) || 1;
-    this._move(dt, world, player, robots, dirX / len, dirZ / len, 1, { ignoreRobots: true, buildings });
-    const moved = didDisplace(prevX, prevZ, this.x, this.z, TILE * 0.04);
-    noteChaseMoveResult(this, moved, dt);
+    const remaining = Math.hypot(nav.goalX - prevX, nav.goalZ - prevZ);
+    const speed = Math.min(1, remaining / Math.max(0.001, this.speed * dt));
+    this._move(dt, world, player, robots, dirX / len, dirZ / len, speed, { ignoreRobots: true, buildings });
+    const moved = didDisplace(prevX, prevZ, this.x, this.z);
+    const forward = ((this.x - prevX) * dirX + (this.z - prevZ) * dirZ) / len;
+    noteChaseMoveResult(this, forward > this.speed * dt * 0.2, dt);
     return moved;
   }
 
@@ -886,7 +895,10 @@ export class Raider extends Robot {
     this.combatTarget = target;
     this.searchPhase = null;
     const inside = buildings.getEntityBuildingAt(this);
-    if (target) this.lastCombatSight = { x: target.x, z: target.z, until: time + 7 };
+    if (target) {
+      this.exitBuilding = null;
+      this.lastCombatSight = { x: target.x, z: target.z, building: buildings.getEntityBuildingAt(target), target, until: time + 12 };
+    }
     const melee = MELEE_WEAPONS[this.weaponKey];
     const incoming = melee ? this._incomingShotDodge(bullets) : null;
     const threat = incoming?.threat ?? target
@@ -904,7 +916,7 @@ export class Raider extends Robot {
       }
     }
     this.indoorTime = inside ? this.indoorTime + dt : 0;
-    if (!this.retreat && inside && (this.indoorTime > 15 || (target && buildings.getEntityBuildingAt(target) !== inside))) {
+    if (!this.retreat && !target && inside && this.indoorTime > 15 && this.lastCombatSight?.building !== inside && this.lootTarget?.homeBuilding !== inside) {
       this.exitBuilding = inside;
       if (this.lootTarget?.homeBuilding === inside) {
         this.lootTarget = null;
@@ -970,23 +982,32 @@ export class Raider extends Robot {
       }
     } else if (this.lastCombatSight && time < this.lastCombatSight.until) {
       const goal = this.lastCombatSight;
-      const shelter = buildings.getEntityBuildingAt(goal);
-      if (shelter && !shelter.doorOpen) {
-        const door = this._doorApproach(shelter);
-        if (Math.hypot(door.x - this.x, door.z - this.z) < 4) buildings.toggleDoor(shelter);
+      // Track the building transition while the last sighting is still fresh.
+      if (!goal.building && goal.target?.alive) {
+        const shelter = buildings.getEntityBuildingAt(goal.target);
+        if (shelter && Math.hypot(goal.x - goal.target.x, goal.z - goal.target.z) < TILE * 2) {
+          goal.building = shelter;
+          goal.x = goal.target.x;
+          goal.z = goal.target.z;
+        }
       }
-      if (Math.hypot(goal.x - this.x, goal.z - this.z) <= 2) goal.reached = true;
-      if (goal.reached) {
-        this.speed = this.baseSpeed;
-        this._updateWander(dt, world, player, robots, 0.8, true);
-      } else this._runToward(dt, goal, world, robots, buildings, time);
+      if (goal.building && inside !== goal.building) {
+        this._enterBuilding(dt, goal.building, world, robots, buildings, time);
+      } else {
+        this.enteringBuilding = null;
+        if (Math.hypot(goal.x - this.x, goal.z - this.z) <= 2) goal.reached = true;
+        if (goal.reached) {
+          this.speed = this.baseSpeed;
+          this._updateWander(dt, world, player, robots, 0.8, true);
+        } else this._runToward(dt, goal, world, robots, buildings, time);
+      }
     } else {
       this.fireCooldown = Math.max(this.fireCooldown, 0.4);
       this.lootCooldown -= dt;
       if (this.lootCooldown <= 0 && !(this.lootTarget?.slots?.some(Boolean)
         || (this.lootTarget?.item && groundDrops.drops.includes(this.lootTarget)))) {
         this.lootCooldown = 1.5;
-        let nearest = 52;
+        let nearest = 72;
         this.lootTarget = null;
         if (this.loot.length < 12) {
           for (const chest of [...chests, ...corpses, ...groundDrops.drops]) {
@@ -1007,8 +1028,7 @@ export class Raider extends Robot {
       else {
         this.speed = this.baseSpeed;
         const building = chest.homeBuilding;
-        const door = building && this._doorApproach(building);
-        if (Math.hypot(chest.x - this.x, chest.z - this.z) < 3.5
+        if (Math.hypot(chest.x - this.x, chest.z - this.z) < TILE * 1.1
           && (building ? inside === building : world.hasLineOfSight(this.x, this.z, chest.x, chest.z))) {
           const index = chest.slots?.findIndex(Boolean) ?? -1;
           if (index >= 0) {
@@ -1023,20 +1043,14 @@ export class Raider extends Robot {
           this.lootTarget = null;
           if (building) this.exitBuilding = building;
         } else {
-          let goal = chest;
           if (building && inside !== building) {
-            const atDoor = Math.hypot(door.x - this.x, door.z - this.z) < TILE;
-            if (atDoor && !building.doorOpen) buildings.toggleDoor(building);
-            const entering = building.doorOpen && (atDoor || this.enteringBuilding === building);
-            this.enteringBuilding = entering ? building : null;
-            const direction = building.doorFacing === 'north' ? 1 : -1;
-            goal = entering ? { x: door.x, z: door.z + direction * TILE * 2.25 } : door;
-          } else if (building) {
+            this._enterBuilding(dt, building, world, robots, buildings, time);
+          } else {
             this.enteringBuilding = null;
-            goal = { x: chest.x, z: chest.z + TILE * 0.4 };
+            const goal = building ? { x: chest.x, z: chest.z + TILE * 0.85 } : chest;
+            this._runToward(dt, goal, world, robots, buildings, time);
           }
-          this._runToward(dt, goal, world, robots, buildings, time);
-          if (this.lootProgressTarget !== chest || didDisplace(startX, startZ, this.x, this.z, MOTION_IDLE_EPS)) {
+          if (this.lootProgressTarget !== chest || this._nav?.idleTime < 0.15) {
             this.lootProgressTarget = chest;
             this.lootStuckTime = 0;
           } else if ((this.lootStuckTime += dt) > 4) {
@@ -1099,12 +1113,34 @@ export class Raider extends Robot {
     return best;
   }
 
+  _enterBuilding(dt, building, world, robots, buildings, time) {
+    const door = this.enteringBuilding === building && this.entryDoor
+      ? this.entryDoor
+      : [building, building.rearDoor].filter(Boolean).reduce((best, candidate) => {
+        const point = this._doorApproach(candidate);
+        const previous = this._doorApproach(best);
+        return Math.hypot(point.x - this.x, point.z - this.z)
+          < Math.hypot(previous.x - this.x, previous.z - this.z) ? candidate : best;
+      });
+    this.enteringBuilding = building;
+    this.entryDoor = door;
+    const approach = this._doorApproach(door);
+    const center = getDoorWorldPos(door);
+    const direction = door.doorFacing === 'north' ? 1 : -1;
+    const depth = (this.z - approach.z) * direction;
+    const aligned = Math.abs(this.x - center.x) < TILE * 0.12;
+    const close = Math.hypot(this.x - center.x, this.z - center.z) < TILE * 1.35;
+    if (close && !door.doorOpen && !buildings.toggleDoor(door)) return;
+    const goal = door.doorOpen && aligned && depth > -TILE * 0.25
+      ? { x: center.x, z: center.z + direction * TILE * 1.15 - this.getMoveCollider().zOff }
+      : approach;
+    this._runToward(dt, goal, world, robots, buildings, time);
+  }
+
   _doorApproach(building) {
-    return {
-      x: building.originX + (building.doorTx + 0.5) * TILE,
-      z: building.originZ + ((building.doorTz ?? building.h - 1)
-        + (building.doorFacing === 'north' ? -0.35 : 1.35)) * TILE,
-    };
+    const { x, z } = getDoorWorldPos(building);
+    const direction = building.doorFacing === 'north' ? -1 : 1;
+    return { x, z: z + direction * TILE * 0.85 - this.getMoveCollider().zOff };
   }
 
   _runToward(dt, goal, world, robots, buildings, time) {

@@ -240,6 +240,26 @@ export class RaidBase {
     this.status = root.querySelector('[role=status]');
     this.dialogStatus = root.querySelector('#raid-deploy-status');
     this.selection = root.querySelector('#raid-selection');
+    root.addEventListener('pointerover', (event) => {
+      const slot = event.target.closest('[data-item-name]');
+      if (!slot || slot.contains(event.relatedTarget)
+        || !this.selection.classList.contains('hidden')) return;
+      if (event.pointerType !== 'mouse') return;
+      const host = slot.closest('dialog[open]') ?? root;
+      this.itemName ??= document.createElement('div');
+      this.itemName.className = 'inv-tooltip visible';
+      host.append(this.itemName);
+      this.pixelLabel(this.itemName, slot.dataset.itemName, 240);
+      this.positionItemName(event);
+    });
+    root.addEventListener('pointermove', (event) => {
+      if (this.itemName?.classList.contains('visible')) this.positionItemName(event);
+    });
+    root.addEventListener('pointerout', (event) => {
+      const slot = event.target.closest('[data-item-name]');
+      if (slot && !slot.contains(event.relatedTarget)) this.hideItemName();
+    });
+    root.addEventListener('pointerdown', () => this.hideItemName(), true);
     this.slotPositions = new WeakMap();
     document.addEventListener('pointerdown', (event) => {
       if (event.target === this.workspace || event.target === this.root.querySelector('#raid-stash')) return;
@@ -258,7 +278,6 @@ export class RaidBase {
     root.addEventListener('scroll', repositionSelection, { capture: true, passive: true });
     window.addEventListener('resize', repositionSelection, { passive: true });
     window.visualViewport?.addEventListener('resize', repositionSelection, { passive: true });
-    new ResizeObserver(() => repositionSelection()).observe(this.selection);
     this.deployDialog = root.querySelector('#raid-deploy-dialog');
     this.station = 'deploy';
     this.catalogSelection = null;
@@ -289,6 +308,7 @@ export class RaidBase {
     };
     applyVolume();
     for (const [slider, key] of [[musicVolume, 'raid-music-volume'], [soundVolume, 'raid-effects-volume']]) {
+      this.styleSlider(slider);
       slider.addEventListener('input', applyVolume);
       slider.addEventListener('change', () => {
         try { localStorage.setItem(key, slider.value); } catch {}
@@ -400,6 +420,25 @@ export class RaidBase {
     }
   }
 
+  styleSlider(slider) {
+    const track = document.createElement('div');
+    track.className = 'inv-context-slider-track raid-smooth-slider';
+    const thumb = document.createElement('span');
+    thumb.className = 'inv-context-slider-thumb';
+    thumb.setAttribute('aria-hidden', 'true');
+    slider.replaceWith(track);
+    track.append(thumb, slider);
+    slider.classList.add('inv-context-amount-slider');
+    const update = () => {
+      const min = Number(slider.min);
+      const span = Number(slider.max) - min;
+      track.style.setProperty('--slider-progress', `${span > 0 ? (slider.valueAsNumber - min) / span * 100 : 100}%`);
+    };
+    slider.addEventListener('input', update);
+    update();
+    return track;
+  }
+
   refreshChallenges() {
     const next = structuredClone(this.profile);
     let changed = false;
@@ -421,8 +460,15 @@ export class RaidBase {
   }
 
   setStatus(message) {
-    this.pixelLabel(this.status, message, 420);
-    this.pixelLabel(this.dialogStatus, message);
+    if (!message) return;
+    const notice = this.deployDialog.open ? this.dialogStatus : this.status;
+    this.pixelLabel(notice, message, 280);
+    this.statusAnimation?.cancel();
+    this.statusAnimation = notice.animate(
+      [{ opacity: 0, translate: '-50% 6px' }, { opacity: 1, translate: '-50% 0', offset: 0.12 },
+        { opacity: 1, translate: '-50% -4px', offset: 0.72 }, { opacity: 0, translate: '-50% -18px' }],
+      { duration: 1800, easing: 'ease-out' });
+    this.statusAnimation.onfinish = () => this.pixelLabel(notice, '');
   }
 
   transact(change, reportError = (message) => this.setStatus(message)) {
@@ -449,8 +495,12 @@ export class RaidBase {
   }
 
   render() {
+    this.hideItemName();
     const profile = this.profile;
     const level = raidLevel(profile);
+    const xpProgress = this.root.querySelector('#raid-xp-progress');
+    xpProgress.max = levelCost(level);
+    xpProgress.value = profile.xp - levelStart(level);
     this.pixelLabel(this.root.querySelector('#raid-stats'),
       `Level ${level}  /  ${profile.xp - levelStart(level)}/${levelCost(level)} XP`);
     this.pixelLabel(this.root.querySelector('#raid-extract-count'), `Extracts: ${profile.extractions}`);
@@ -463,7 +513,7 @@ export class RaidBase {
       const station = this.deployDialog.open ? 'stash' : this.station;
       panel.classList.toggle('hidden', panel.dataset.basePanel !== station);
     }
-    this.selection.classList.add('hidden');
+    if (this.catalogSelection == null) this.selection.classList.add('hidden');
     const catalog = !this.deployDialog.open && ['craft', 'shop'].includes(this.station);
     this.workspace.classList.toggle('raid-catalog-active', catalog);
     if (this.deployDialog.open || this.station === 'stash') this.renderStash();
@@ -603,9 +653,10 @@ export class RaidBase {
         drag.moved = true;
         slot.classList.add('raid-dragging');
         if (!drag.ghost) {
-          drag.ghost = slot.cloneNode(true);
-          drag.ghost.classList.remove('raid-dragging');
-          drag.ghost.classList.add('raid-drag-ghost');
+          const icon = slot.querySelector(':scope > img');
+          if (!icon) return;
+          drag.ghost = icon.cloneNode(false);
+          drag.ghost.className = 'raid-drag-ghost';
           drag.ghost.setAttribute('aria-hidden', 'true');
           drag.ghost.tabIndex = -1;
           drag.ghost.style.width = `${slot.offsetWidth}px`;
@@ -668,28 +719,35 @@ export class RaidBase {
     const gearGrid = this.root.querySelector('#raid-gear');
     const stashGrid = this.root.querySelector('#raid-stash');
     const stashScroll = stashGrid.scrollTop;
-    kitGrid.replaceChildren();
-    gearGrid.replaceChildren();
-    stashGrid.replaceChildren();
     const player = new Player();
     player.applySaveData(kit);
     for (const key of ['equipmentSlots', 'handSlots', 'itemSlots']) {
       kit[key].forEach((entry, index) => {
         const locked = key === 'itemSlots' && !player.isItemSlotUnlocked(index);
         const item = locked ? null : entry;
-        const slot = this.slot(key === 'itemSlots' ? kitGrid : gearGrid, item, item ? (anchor) => this.inspectKit(item, key, index, anchor) : null, '',
+        const grid = key === 'itemSlots' ? kitGrid : gearGrid;
+        const position = key === 'handSlots' ? kit.equipmentSlots.length + index : index;
+        const signature = JSON.stringify([item, locked]);
+        if (grid.children[position]?.dataset.renderSignature === signature) return;
+        const previous = grid.children[position];
+        const slot = this.slot(grid, item, item ? (anchor) => this.inspectKit(item, key, index, anchor) : null, '',
           locked ? INV_LOCK_SRC : key === 'handSlots' ? ['assets/ui/weapon1.png', 'assets/ui/weapon2.png'][index]
             : key === 'equipmentSlots' ? ['assets/ui/vest.png', 'assets/ui/backpack.png'][index] : null);
         if (locked) {
           slot.dataset.locked = 'true';
           slot.setAttribute('aria-label', 'Locked inventory slot');
         }
+        if (previous) previous.replaceWith(slot);
+        slot.dataset.renderSignature = signature;
         this.slotPositions.set(slot, { source: 'kit', key, index });
         if (item) this.bindTransfer(slot, 'kit', key, index);
       });
     }
     for (let i = 0; i < Math.max(limit, stash.length); i++) {
       const item = stash[i];
+      const signature = JSON.stringify(item ?? null);
+      const previous = stashGrid.children[i];
+      if (previous?.dataset.renderSignature === signature) continue;
       const slot = this.slot(stashGrid, item, item ? (anchor) => {
         const actions = [];
         const detail = document.createElement('div');
@@ -712,9 +770,12 @@ export class RaidBase {
         });
         this.inspect(item, actions, detail, anchor, { showClose: false });
       } : null);
+      if (previous) previous.replaceWith(slot);
+      slot.dataset.renderSignature = signature;
       this.slotPositions.set(slot, { source: 'stash', key: null, index: i });
       if (item) this.bindTransfer(slot, 'stash', null, i);
     }
+    while (stashGrid.childElementCount > Math.max(limit, stash.length)) stashGrid.lastElementChild.remove();
     stashGrid.scrollTop = stashScroll;
   }
 
@@ -819,6 +880,7 @@ export class RaidBase {
     const preview = document.createElement('div');
     preview.className = 'raid-recycle-preview';
     const status = document.createElement('div');
+    status.className = 'raid-quantity-notice';
     status.setAttribute('role', 'status');
     let repairUnavailable = false;
     const update = () => {
@@ -848,8 +910,6 @@ export class RaidBase {
         return;
       }
       const count = slider.valueAsNumber;
-      const fill = sliderMax > batch ? (count - batch) / (sliderMax - batch) * 100 : 100;
-      slider.style.setProperty('--raid-slider-fill', fill + '%');
       const original = document.createElement('div');
       const originalIcon = document.createElement('img');
       originalIcon.src = getItemIconSrc(item);
@@ -897,10 +957,18 @@ export class RaidBase {
     controls.className = 'raid-quantity-actions';
     controls.append(this.button('Cancel', () => dialog.close()), this.button(action, () => {
       if (this.transact((next, player) => change(next, player, slider.valueAsNumber),
-        (message) => this.pixelLabel(status, message, 270))) dialog.close();
+        (message) => {
+          this.pixelLabel(status, message, 270);
+          status.animate([{ opacity: 0, translate: '0 5px' }, { opacity: 1, offset: 0.15 },
+            { opacity: 1, offset: 0.75 }, { opacity: 0, translate: '0 -12px' }],
+          { duration: 1800, easing: 'ease-out' });
+        })) dialog.close();
     }, repairUnavailable));
     dialog.append(preview);
-    if (sliderMax > batch) dialog.append(slider);
+    if (sliderMax > batch) {
+      dialog.append(slider);
+      this.styleSlider(slider);
+    }
     dialog.append(status, controls);
     let pressedBackdrop = false;
     const outsideDialog = (event) => {
@@ -1040,6 +1108,7 @@ export class RaidBase {
     buttons.className = 'inv-context-actions';
     buttons.append(...actions.map((action) => this.button(...action)));
     if (showClose) buttons.append(this.button('Close', () => this.closeSelection()));
+    this.hideItemName();
     this.selection.replaceChildren(title, description);
     if (buttons.childElementCount) this.selection.append(buttons);
     this.selection.classList.remove('hidden');
@@ -1054,7 +1123,7 @@ export class RaidBase {
         behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
       });
     }
-    this.positionSelection(anchor);
+    if (!keepPosition || !this.selection.style.left) this.positionSelection(anchor);
   }
 
   positionSelection(anchor) {
@@ -1083,6 +1152,16 @@ export class RaidBase {
     const left = rect.right + width + 8 <= maxX ? rect.right + 5 : rect.left - width - 5;
     this.selection.style.left = `${Math.max(8, Math.min(left, maxX - width - 8))}px`;
     this.selection.style.top = `${Math.max(8, Math.min(rect.top, maxY - height - 8))}px`;
+  }
+
+  positionItemName({ clientX, clientY }) {
+    const { offsetWidth: width, offsetHeight: height } = this.itemName;
+    this.itemName.style.left = Math.max(8, Math.min(clientX - width / 2, innerWidth - width - 8)) + 'px';
+    this.itemName.style.top = Math.max(8, clientY - height - 12) + 'px';
+  }
+
+  hideItemName() {
+    this.itemName?.classList.remove('visible');
   }
 
   closeSelection(restoreFocus = false) {
@@ -1167,7 +1246,7 @@ export class RaidBase {
     slot.disabled = !action;
     if (item) {
       const label = getItemDisplayName(item);
-      slot.title = label;
+      slot.dataset.itemName = getItemDisplayName({ ...item, amount: 1 });
       slot.setAttribute('aria-label', label);
       const src = getItemIconSrc(item);
       if (src) {

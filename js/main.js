@@ -1,3 +1,4 @@
+import { normalizeThrowableItem } from './throwables.js';
 import { RaidBase, raidLevel, challengeProgress, newRaidProfile, deployProfile, extractProfile, loseRaidProfile, normalizeRaidProfile, EXTRACT_RADIUS, EXTRACT_SECONDS } from './raidBase.js';
 import { collectWallOccluders, collectPropOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
 import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
@@ -15,7 +16,7 @@ import {
 import { SoundManager } from './audio.js';
 import { ItemManager } from './items.js';
 import { GroundDropManager, GROUND_DROP_DISPLAY_PX, GROUND_DROP_RES_PX } from './groundDrops.js';
-import { getEnemyStatusIcon, hearPlayerGunshot, tickTileFlowField, hasCombatSight } from './enemyNav.js';
+import { getEnemyStatusIcon, hearPlayerGunshot, hasCombatSight } from './enemyNav.js';
 import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_H, CHEST_DRAW_PIVOT } from './chests.js';
 import {
   BuildingManager,
@@ -55,6 +56,10 @@ import {
   VIEW_MARGIN_TILES,
   VIEW_SPRITE_PAD,
 } from './viewCull.js';
+const npcCollisionZ = (npc) => npc.z + (npc.getMoveCollider().zOff ?? 0);
+
+const DYNAMIC_SHADOWS = new URLSearchParams(location.search).get('shadows') !== '0';
+
 /** Y-sort bias — shadows on the floor, under walls and bodies. */
 const SORT_SHADOW = 0;
 const SORT_WALL_BACK = 1;
@@ -232,7 +237,7 @@ class Game {
       const label = el.textContent.trim();
       if (label) this._setPixelText(el, label, T);
     });
-    this._setPixelText(this.el.reloadIndicator, 'Reloading...', T);
+    this._setPixelText(document.getElementById('reload-label'), 'Reloading', T);
     this._setPixelText(this.el.spawnCurtainStatus, 'Entering the ruins...', T);
     this._setPixelText(document.querySelector('.ammo-sep'), '/', T);
     if (this.el.loadingStatus?.textContent.trim()) {
@@ -714,7 +719,6 @@ class Game {
     setLabel('#raid-result-duration', seconds == null ? 'Time: —' : 'Time: ' + Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's');
     setLabel('#raid-result-kills', 'Robots: ' + (kills ?? '—'));
     setLabel('#raid-result-raiders', 'Raiders: ' + (raiderKills ?? '—'));
-    setLabel('#raid-result-cash', '+' + (next.cash - previous.cash) + ' Cash');
     setLabel('#raid-result-xp', '+' + (next.xp - previous.xp) + ' XP');
     setLabel('#raid-result-items-title', extracted ? 'New loot extracted' : 'Items lost');
     const items = summary.querySelector('#raid-result-items');
@@ -854,8 +858,7 @@ class Game {
     if (e.code === 'KeyR') {
       this._tryStartReload(performance.now() / 1000);
     }
-    if (e.code === 'Digit1') this.player?.setActiveHandSlot(0);
-    if (e.code === 'Digit2') this.player?.setActiveHandSlot(1);
+    if (e.code === 'Digit1' || e.code === 'Digit2') this._selectRaidHand(e.code === 'Digit1' ? 0 : 1);
   }
 
   _onGameKeyUp(e) {
@@ -877,11 +880,15 @@ class Game {
 
   _bindEvents() {
     document.addEventListener('click', (event) => {
+      if (!event.target.closest?.('#overlay, #inventory, #hud button, #mb-pause')) return;
       const control = event.target.closest?.('button, [role="button"], .inv-slot-sprite, input, select, label');
-      if (!control || control.disabled || control.getAttribute('aria-disabled') === 'true'
-        || control.closest('#mobile-controls') || control.dataset.uiCue === 'manual'
-        || control.id === 'raid-deploy-confirm') return;
-      this.audio.playUi(control.matches('.inv-slot-sprite, input, select, label') ? 'click1' : 'button1');
+      if (control?.dataset.uiCue === 'manual' || control?.id === 'raid-deploy-confirm') return;
+      const button = control?.matches('button:not(.inv-slot-sprite), [role="button"]')
+        && !control.disabled && control.getAttribute('aria-disabled') !== 'true';
+      this.audio.playUi(button ? 'button1' : 'click1');
+      if (control && !control.disabled && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        control.animate([{ scale: '0.95' }, { scale: '1' }], { duration: 160, easing: 'ease-out' });
+      }
     }, true);
     this.el.resumeBtn?.addEventListener('click', () => this._hidePauseMenu());
     this.el.backToMenuBtn?.addEventListener('click', () => this._requestBackToMenu());
@@ -936,6 +943,7 @@ class Game {
     this.canvas.addEventListener('wheel', (e) => {
       if (!this.running || this.paused || this._panelOpen()) return;
       e.preventDefault();
+      this.heldThrowable = null;
       if (this.player?.toggleWeaponSlot()) this.audio.weaponSwitch();
     }, { passive: false });
 
@@ -1023,8 +1031,8 @@ class Game {
     });
 
     bindPress('mb-pause', () => this._togglePause());
-    bindPress('mb-hand-0', () => { if (this.running) this.player?.setActiveHandSlot(0); });
-    bindPress('mb-hand-1', () => { if (this.running) this.player?.setActiveHandSlot(1); });
+    bindPress('mb-hand-0', () => { if (this.running) this._selectRaidHand(0); });
+    bindPress('mb-hand-1', () => { if (this.running) this._selectRaidHand(1); });
     bindPress('mb-interact', () => {
       if (this.running) {
         this.audio.resume();
@@ -1177,6 +1185,11 @@ class Game {
     return pointInViewBounds(v, wx, wz, extraPad);
   }
 
+  _entityToScreen(wx, wz) {
+    const camera = this._camera();
+    return { x: INTERNAL_W / 2 + (wx - camera.x) * PPU, y: INTERNAL_H / 2 + (wz - camera.z) * PPU };
+  }
+
   _worldToScreen(wx, wz) {
     if (this.player && wx === this.player.x && wz === this.player.z) {
       const camera = this._camera();
@@ -1319,6 +1332,8 @@ class Game {
     });
     preloadPixelTextAtlas();
     this.particles = [];
+    this.heldThrowable = null;
+    this.thrownItems = [];
     this.dayNight = new DayNightCycle();
 
     if (saveData) {
@@ -1625,7 +1640,9 @@ class Game {
         ? this.mouseDown
         : fireEdge;
 
-      if (this.player.usesMeleeCombat()) {
+      if (this.heldThrowable) {
+        if (fireEdge) this._throwHeldItem();
+      } else if (this.player.usesMeleeCombat()) {
         const melee = this.player.getActiveMelee();
         if (melee?.noCharge) {
           if (fireEdge && this.player.canMeleeCharge(time)) {
@@ -1675,7 +1692,8 @@ class Game {
     this.chunkEntities.update(this.player, time);
     this._syncCamPixels();
     this.bullets.update(dt, this.world, (b) => this._onBulletHit(b), this.player);
-    tickTileFlowField(time, this.world, this.buildings, this.player, this.robots);
+    const navStart = performance.now();
+
     const simView = this.getViewBoundsWorld();
     const simPad = TILE * 10;
     this._spawnRaiders(time);
@@ -1683,15 +1701,40 @@ class Game {
     for (const robot of [...this.robots]) {
       if (!robot.alive) continue;
       if (!pointInViewBounds(simView, robot.x, robot.z, simPad)) continue;
+      const previousX = robot.x;
+      const previousZ = robot.z;
+      const moved = () => Math.hypot(robot.x - previousX, robot.z - previousZ) > dt * 0.15;
       if (robot.type === 'raider') {
         const previousStep = Math.floor(robot.walkPhase / 2);
         robot.updateRaider(dt, this.player, this.world, this.robots, this.chests.chests, this.corpses.corpses,
           this.groundDrops, this.bullets.bullets, this.buildings, time,
           (raider, angle, target) => this._raiderAttack(raider, angle, target, time));
-        if (robot.isMoving && Math.floor(robot.walkPhase / 2) > previousStep) {
+        robot.renderMoving = moved();
+        if (robot.renderMoving && Math.floor(robot.walkPhase / 2) > previousStep) {
           const distance = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
           const volume = 0.2 * Math.max(0, 1 - distance / 45);
           if (volume > 0) this.audio.play('footstep', volume, 1.15 + Math.random() * 0.1, this._soundOffset(robot));
+        }
+        continue;
+      }
+      const lure = !robot.emerging && this.thrownItems.find((item) => item.key === 'flare'
+        && item.flight <= 0 && !item.done && Math.hypot(robot.x - item.x, robot.z - item.z) <= TILE * 12);
+      if (lure) {
+        robot.combatTarget = null;
+        robot.searchPhase = 'investigate';
+        robot.hasLastKnown = true;
+        robot.lastKnownX = lure.x;
+        robot.lastKnownZ = lure.z - robot.getMoveCollider().zOff;
+        robot.angle = Math.atan2(lure.x - robot.x, lure.z - robot.z);
+        const phase = robot.walkPhase;
+        robot._chaseMove(dt, this.player, this.world, this.robots, this.buildings, time);
+        robot.renderMoving = moved();
+        robot._applyLocomotion(previousX, previousZ, dt, robot.renderMoving ? 8 : 0);
+        if (robot.renderMoving && Math.floor(robot.walkPhase / 2) > Math.floor(phase / 2)) {
+          const offset = this._soundOffset(robot);
+          const distance = Math.hypot(offset.x, offset.z);
+          if (robot.type === 'scout') this.audio.scoutStomp(distance, offset);
+          else this.audio.enemyFootstep(distance, offset);
         }
         continue;
       }
@@ -1751,7 +1794,8 @@ class Game {
         }
       }
 
-      if (robot.alive && robot.moving && !robot.emerging
+      robot.renderMoving = moved();
+      if (robot.alive && robot.renderMoving && !robot.emerging
         && !(robot.jump?.active || robot.jump?.charging)
         && robot.shoot?.phase !== 'charging' && robot.shoot?.phase !== 'firing') {
         const step = Math.floor(robot.walkPhase / (robot.type === 'scout' ? 1 : 2));
@@ -1776,11 +1820,13 @@ class Game {
         robot._prevShootPhase = phase;
       }
     }
+      this._npcFrameMs = performance.now() - navStart;
     } else if (!this._isSpawnRevealActive()) {
       this.chunkEntities.update(this.player, time);
     }
     const breathTarget = getPlayerIdleBreathY(this.player, time);
     this._weaponBreathY += (breathTarget - this._weaponBreathY) * Math.min(1, dt * 18);
+    this._updateThrownItems(dt, time);
     updateParticles(this.particles, dt, this.world, {
       onCasingLand: (casing) => this.audio.casingLand(this._soundOffset(casing, casing.z)),
     });
@@ -1845,12 +1891,111 @@ class Game {
     }
   }
 
+  _selectRaidHand(index) {
+    this.heldThrowable = null;
+    this.player?.setActiveHandSlot(index);
+  }
+
+  _throwHeldItem() {
+    const { index, key } = this.heldThrowable;
+    this.heldThrowable = null;
+    const item = normalizeThrowableItem(this.player.itemSlots[index]);
+    if (!item || item.key !== key || !this.player.isItemSlotUnlocked(index)) return;
+    const x = this.player.x;
+    const z = entityFeetZ(this.player);
+    const target = this._screenToWorld(this.mouse.sx, this.mouse.sy);
+    const dx = target.x - x;
+    const dz = target.z - z;
+    const distance = Math.hypot(dx, dz);
+    const scale = Math.min(1, TILE * 5 / Math.max(distance, 0.001));
+    this.player.itemSlots[index] = item.amount > 1 ? { ...item, amount: item.amount - 1 } : null;
+    this.thrownItems.push({ key, x, z, vx: dx * scale / 0.55, vz: dz * scale / 0.55, age: 0, flight: 0.55, lift: 0, tick: 0 });
+  }
+
+  _updateThrownItems(dt, time) {
+    const blocked = (x, z, nx, nz) => this.world.segmentBlocked(x, z, nx, nz, 0.1, false, null, { solidTrace: true });
+    for (const item of this.thrownItems) {
+      item.age += dt;
+      if (item.flight > 0) {
+        const step = Math.min(dt, item.flight);
+        item.flight -= step;
+        const nx = item.x + item.vx * step;
+        const nz = item.z + item.vz * step;
+        if (blocked(item.x, item.z, nx, nz)) {
+          if (item.key === 'molotov') {
+            let low = 0;
+            let high = 1;
+            for (let i = 0; i < 5; i++) {
+              const mid = (low + high) / 2;
+              if (blocked(item.x, item.z, item.x + (nx - item.x) * mid, item.z + (nz - item.z) * mid)) high = mid;
+              else low = mid;
+            }
+            item.x += (nx - item.x) * low;
+            item.z += (nz - item.z) * low;
+            item.flight = 0;
+          }
+          else {
+            if (blocked(item.x, item.z, nx, item.z)) item.vx *= -0.55;
+            else item.x = nx;
+            if (blocked(item.x, item.z, item.x, nz)) item.vz *= -0.55;
+            else item.z = nz;
+          }
+        } else {
+          item.x = nx;
+          item.z = nz;
+        }
+        item.lift = Math.sin(Math.PI * item.flight / 0.55) * 18;
+      }
+      if (item.key === 'grenade' && item.age >= 3) {
+        this.audio.explosion(this._soundOffset(item, item.z));
+        this.particles.push(...createExplosion(item.x, item.z), ...createExplosion(item.x, item.z),
+          ...createRobotSmoke(item.x, item.z, 1.6));
+        for (const npc of [...this.robots]) {
+          const z = npcCollisionZ(npc);
+          if (npc.alive && Math.hypot(npc.x - item.x, z - item.z) < TILE * 2
+            && !blocked(item.x, item.z, npc.x, z)) this._damageRobot(npc, 85, item.x, item.z);
+        }
+        item.done = true;
+      }
+      if (item.flight > 0 || item.done || item.key === 'grenade') continue;
+      item.tick -= dt;
+      if (item.tick > 0) continue;
+      item.tick = 0.4;
+      if (item.key === 'flare') {
+        item.done = item.age >= 10;
+      } else {
+        const radius = TILE * 2;
+        for (let i = 0; i < 22; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const distance = Math.sqrt(Math.random()) * radius;
+          const x = item.x + Math.cos(angle) * distance;
+          const z = item.z + Math.sin(angle) * distance;
+          if (!blocked(item.x, item.z, x, z)) {
+            for (const flame of createRobotFire(x, z, 0)) {
+              flame.vx = 0;
+              flame.vz = 0;
+              this.particles.push(flame);
+            }
+          }
+        }
+        for (const npc of [...this.robots]) {
+          const z = npcCollisionZ(npc);
+          if (npc.alive && Math.hypot(npc.x - item.x, z - item.z) <= radius
+            && !blocked(item.x, item.z, npc.x, z)) this._damageRobot(npc, 8, item.x, item.z);
+        }
+      }
+      item.done ||= item.age >= (item.key === 'flare' ? 10 : 6);
+    }
+    this.thrownItems = this.thrownItems.filter((item) => !item.done);
+  }
+
   _raiderAttack(raider, angle, target, time) {
     const melee = MELEE_WEAPONS[raider.weaponKey];
     if (melee) {
       if (this.world.segmentBlocked(raider.x, entityFeetZ(raider), target.x, entityFeetZ(target), 0.16, false)) return 0.25;
+      raider.swingStartedAt = time;
       const damage = Math.round(melee.damage * 0.55);
-      this.audio.play('melee', 0.7, 1, this._soundOffset(raider));
+      this.audio.melee(this._soundOffset(raider));
       if (target !== this.player) this._damageRobot(target, damage, raider.x, raider.z, null, false);
       else if (target.takeDamage(damage, time)) {
         this.audio.playerHurt(this._soundOffset(this.player));
@@ -1861,6 +2006,14 @@ class Game {
       return 0.85;
     }
     const weapon = WEAPONS[raider.weaponKey];
+    raider.shotFlashUntil = time + 0.075;
+    const aim = gunAimTransform(angle);
+    const hold = GUN_HOLD_OFFSET + gunPivotHoldOffset(aim.angle);
+    const gunZ = raider.z + Math.cos(angle) * hold;
+    this.particles.push(...createBulletCasing(
+      raider.x + Math.sin(angle) * hold, gunZ, angle, aim.flipX, weapon.casingColor || 'yellow',
+      1, (entityFeetZ(raider) - gunZ) * PPU,
+    ));
     const bloom = Math.min(0.24, (raider.shotBloom ?? 0) + (weapon.automatic ? 0.045 : 0.08));
     raider.shotBloom = bloom;
     const shot = { ...weapon, damage: weapon.damage * (weapon.automatic ? 0.38 : 0.55), spread: Math.max(0.26, weapon.spread) + bloom };
@@ -1872,14 +2025,13 @@ class Game {
       }
     }
     const distance = Math.hypot(raider.x - this.player.x, raider.z - this.player.z);
-    const volume = Math.max(0, 1 - distance / 80);
-    if (volume > 0) this.audio.play(weapon.sound, volume, 0.95 + Math.random() * 0.2, this._soundOffset(raider));
+    if (distance < 125) this.audio.enemyShot(distance, this._soundOffset(raider), weapon.sound);
     return weapon.automatic
       ? Math.max(0.13, weapon.fireRate) + Math.random() * 0.07
       : Math.max(0.48, weapon.fireRate) + Math.random() * 0.25;
   }
 
-  _damageRobot(robot, damage, fromX, fromZ, bullet = null, playerCredit = true) {
+  _damageRobot(robot, damage, fromX, fromZ, bullet = null, playerCredit = true, meleeImpact = false) {
     if (!robot.applyHit(damage, fromX, fromZ, this.world, {
       fromBullet: !!bullet,
       alert: this.player.canSeeEnemyOnScreen(robot),
@@ -1890,7 +2042,7 @@ class Game {
       this.audio.playerHurt(soundOffset);
       this.particles.push(...createBloodSplatter(robot.x, robot.z, fromX, fromZ, damage));
     } else {
-      this.audio.hitEnemy(soundOffset);
+      if (!meleeImpact) this.audio.hitEnemy(soundOffset);
       this.particles.push(...createRobotHitSparks(robot.x, robot.z, fromX, fromZ, damage));
     }
     if (bullet) bullet.active = false;
@@ -1911,7 +2063,7 @@ class Game {
         for (const item of loot) this.groundDrops.dropAt(robot.x, robot.z, item, null, { preserve: true });
         const index = this.robots.indexOf(robot);
         if (index >= 0) this.robots.splice(index, 1);
-        return;
+        return true;
       }
       if (playerCredit) {
         this.kills++;
@@ -1930,6 +2082,7 @@ class Game {
       this.particles.push(...createRobotDeathFx(robot.x, robot.z, robot.radius * 1.1));
       this.particles.push(...createRobotSmoke(robot.x, robot.z, 0.55));
     }
+    return true;
   }
 
   _chestScreenPos(chest) {
@@ -1950,6 +2103,7 @@ class Game {
     let best = null;
     let bestD = Infinity;
     for (const corpse of this.corpses.corpses) {
+      if (!pointInWallLight(this._wallLight, corpse.x, this.corpses.sortZ(corpse))) continue;
       const s = this._corpseScreenPos(corpse);
       const dx = this.mouse.sx - s.x;
       const dy = this.mouse.sy - s.y;
@@ -2302,27 +2456,26 @@ class Game {
     const aim = this.player.angle;
     let hitAny = false;
 
-    for (const robot of this.robots) {
+    for (const robot of [...this.robots]) {
       if (!robot.alive) continue;
       const dx = robot.x - this.player.x;
       const dz = robot.z - this.player.z;
       const dist = Math.hypot(dx, dz);
       if (dist > range + robot.radius) continue;
       if (this.world.segmentBlocked(this.player.x, entityFeetZ(this.player),
-        robot.x, entityFeetZ(robot), 0.16, false)) {
+        robot.x, npcCollisionZ(robot), 0.16, false)) {
         continue;
       }
       let diff = Math.atan2(dx, dz) - aim;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
       if (Math.abs(diff) > halfArc) continue;
-      this._damageRobot(robot, dmg, this.player.x, this.player.z);
-      hitAny = true;
+      if (this._damageRobot(robot, dmg, this.player.x, this.player.z, null, true, true)) {
+        if (!hitAny) this.audio.melee(this._soundOffset(robot));
+        hitAny = true;
+      }
     }
-    if (hitAny) {
-      this.audio.melee();
-      if (this.player.isMeleeActive()) this.player.wearActiveHand(1);
-    }
+    if (hitAny && this.player.isMeleeActive()) this.player.wearActiveHand(1);
   }
 
   _onBulletHit(bullet) {
@@ -2330,7 +2483,7 @@ class Game {
     const origin = bullet.playerShotOrigin
       ?? (bullet.enemyOwner?.type === 'raider' ? bullet.raiderShotOrigin : null);
     const blocked = (target) => origin && this.world.segmentBlocked(
-      origin.x, origin.z, target.x, entityFeetZ(target), 0.06, false, null, { feetTrace: true });
+      origin.x, origin.z, target.x, target === this.player ? entityFeetZ(target) : npcCollisionZ(target), 0.06, false, null, { feetTrace: true });
     if (bullet.fromPlayer || bullet.enemyOwner) {
       for (const robot of this.robots) {
         if (!robot.alive) continue;
@@ -2472,7 +2625,7 @@ class Game {
   }
 
   _getGunScreenPose(drawTime) {
-    const playerGs = this._worldToScreen(this.player.x, this.player.z);
+    const playerGs = this._entityToScreen(this.player.x, this.player.z);
     const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
     const idleBreath = Math.round(this._weaponBreathY ?? 0);
     const lunge = this.player.getMeleeSwingLunge(drawTime);
@@ -2584,6 +2737,7 @@ class Game {
       pose.pivot,
       pose.tilt,
       pose.weaponAnim,
+      true,
     );
     if (clipBounds) ctx.restore();
   }
@@ -2695,7 +2849,12 @@ class Game {
       const point = worldToScreen(hatch.x, hatch.z);
       this.sprites.drawPropSprite(ctx, hatch.state === 'open' ? 'hatch_open' : 'hatch_closed',
         point.x, point.y, 2 * tilePx, { anchor: 'center' });
-      if (hatch === this.nearestHatch && this._extractElapsed > 0) {
+      const extracting = hatch === this.nearestHatch && this._extractElapsed > 0;
+      if (hatch.state === 'calling' || extracting) {
+        const seconds = extracting ? EXTRACT_SECONDS - this._extractElapsed : hatch.remaining;
+        drawPixelText(ctx, `${Math.max(1, Math.ceil(seconds))}s`, point.x, point.y - tilePx - 8, 1, 'center');
+      }
+      if (extracting) {
         ctx.beginPath();
         ctx.arc(point.x, point.y, 20, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * this._extractElapsed / EXTRACT_SECONDS);
         ctx.strokeStyle = '#85d79c';
@@ -2713,14 +2872,17 @@ class Game {
       minZ: Math.floor(viewMinZ / TILE) * TILE,
       maxZ: Math.ceil(viewMaxZ / TILE) * TILE,
     };
-    const occluders = collectWallOccluders(visibleBuildings, lightView);
-    occluders.push(...collectPropOccluders(visibleBuildings, this._cachedYsortFoliage, lightView, playerX, playerZ));
+    const occluders = [];
+    if (DYNAMIC_SHADOWS) {
+      occluders.push(...collectWallOccluders(visibleBuildings, lightView),
+        ...collectPropOccluders(visibleBuildings, this._cachedYsortFoliage, lightView, playerX, playerZ));
+    }
     const colliderZ = playerZ + this.player.getMoveCollider(PPU).zOff;
     const floorPixel = TILE / BUILDING_ART_PX;
-    const lightOrigin = resolveWallLightOrigin(
+    const lightOrigin = occluders.length ? resolveWallLightOrigin(
       Math.round(playerX / floorPixel) * floorPixel, Math.round(colliderZ / floorPixel) * floorPixel,
       playerX, colliderZ, occluders,
-    );
+    ) : null;
     const lightKey = occluders.length ? JSON.stringify([lightOrigin, lightView, occluders]) : null;
     if (lightKey !== this._wallLightKey) {
       this._wallLightKey = lightKey;
@@ -2730,6 +2892,11 @@ class Game {
         this._wallShadowCanvas ??= document.createElement('canvas');
         rasterizeWallShadow(this._wallShadowCanvas, this._wallLight, lightView, floorPixel);
       }
+    }
+    for (const item of this.thrownItems ?? []) {
+      if ((item.key === 'molotov' && item.flight <= 0) || !pointInWallLight(this._wallLight, item.x, item.z)) continue;
+      const point = worldToScreen(item.x, item.z);
+      this.sprites.drawGroundItem(ctx, item.key, point.x, point.y, 18, -item.lift);
     }
     const shadowMask = this._wallLight ? this._wallShadowCanvas : null;
     const shadowOrigin = worldToScreen(lightView.minX, lightView.minZ);
@@ -2825,7 +2992,7 @@ class Game {
       });
     }
     for (const corpse of this.corpses?.corpses ?? []) {
-      if (!inView(corpse.x, corpse.z, TILE * 2)) continue;
+      if (!inView(corpse.x, corpse.z, TILE * 2) || !lit(corpse.x, this.corpses.sortZ(corpse))) continue;
       const corpseScale = CORPSE_DRAW_SCALE * (getEnemyDrawScale(corpse.type) / getEnemyDrawScale('spider'));
       const corpseSortZ = this.corpses.sortZ(corpse);
       drawList.push({ z: corpseSortZ, sortBias: SORT_ENTITY, draw: () => {
@@ -2915,25 +3082,36 @@ class Game {
     }
     for (const robot of this.robots) {
       if (!robot.alive && !robot.emerging) continue;
-      if (!inView(robot.x, robot.z, spritePad) || !lit(robot.x, entityFeetZ(robot))) continue;
+      if (!inView(robot.x, robot.z, spritePad) || !lit(robot.x, npcCollisionZ(robot))) continue;
       if (robot.type === 'raider') {
         const z = this._feetSortZ(robot.x, robot.z, CHAR_NATIVE_PX, SPRITE_PLAYER);
-        const point = this._worldToScreen(robot.x, robot.z);
+        const point = this._entityToScreen(robot.x, robot.z);
         drawList.push({ z, sortBias: SORT_SHADOW, draw: () => drawHumanShadow(point, 0) });
         drawList.push({ z, sortBias: SORT_ENTITY, draw: () => {
           const flip = Math.sin(robot.angle) < 0;
-          this.sprites.draw(ctx, getPlayerSheet(robot), point.x, point.y, SPRITE_PLAYER, 0, flip, 'center', 0,
-            getPlayerAnim(robot, dropDrawTime));
+          this.sprites.draw(ctx, getPlayerSheet(robot, robot.renderMoving), point.x, point.y, SPRITE_PLAYER, 0, flip, 'center', 0,
+            getPlayerAnim(robot, dropDrawTime, robot.renderMoving), true);
           const gun = WEAPONS[robot.weaponKey];
           if (gun) {
             const aim = gunAimTransform(robot.angle);
-            this.sprites.draw(ctx, gun.sprite, point.x + Math.sin(robot.angle) * 8,
-              point.y - 5 + Math.cos(robot.angle) * 5, 1.1, aim.angle, aim.flipX, 'center');
+            const reach = (GUN_HOLD_OFFSET + gunPivotHoldOffset(aim.angle)) * PPU;
+            const elapsed = gun.reloadTime - robot.reloadLeft;
+            const blend = robot.reloadLeft > 0 ? Math.min(1, elapsed / 0.18, robot.reloadLeft / 0.18) : 0;
+            const sx = point.x + Math.sin(robot.angle) * reach * (1 - blend) + getReloadHoldScreenX(point.x, aim.flipX) * blend - point.x * blend;
+            const sy = point.y + Math.cos(robot.angle) * reach * (1 - blend);
+            const shot = dropDrawTime < (robot.shotFlashUntil ?? 0);
+            const sheet = shot && gun.shotSprite ? gun.shotSprite : robot.reloadLeft > 0 ? gun.sprite + '_reload' : gun.sprite;
+            this.sprites.draw(ctx, sheet, sx, sy,
+              1.1, aim.angle * (1 - blend) - Math.PI * 0.35 * blend, aim.flipX, 'shoulder',
+              0, robot.reloadLeft > 0 ? { elapsed } : null, true);
           } else {
             const melee = MELEE_WEAPONS[robot.weaponKey];
-            const pose = getMeleeHoldPose(robot);
-            const hold = worldToScreen(pose.worldX, pose.worldZ);
-            this.sprites.draw(ctx, melee.sprite, hold.x, hold.y - 5, 1.1, pose.angle, pose.flipX, 'center');
+            const elapsed = dropDrawTime - (robot.swingStartedAt ?? -Infinity);
+            const swing = elapsed >= 0 && elapsed < 0.42 ? Math.sin(Math.PI * elapsed / 0.42) : 0;
+            const pose = getMeleeHoldPose(robot, 0.14 * swing);
+            const hold = this._entityToScreen(pose.worldX, pose.worldZ);
+            this.sprites.draw(ctx, melee.sprite, hold.x, hold.y + 8 * swing, 1.1,
+              pose.angle, pose.flipX, 'shoulder', melee.swingAngle * swing, null, true);
           }
         }});
         continue;
@@ -2958,9 +3136,9 @@ class Game {
         const chargeShake = robot.jump?.charging
           ? Math.sin(performance.now() / 1000 * 28) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
           : 0;
-        const drawX = Math.round(s.x + shake.x + chargeShake);
+        const drawX = s.x + shake.x + chargeShake;
         const shootPhase = robot.shoot?.phase ?? null;
-        const robotMoving = (robot.moving || (robot.moveSpeed ?? 0) > 0.2) && !robot.emerging
+        const robotMoving = robot.renderMoving && !robot.emerging
           && shootPhase !== 'charging' && shootPhase !== 'firing';
         const canWalkBounce = robotMoving
           && !robot.jump?.active && !robot.jump?.charging;
@@ -2973,7 +3151,7 @@ class Game {
         const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
         const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
         const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
-        const anchorY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob);
+        const anchorY = s.y - bury + shake.y + emergeBob + jumpBob + chargeBob;
         const feetY = Math.round(anchorY + spriteFeetOffset(enemyNativePx, scale) + walkBouncePx);
         drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx, shadowGridOrigin);
       }});
@@ -2981,7 +3159,7 @@ class Game {
         const drawTime = performance.now() / 1000;
         const emerge = robot.getEmergeT();
         const shake = robot.getEmergeShake();
-        const s = this._worldToScreen(robot.x, robot.z);
+        const s = this._entityToScreen(robot.x, robot.z);
         const bury = (1 - emerge) * 32;
         const scale = enemyDrawScale * (0.15 + emerge * 0.85);
         const chargeShake = robot.jump?.charging
@@ -2990,7 +3168,7 @@ class Game {
         const drawX = Math.round(s.x + shake.x + chargeShake);
         const shootPhase = robot.shoot?.phase ?? null;
         const isScout = robot.type === 'scout';
-        const robotMoving = (robot.moving || (robot.moveSpeed ?? 0) > 0.2) && !robot.emerging
+        const robotMoving = robot.renderMoving && !robot.emerging
           && shootPhase !== 'charging' && shootPhase !== 'firing';
         const canWalkBounce = robotMoving
           && !robot.jump?.active && !robot.jump?.charging;
@@ -3032,6 +3210,7 @@ class Game {
           'center',
           0,
           bodyAnim,
+          true,
         );
         const statusIcon = getEnemyStatusIcon(robot);
         if (statusIcon && emerge > 0.85) {
@@ -3056,7 +3235,7 @@ class Game {
       }});
     }
     const drawTime = performance.now() / 1000;
-    const playerSheet = getPlayerSheet(this.player, drawTime);
+    const playerSheet = getPlayerSheet(this.player);
     const playerFlip = getPlayerFlipX(this.player);
     const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
     const idleBreath = Math.round(this._weaponBreathY ?? 0);
@@ -3066,13 +3245,17 @@ class Game {
       drawHumanShadow(s, playerBounce);
     }});
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, draw: () => {
-      const s = this._worldToScreen(this.player.x, this.player.z);
-      this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim);
+      const s = this._entityToScreen(this.player.x, this.player.z);
+      this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim, true);
     }});
     const gunClip = insideBuilding ? buildingGunClipBounds(insideBuilding) : null;
     drawList.push({ z: playerSortZ + 0.02, sortBias: SORT_GUN, draw: () => {
-      const pose = this._getGunScreenPose(drawTime);
-      this._drawWeaponSprite(ctx, pose, gunClip);
+      if (this.heldThrowable) {
+        const point = this._entityToScreen(this.player.x, this.player.z);
+        this.sprites.drawGroundItem(ctx, this.heldThrowable.key, point.x + Math.sin(this.player.angle) * 12, point.y + 8, 18);
+      } else {
+        this._drawWeaponSprite(ctx, this._getGunScreenPose(drawTime), gunClip);
+      }
     }});
     for (const building of visibleBuildings) {
       const playerInside = insideBuilding === building;
@@ -3145,7 +3328,7 @@ class Game {
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     // Group consecutive props while keeping their depth relative to walls and entities.
     const sceneContext = ctx;
-    const casterBySource = new Map(occluders.filter((box) => box.source).map((box) => [box.source, box]));
+    const casterBySource = shadowMask ? new Map(occluders.filter((box) => box.source).map((box) => [box.source, box])) : null;
     for (let i = 0; i < drawList.length; i++) {
       const entry = drawList[i];
       if (shadowMask && entry.receivesShadow) {
@@ -3377,6 +3560,13 @@ class Game {
   _updateHUD() {
     const w = this.player.getDisplayWeapon();
     const time = performance.now() / 1000;
+    const charging = this.player.melee?.charging;
+    const reloading = !this.player.isMeleeActive() && this.player.getWeapon()?.reloading;
+    const progress = charging ? this.player.getMeleeChargeProgress(time) : this.player.getReloadProgress(time);
+    if (charging || reloading) {
+      this.el.reloadIndicator.style.setProperty('--fill-frame', `${Math.min(7, Math.floor(progress * 8)) * 100 / 7}%`);
+      this._setPixelText(document.getElementById('reload-label'), charging ? 'Charging' : 'Reloading', PIXEL_TEXT_SCALE);
+    }
     const hpPct = (this.player.health / this.player.maxHealth) * 100;
     this.el.healthBar.style.width = `${hpPct}%`;
     this._setPixelText(
@@ -3390,7 +3580,7 @@ class Game {
       this._setPixelText(this.el.ammoReserve, '-', PIXEL_TEXT_SCALE);
       this.el.ammoCurrent.classList.remove('ammo-low');
       this.el.ammoReserve.classList.remove('ammo-low');
-      this.el.reloadIndicator.classList.add('hidden');
+      this.el.reloadIndicator.classList.toggle('hidden', !charging);
       this._drawAmmoHudIcon(null);
     } else {
       const gun = this.player.getWeapon();
@@ -3418,9 +3608,16 @@ class Game {
 
     if (this.items.pickupMsg) {
       this._setPixelText(this.el.pickupStatus, this.items.pickupMsg, PIXEL_TEXT_SCALE);
+      if (this._pickupNotice !== this.items.pickupMsg) {
+        this._pickupNotice = this.items.pickupMsg;
+        this.el.pickupStatus.animate([{ opacity: 0, translate: '0 5px' }, { opacity: 1, translate: '0 0', offset: 0.15 },
+          { opacity: 1, translate: '0 -4px', offset: 0.75 }, { opacity: 0, translate: '0 -14px' }],
+        { duration: 1000 * this.items.pickupMsgTimer, easing: 'ease-out', fill: 'forwards' });
+      }
       this.el.pickupStatus.classList.add('active');
       this.el.pickupStatus.classList.toggle('error', this.items.pickupMsgError);
     } else {
+      this._pickupNotice = null;
       this._setPixelText(this.el.pickupStatus, '');
       this.el.pickupStatus.classList.remove('active', 'error');
     }
@@ -3510,7 +3707,10 @@ class Game {
 
   _loop(now) {
     if (!this.running || this.paused) return;
-    const dt = Math.max(0, Math.min((now - this.lastTime) / 1000, 0.05));
+    const frameMs = Math.max(0, now - this.lastTime);
+    const updateStart = performance.now();
+    this._npcFrameMs = 0;
+    const dt = Math.min(frameMs / 1000, 0.05);
     this.lastTime = now;
     const time = now / 1000;
 
@@ -3529,8 +3729,24 @@ class Game {
       this._saveRaidCheckpoint();
       this.nextRaidCheckpointAt = now + 3000;
     }
+    const renderStart = performance.now();
     this._draw();
+    const renderMs = performance.now() - renderStart;
     this._updateHUD();
+    const perf = this._perf ??= { frames: 0, total: 0, peak: 0, npcPeak: 0, updated: now };
+    if (frameMs > 0) {
+      perf.frames++;
+      perf.total += frameMs;
+      perf.peak = Math.max(perf.peak, frameMs);
+    }
+    perf.npcPeak = Math.max(perf.npcPeak, this._npcFrameMs);
+    if (now - perf.updated >= 500 && perf.total > 0) {
+      document.getElementById('raid-performance').textContent =
+        `${Math.round(1000 * perf.frames / perf.total)} FPS · max ${perf.peak.toFixed(0)} ms\n`
+        + `CPU ${(renderStart - updateStart).toFixed(1)} + draw ${renderMs.toFixed(1)} ms\n`
+        + `NPC max ${perf.npcPeak.toFixed(1)} ms · shadows ${DYNAMIC_SHADOWS ? 'on' : 'off'}`;
+      Object.assign(perf, { frames: 0, total: 0, peak: 0, npcPeak: 0, updated: now });
+    }
     this._scheduleFrame();
   }
 }

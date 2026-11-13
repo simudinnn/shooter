@@ -947,10 +947,10 @@ export class BuildingManager {
       const { x, z } = getDoorWorldPos(building.rearDoor);
       world.clearFoliageInRect(x - TILE / 2, x + TILE / 2, z - TILE * 2, z, { markBlocked: true });
     }
-    for (const rect of buildingFoliageClearRects(building)) {
+    for (const rect of buildingFoliageClearRects(building, 1)) {
       world.clearFoliageInRect(rect.minX, rect.maxX, rect.minZ, rect.maxZ, { markBlocked: true });
     }
-    world.removeFoliageWhere((f) => foliageOverlapsBuildingClearZone(building, f));
+    world.removeFoliageWhere((f) => f.kind.startsWith('tree') && foliageOverlapsBuildingClearZone(building, f));
     this._markBuildingFootprintBlocked(world, building);
   }
 

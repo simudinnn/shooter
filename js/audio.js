@@ -203,7 +203,9 @@ export class SoundManager {
   revolver() {const pitch = 0.95 + Math.random() * 0.2;this.play('revolver', 1, pitch);}
   famas() {const pitch = 0.95 + Math.random() * 0.2;this.play('famas', 1, pitch);}
   fal() {const pitch = 0.95 + Math.random() * 0.2;this.play('fal', 1, pitch);}
-  melee() {const pitch = 0.95 + Math.random() * 0.2;this.play('melee', 1, pitch);}
+  melee(offset = null) {
+    this.play('melee', 0.5, 0.95 + Math.random() * 0.2, offset);
+  }
 
 
   reload() {
@@ -219,7 +221,7 @@ export class SoundManager {
   }
 
   explosion(offset = null) {
-    this.play('explosion', 1 * this._effectVolume(offset, 120), 1, offset);
+    this.play('explosion', 1 * this._effectVolume(offset, 165), 1, offset);
   }
 
   _effectVolume(offset, range) {
@@ -286,7 +288,7 @@ export class SoundManager {
   scoutStomp(distance = 0, offset = null) {
     if (!this.enabled || !this.ctx) return;
 
-    const vol = this._distanceAtten(distance, 6, 32);
+    const vol = this._distanceAtten(distance, 5, 42);
     if (vol <= 0) return;
 
     const now = this.ctx.currentTime;
@@ -294,7 +296,7 @@ export class SoundManager {
     this._lastScoutStomp = now;
 
     const pitch = 0.9 + Math.random() * 0.08;
-    this.play('scoutStomp', vol, pitch, offset);
+    this.play('scoutStomp', 0.33 * vol, pitch, offset);
   }
 
   scoutChargeStart(distance = 0, offset = null) {
@@ -306,13 +308,12 @@ export class SoundManager {
     this.play('scoutChargeStart', 1.5 * vol, 1, offset);
   }
 
-  enemyShot(distance = 0, offset = null) {
+  enemyShot(distance = 0, offset = null, sound = 'enemyShot') {
     if (!this.enabled || !this.ctx) return;
 
-    const vol = this._distanceAtten(distance, 10, 45);
+    const vol = this._distanceAtten(distance, 12, sound === 'enemyShot' ? 110 : 125);
     if (vol <= 0) return;
-    const pitch = 0.95 + Math.random() * 0.2
-    this.play('enemyShot', 1.5 * vol, pitch, offset);
+    this.play(sound, (sound === 'enemyShot' ? 0.56 : 0.68) * vol, 0.95 + Math.random() * 0.2, offset);
   }
 
 
