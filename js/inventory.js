@@ -965,6 +965,15 @@ export class InventoryUI {
         this.render();
         return true;
       }, null, { host: this.root, anchor, level: this.game.player.raidLevel });
+      const cursor = this._cursorEl;
+      if (cursor && !this.game.mobile && cursor.showPopover) {
+        cursor.setAttribute('popover', 'manual');
+        cursor.showPopover();
+        this.quantityDialog.addEventListener('close', () => {
+          if (cursor.matches(':popover-open')) cursor.hidePopover();
+          cursor.removeAttribute('popover');
+        }, { once: true });
+      }
     });
     actions.append(button);
   }

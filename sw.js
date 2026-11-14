@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v481';
+const CACHE = 'robot-ruins-v485';
 
 function buildingKitSprites() {
   return [
@@ -178,6 +178,9 @@ const SHELL = [
 ];
 
 const ASSETS = [
+  './sounds/entities/hit-enemy-1.ogg',
+  './sounds/entities/hit-enemy-2.ogg',
+  './sounds/entities/hit-enemy-3.ogg',
   './assets/ui/loading_circle.png',
   './assets/ui/filling_circle.png',
   './sounds/ui/click1.ogg',

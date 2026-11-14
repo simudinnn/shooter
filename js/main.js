@@ -2083,7 +2083,7 @@ class Game {
       : Math.max(0.48, weapon.fireRate) + Math.random() * 0.25;
   }
 
-  _damageRobot(robot, damage, fromX, fromZ, bullet = null, playerCredit = true, meleeImpact = false) {
+  _damageRobot(robot, damage, fromX, fromZ, bullet = null, playerCredit = true) {
     if (!robot.applyHit(damage, fromX, fromZ, this.world, {
       fromBullet: !!bullet,
       alert: this.player.canSeeEnemyOnScreen(robot),
@@ -2094,7 +2094,7 @@ class Game {
       this.audio.playerHurt(soundOffset);
       this.particles.push(...createBloodSplatter(robot.x, robot.z, fromX, fromZ, damage));
     } else {
-      if (!meleeImpact) this.audio.hitEnemy(soundOffset);
+      this.audio.hitEnemy(soundOffset);
       this.particles.push(...createRobotHitSparks(robot.x, robot.z, fromX, fromZ, damage));
     }
     if (bullet) bullet.active = false;
@@ -2522,7 +2522,7 @@ class Game {
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
       if (Math.abs(diff) > halfArc) continue;
-      if (this._damageRobot(robot, dmg, this.player.x, this.player.z, null, true, true)) {
+      if (this._damageRobot(robot, dmg, this.player.x, this.player.z)) {
         if (!hitAny) this.audio.melee(this._soundOffset(robot));
         hitAny = true;
       }
@@ -3753,7 +3753,18 @@ class Game {
     if (this._frameRequest !== null) return;
     this._frameRequest = requestAnimationFrame((now) => {
       this._frameRequest = null;
-      this._loop(now);
+      try {
+        this._loop(now);
+      } catch (error) {
+        console.error('Raid frame failed:', error);
+        if (this.running) {
+          this._showPauseMenu();
+          this.showWaveBanner('Raid interrupted', 4);
+        } else {
+          document.getElementById('raid-results').classList.add('hidden');
+          this._showRaidBase(this.raidProfile, 'Could not display the raid result.');
+        }
+      }
     });
   }
 

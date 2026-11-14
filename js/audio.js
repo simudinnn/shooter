@@ -217,7 +217,7 @@ export class SoundManager {
   }
 
   hitEnemy(offset = null) {
-    this.play('hitEnemy', 0.6 * this._effectVolume(offset, 32), 1, offset);
+    this.play('hitEnemy', 0.85 * this._effectVolume(offset, 48), 1, offset);
   }
 
   explosion(offset = null) {

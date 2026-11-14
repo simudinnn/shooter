@@ -912,6 +912,7 @@ export class RaidBase {
     if (!raid) this.closeSelection();
     const dialog = document.createElement('dialog');
     dialog.className = 'raid-quantity-dialog';
+    dialog.dataset.action = action.toLowerCase();
     dialog.setAttribute('aria-label', action + ' ' + getItemDisplayName(item));
     const slider = document.createElement('input');
     slider.type = 'range';

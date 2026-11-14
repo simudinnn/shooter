@@ -3520,7 +3520,7 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
 
 @media (hover: hover) and (pointer: fine) {
   #raid-base,
-  body:not(.mobile-ui) :is(#hud, #overlay) { --desktop-ui-scale: 1.25; }
+  body:not(.mobile-ui) :is(#hud, #overlay, #inventory) { --desktop-ui-scale: 1.25; }
 
   #raid-base :is(.raid-base-top, .raid-base-strip, .raid-base-workspace) {
     padding-inline: clamp(12px, 3vw, 64px);
@@ -3624,12 +3624,12 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
 
 @media (hover: hover) and (pointer: fine) and (min-width: 1250px) and (min-height: 720px) {
   #raid-base,
-  body:not(.mobile-ui) :is(#hud, #overlay) { --desktop-ui-scale: 1.5; }
+  body:not(.mobile-ui) :is(#hud, #overlay, #inventory) { --desktop-ui-scale: 1.5; }
 }
 
 @media (hover: hover) and (pointer: fine) and (min-width: 1900px) and (min-height: 1000px) {
   #raid-base,
-  body:not(.mobile-ui) :is(#hud, #overlay) { --desktop-ui-scale: 2; }
+  body:not(.mobile-ui) :is(#hud, #overlay, #inventory) { --desktop-ui-scale: 2; }
 }
 
 @media (hover: hover) and (pointer: fine) and (max-width: 850px) {
@@ -3735,14 +3735,14 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
   zoom: 1;
   filter: none;
 }
-#raid-base .raid-recycle-preview,
-#raid-base .raid-recycle-preview > div {
+:is(#raid-base, #inventory) .raid-recycle-preview,
+:is(#raid-base, #inventory) .raid-recycle-preview > div {
   display: flex;
   align-items: center;
   gap: 5px;
 }
-#raid-base .raid-recycle-preview { flex-wrap: wrap; gap: 4px 10px; margin: 2px 0 4px; }
-#raid-base .raid-recycle-preview img:not(.inv-pixel-text-img) {
+:is(#raid-base, #inventory) .raid-recycle-preview { flex-wrap: wrap; gap: 4px 10px; margin: 2px 0 4px; }
+:is(#raid-base, #inventory) .raid-recycle-preview img:not(.inv-pixel-text-img) {
   width: 28px;
   height: 28px;
   object-fit: contain;
@@ -3810,12 +3810,12 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
   background: #a82a23 url('assets/ui/ui_button_9slice.png') center / 100% 100%;
   image-rendering: pixelated;
 }
-#raid-base .raid-quantity-actions {
+:is(#raid-base, #inventory) .raid-quantity-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-#raid-base .raid-quantity-actions {
+:is(#raid-base, #inventory) .raid-quantity-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
   margin-top: 8px;
@@ -4014,7 +4014,27 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 
 .raid-stash-tools + .raid-station-description { margin-block: 5px 12px; }
 .raid-stash-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; }
-#inventory .raid-quantity-actions > button { border: 4px solid transparent; border-image: url('assets/ui/ui_button_9slice.png') 4 fill stretch; }
+.raid-quantity-dialog .raid-quantity-actions > button.ui-slice-button {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 4px solid transparent;
+  border-image: url('assets/ui/ui_button_9slice.png') 4 fill stretch;
+}
+:is(#raid-base, #inventory) .raid-quantity-dialog .raid-quantity-actions .inv-pixel-text-img {
+  zoom: var(--desktop-ui-scale, 1);
+}
+:is(#raid-base, #inventory) .raid-quantity-dialog .raid-recycle-preview img:not(.inv-pixel-text-img) {
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+.inv-cursor-follow[popover] {
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
 
 #overlay #raid-base :is(#raid-transfer-all, #raid-stash-sort, #raid-settings form > button) {
   min-width: 0;
@@ -4024,3 +4044,8 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 }
 #overlay #raid-base :is(#raid-transfer-all, #raid-stash-sort) { inline-size: clamp(130px, 10vw, 176px); max-inline-size: 100%; block-size: 36px; }
 #overlay #raid-base :is(#raid-transfer-all, #raid-stash-sort) .inv-pixel-text-img { max-height: 17px; max-width: 100%; object-fit: contain; }
+
+:is(#raid-base, #inventory) .raid-quantity-dialog[data-action="split"] .raid-quantity-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
