@@ -271,7 +271,7 @@ export class SoundManager {
     this.play('footstep', volume, pitch);
   }
 
-  enemyFootstep(distance = 0, offset = null) {
+  enemyFootstep(distance = 0, offset = null, usePlayerStep = false) {
     if (!this.enabled || !this.ctx) return;
 
     const vol = this._distanceAtten(distance);
@@ -281,8 +281,8 @@ export class SoundManager {
     if (now - this._lastEnemyStep < 0.18) return;
     this._lastEnemyStep = now;
 
-    const pitch = 0.9 + Math.random() * 0.12;
-    this.play('enemyFootstep', 0.4 * vol, pitch, offset);
+    const pitch = usePlayerStep ? 1.15 + Math.random() * 0.1 : 0.9 + Math.random() * 0.12;
+    this.play(usePlayerStep ? 'footstep' : 'enemyFootstep', (usePlayerStep ? 0.2 : 0.4) * vol, pitch, offset);
   }
 
   scoutStomp(distance = 0, offset = null) {

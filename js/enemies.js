@@ -553,21 +553,6 @@ export class Robot {
       this.chasing = true;
       this.angle = Math.atan2(dx, dz);
 
-      const jumpMin = 2.6;
-      const jumpMax = 7.2;
-      if (canSee && !isEnemyAlert(this) && this.type === 'spider' && dist < jumpMax && dist > jumpMin && this.jumpCooldown <= 0 && !this.jump.charging && !this.jump.active) {
-        this.jumpTryTimer -= dt;
-        if (this.jumpTryTimer <= 0) {
-          this.jumpTryTimer = 0.38 + Math.random() * 0.32;
-          if (Math.random() < 0.62) {
-            this._beginJumpCharge(dx, dz, dist);
-            return;
-          }
-        }
-      } else if (dist >= jumpMax) {
-        this.jumpTryTimer = 0;
-      }
-
       moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz);
 
       if (

@@ -112,8 +112,8 @@ const BUILDING_ASSET_PATHS = Object.fromEntries([
 ]);
 
 const CORE_ASSETS = {
-  spider: 'assets/enemies/spider.png',
-  spider_walk: 'assets/enemies/spider_walk.png',
+  spider: 'assets/enemies/zombie.png',
+  spider_walk: 'assets/enemies/zombie_walk.png',
   scout: 'assets/enemies/scout.png',
   scout_walk: 'assets/enemies/scout_walk.png',
   scout_charge: 'assets/enemies/charge.png',

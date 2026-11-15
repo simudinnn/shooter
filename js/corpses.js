@@ -51,7 +51,7 @@ export class CorpseManager {
       x: robot.x,
       z: robot.z,
       type: robot.type ?? 'spider',
-      slots: rollCorpseLoot(robot.type),
+      slots: robot.type === 'spider' ? [] : rollCorpseLoot(robot.type),
       spawnTime: time,
       despawnAt: time + CORPSE_LIFETIME_SEC,
       isCorpse: true,
@@ -69,10 +69,11 @@ export class CorpseManager {
   update(dt, time, onSmoke) {
     for (let i = this.corpses.length - 1; i >= 0; i--) {
       const c = this.corpses[i];
-      if (time >= c.despawnAt || this.isEmpty(c)) {
+      if (time >= c.despawnAt || (c.type !== 'spider' && this.isEmpty(c))) {
         this._removeCorpseAt(i);
         continue;
       }
+      if (c.type === 'spider') continue;
       c.smokeAcc += dt;
       const rate = 0.72;
       while (c.smokeAcc >= rate) {
@@ -86,6 +87,7 @@ export class CorpseManager {
     let best = null;
     let bestD = maxDist + player.radius;
     for (const corpse of this.corpses) {
+      if (this.isEmpty(corpse)) continue;
       const d = Math.hypot(player.x - corpse.x, player.z - corpse.z);
       if (d < bestD) {
         bestD = d;
@@ -96,7 +98,7 @@ export class CorpseManager {
   }
 
   isInInteractRange(player, corpse) {
-    return Math.hypot(player.x - corpse.x, player.z - corpse.z) <= CORPSE_INTERACT_DIST + player.radius;
+    return !this.isEmpty(corpse) && Math.hypot(player.x - corpse.x, player.z - corpse.z) <= CORPSE_INTERACT_DIST + player.radius;
   }
 
   isEmpty(corpse) {

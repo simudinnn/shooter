@@ -132,7 +132,7 @@ export function normalizeRaidProfile(profile) {
 
 const CHALLENGES = [
   { id: 'first_extract', title: 'First Return', description: 'Complete one successful extraction.', metric: 'extractions', goal: 1, xp: 100 },
-  { id: 'robot_hunter', title: 'Machine Breaker', description: 'Extract after destroying five robots across raids.', metric: 'extractedKills', goal: 5,
+  { id: 'robot_hunter', title: 'Zombie Hunter', description: 'Extract after killing five zombies across raids.', metric: 'extractedKills', goal: 5,
     xp: 150, item: { kind: 'equipment', key: 'vest' } },
   { id: 'workshop', title: 'Field Technician', description: 'Craft three items at the base station.', metric: 'crafts', goal: 3,
     xp: 100, item: { kind: 'material', key: 'mechanical_comp', amount: 3 } },
@@ -143,7 +143,7 @@ const CHALLENGES = [
 const ROTATION_MS = 3 * 60 * 60 * 1000;
 const ROTATING_CHALLENGES = [
   { title: 'Quick Extraction', metric: 'extractions', goal: 1, xp: 80 },
-  { title: 'Robot Sweep', metric: 'extractedKills', goal: 3, xp: 120 },
+  { title: 'Zombie Sweep', metric: 'extractedKills', goal: 3, xp: 120 },
   { title: 'Workshop Shift', metric: 'crafts', goal: 2, xp: 90 },
   { title: 'Double Return', metric: 'extractions', goal: 2, xp: 140 },
   { title: 'Heavy Patrol', metric: 'extractedKills', goal: 6, xp: 180 },
@@ -576,7 +576,7 @@ export class RaidBase {
       const goal = challenge.goal;
       const task = {
         extractions: `Return to Safe Zone through a hatch in ${goal === 1 ? 'one raid' : goal + ' raids'}.`,
-        extractedKills: `Destroy ${goal} robots across raids. Only kills from raids you extract from count.`,
+        extractedKills: `Kill ${goal} zombies across raids. Only kills from raids you extract from count.`,
         crafts: `Complete ${goal} crafting orders at the Safe Zone station. Each craft counts once.`,
       }[challenge.metric];
       this.pixelLabel(title, challenge.title);

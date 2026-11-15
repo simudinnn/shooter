@@ -1,4 +1,4 @@
-import { Robot, Scout, createGroundErupt, SCOUT_SPAWN_SHARE } from './enemies.js';
+import { Robot, Scout, createGroundErupt } from './enemies.js';
 import { CHUNK_WORLD, TILE, hash01, isInBase } from './worldGen.js';
 import { getNearbyTownAnchors } from './highwayGen.js';
 import { BUILDING_CHUNK_SPAWN_RATE } from './buildings.js';
@@ -9,7 +9,7 @@ const totalSpawnWeight = 100 + customSpawnEntries.reduce((sum, [, entry]) => sum
 
 function pickEnemyType(roll) {
   let weight = roll * totalSpawnWeight;
-  if (weight < 100) return weight < SCOUT_SPAWN_SHARE * 100 ? 'scout' : 'spider';
+  if (weight < 100) return 'spider';
   weight -= 100;
   for (const [type, entry] of customSpawnEntries) {
     weight -= entry.spawnWeight;
@@ -24,12 +24,12 @@ export const ENTITY_CHUNK_RADIUS = 4;
 export const ENTITY_DESPAWN_DIST = ENTITY_CHUNK_RADIUS * CHUNK_WORLD + 40;
 
 /** Soft caps within despawn range — keeps the world from flooding. */
-export const MAX_NEARBY_SPIDERS = 18;
+export const MAX_NEARBY_SPIDERS = 32;
 export const MAX_NEARBY_CHESTS = 10;
 /** Wilderness per-chunk spawn chance (away from towns). */
-export const SPIDER_CHUNK_CHANCE = 0.1;
+export const SPIDER_CHUNK_CHANCE = 0.28;
 /** Per-chunk spawn chance in the town outskirts ring. */
-export const SPIDER_TOWN_RING_CHANCE = 0.62;
+export const SPIDER_TOWN_RING_CHANCE = 0.90;
 /** World units — prefer robot spawns in this annulus around a town anchor. */
 export const TOWN_ROBOT_RING_MIN = TILE * 14;
 export const TOWN_ROBOT_RING_MAX = TILE * 44;

@@ -9,7 +9,7 @@ const DISPLAY_NAMES = {
 const DESCRIPTIONS = {
   grenade: 'Explodes three seconds after throwing.',
   molotov: 'Breaks on impact and ignites the area.',
-  flare: 'Attracts robots after landing.',
+  flare: 'Attracts zombies after landing.',
 };
 
 export function throwableSpritePath(key) {

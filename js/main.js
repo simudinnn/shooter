@@ -5,7 +5,7 @@ import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preload
 import { World, TILE } from './world.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
-import { Robot, Scout, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
+import { Robot, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
 import { Player, BulletPool, WEAPONS, MELEE_WEAPONS, GUN_HOLD_OFFSET, HUMAN_WALK_RATE, HUMAN_SPRINT_RATE, findBulletSpawn } from './player.js';
 import {
@@ -16,7 +16,7 @@ import {
 import { SoundManager } from './audio.js';
 import { ItemManager } from './items.js';
 import { GroundDropManager, GROUND_DROP_DISPLAY_PX, GROUND_DROP_RES_PX } from './groundDrops.js';
-import { getEnemyStatusIcon, hearPlayerGunshot, hasCombatSight } from './enemyNav.js';
+import { hearPlayerGunshot, hasCombatSight } from './enemyNav.js';
 import { ChestManager, CHEST_DRAW_SCALE, CHEST_OPAQUE_HALF_W, CHEST_OPAQUE_HALF_H, CHEST_DRAW_PIVOT } from './chests.js';
 import {
   BuildingManager,
@@ -40,7 +40,7 @@ import {
   BUILDING_ART_PX,
 } from './buildingGen.js';
 import { chestSpriteName, getItemDisplayName, getItemIconSrc } from './loot.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, resolveFlipX, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim, ENEMY_STATUS_ICON_SCALE } from './sprites.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, resolveFlipX, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, updateLocomotion, isSprintAnimSpeed, entityPushRadius } from './collision.js';
 import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
@@ -732,7 +732,7 @@ class Game {
     };
     setLabel('h2', extracted ? 'Extraction successful' : abandoned ? 'Raid abandoned' : 'Raid lost');
     setLabel('#raid-result-duration', seconds == null ? 'Time: —' : 'Time: ' + Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's');
-    setLabel('#raid-result-kills', 'Robots: ' + (kills ?? '—'));
+    setLabel('#raid-result-kills', 'Zombies: ' + (kills ?? '—'));
     setLabel('#raid-result-raiders', 'Raiders: ' + (raiderKills ?? '—'));
     setLabel('#raid-result-xp', '+' + (next.xp - previous.xp) + ' XP');
     setLabel('#raid-result-items-title', extracted ? 'New loot extracted' : 'Items lost');
@@ -1460,9 +1460,8 @@ class Game {
     this.buildings.restoreAllFromSave(data.buildings, this.world);
 
     for (const s of data.robots ?? []) {
-      const robot = s.type === 'scout'
-        ? new Scout(s.x, s.z, s.wave ?? 1)
-        : new Robot(s.x, s.z, s.wave ?? 1, s.type ?? 'spider');
+      const type = s.type === 'scout' ? 'spider' : s.type ?? 'spider';
+      const robot = new Robot(s.x, s.z, s.wave ?? 1, type);
       robot.health = s.health;
       robot.maxHealth = s.maxHealth;
       robot.angle = s.angle ?? robot.angle;
@@ -1767,7 +1766,7 @@ class Game {
           const offset = this._soundOffset(robot);
           const distance = Math.hypot(offset.x, offset.z);
           if (robot.type === 'scout') this.audio.scoutStomp(distance, offset);
-          else this.audio.enemyFootstep(distance, offset);
+          else this.audio.enemyFootstep(distance, offset, robot.type === 'spider');
         }
         continue;
       }
@@ -1809,7 +1808,7 @@ class Game {
           robot.groundSpewAcc -= spewRate;
           this.particles.push(...createGroundSpew(robot.x, robot.z, intensity));
         }
-      } else if (robot.alive) {
+      } else if (robot.alive && robot.type !== 'spider') {
         const ratio = robot.healthRatio;
         const bodySpread = robot.radius * 1.15;
         if (ratio <= 0.5) {
@@ -1837,7 +1836,7 @@ class Game {
           if (step > 0) {
             const dist = Math.hypot(robot.x - this.player.x, robot.z - this.player.z);
             if (robot.type === 'scout') this.audio.scoutStomp(dist, this._soundOffset(robot));
-            else this.audio.enemyFootstep(dist, this._soundOffset(robot));
+            else this.audio.enemyFootstep(dist, this._soundOffset(robot), robot.type === 'spider');
           }
         }
       } else {
@@ -2090,7 +2089,7 @@ class Game {
     })) return;
     const isRaider = robot.type === 'raider';
     const soundOffset = this._soundOffset(robot);
-    if (isRaider) {
+    if (isRaider || robot.type === 'spider') {
       this.audio.playerHurt(soundOffset);
       this.particles.push(...createBloodSplatter(robot.x, robot.z, fromX, fromZ, damage));
     } else {
@@ -2129,6 +2128,7 @@ class Game {
       this.corpses.spawnFromRobot(robot, time);
       const idx = this.robots.indexOf(robot);
       if (idx >= 0) this.robots.splice(idx, 1);
+      if (robot.type === 'spider') return true;
       this.audio.explosion(this._soundOffset(robot));
       this.particles.push(...createExplosion(robot.x, robot.z));
       this.particles.push(...createRobotDeathFx(robot.x, robot.z, robot.radius * 1.1));
@@ -2155,6 +2155,7 @@ class Game {
     let best = null;
     let bestD = Infinity;
     for (const corpse of this.corpses.corpses) {
+      if (this.corpses.isEmpty(corpse)) continue;
       if (!pointInWallLight(this._wallLight, corpse.x, this.corpses.sortZ(corpse))) continue;
       const s = this._corpseScreenPos(corpse);
       const dx = this.mouse.sx - s.x;
@@ -3051,11 +3052,11 @@ class Game {
         const s = this._corpseScreenPos(corpse);
         this.sprites.draw(
           ctx,
-          corpseSpriteName(corpse.type),
+          corpse.type === 'spider' ? 'spider' : corpseSpriteName(corpse.type),
           s.x,
           s.y,
           corpseScale,
-          0,
+          corpse.type === 'spider' ? Math.PI / 2 : 0,
           false,
           'center',
         );
@@ -3264,22 +3265,6 @@ class Game {
           bodyAnim,
           true,
         );
-        const statusIcon = getEnemyStatusIcon(robot);
-        if (statusIcon && emerge > 0.85) {
-          const headLift = Math.round(spriteFeetOffset(enemyNativePx, scale) + walkBouncePx);
-          const iconY = drawY - headLift - 14;
-          const bob = Math.sin(drawTime * 4.5 + robot.x) * 1.5;
-          this.sprites.draw(
-            ctx,
-            statusIcon,
-            drawX,
-            iconY + bob,
-            ENEMY_STATUS_ICON_SCALE,
-            0,
-            false,
-            'center',
-          );
-        }
         if (robot.name) {
           drawPixelText(ctx, robot.name, drawX, drawY - 34, 1, 'center');
         }

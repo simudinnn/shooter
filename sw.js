@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v485';
+const CACHE = 'robot-ruins-v488';
 
 function buildingKitSprites() {
   return [
@@ -193,8 +193,8 @@ const ASSETS = [
   ...WEAPON_SPRITES,
   ...WORLD_SPRITES,
   ...BUILDING_KIT_SPRITES,
-  './assets/enemies/spider.png',
-  './assets/enemies/spider_walk.png',
+  './assets/enemies/zombie.png',
+  './assets/enemies/zombie_walk.png',
   './assets/enemies/scout.png',
   './assets/enemies/scout_walk.png',
   './assets/enemies/charge.png',
