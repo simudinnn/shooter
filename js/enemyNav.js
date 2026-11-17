@@ -46,7 +46,7 @@ export const ENEMY_ALERT_DETECT_MULT = 1.2;
 export const ENEMY_ALERT_WANDER_SPEED = 0.82;
 export const ENEMY_IDLE_FORGET_TIME = 5.0;
 
-export const SPIDER_DETECT_RANGE = 36;
+export const SPIDER_DETECT_RANGE = 26;
 export const SCOUT_DETECT_RANGE = 30;
 
 const _flow = {

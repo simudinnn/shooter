@@ -50,7 +50,7 @@ export class ChunkEntityManager {
     if (time < this._nextUpdate) return;
     this._nextUpdate = time + 0.2;
     this._despawnFar(player);
-    this._populateBuildingsOnly(player, ENTITY_CHUNK_RADIUS, true);
+    if (!this.world.raidMap) this._populateBuildingsOnly(player, ENTITY_CHUNK_RADIUS, true);
     this._populateEnemiesOnly(player, true);
   }
 
@@ -370,7 +370,7 @@ export class ChunkEntityManager {
 
   _spawnChunkSpiders(chunk, player, fx, fz) {
     const center = this._chunkCenter(chunk.cx, chunk.cz);
-    if (isInBase(center.x, center.z)) {
+    if (!this.world.raidMap && isInBase(center.x, center.z)) {
       chunk.spidersSpawned = true;
       return;
     }
@@ -444,7 +444,7 @@ export class ChunkEntityManager {
 
     const tryPoint = (requireAhead) => {
       for (const [x, z] of tries) {
-        if (isInBase(x, z)) continue;
+        if (!this.world.raidMap && isInBase(x, z)) continue;
         if (!this._offScreenForSpawn(x, z)) continue;
         if (requireAhead && !this._isAheadOfPlayer(player, x, z, fx, fz)) continue;
         if (Robot._isValidSpawn(

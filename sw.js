@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v488';
+const CACHE = 'robot-ruins-v518';
 
 function buildingKitSprites() {
   return [
@@ -145,6 +145,7 @@ const SHELL = [
   './js/particles.js',
   './js/sprites.js',
   './js/world.js',
+  './js/authoredRaidMap.js',
   './js/worldGen.js',
   './js/saveGame.js',
   './js/viewCull.js',
@@ -195,6 +196,10 @@ const ASSETS = [
   ...BUILDING_KIT_SPRITES,
   './assets/enemies/zombie.png',
   './assets/enemies/zombie_walk.png',
+  './assets/enemies/zombie_run.png',
+  './assets/enemies/zombie_dead1.png',
+  './assets/enemies/zombie_dead2.png',
+  './assets/enemies/zombie_dead3.png',
   './assets/enemies/scout.png',
   './assets/enemies/scout_walk.png',
   './assets/enemies/charge.png',
@@ -311,6 +316,8 @@ async function serve(request, url) {
 }
 
 self.addEventListener('fetch', (event) => {
+  const path = new URL(event.request.url).pathname;
+  if (path.endsWith('/tools/map-editor-assets.json') || path.includes('/maps/')) return;
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin || request.headers.has('range')) return;

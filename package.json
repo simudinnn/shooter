@@ -1,7 +1,7 @@
 {
   "name": "robot-ruins",
   "version": "1.0.0",
-  "description": "2.5D top-down robot shooter",
+  "description": "2.5D top-down zombie shooter",
   "type": "module",
   "scripts": {
     "start": "node server/dev-server.mjs",

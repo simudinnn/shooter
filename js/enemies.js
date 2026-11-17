@@ -50,10 +50,15 @@ export class Robot {
     this.alive = true;
     this.baseSpeed = (10 + Math.random() * 2.2) * (1 + (wave - 1) * 0.05);
     this.speed = this.baseSpeed;
+    this.zombieRunSpeed = type === 'spider' && Math.random() < 0.35
+      ? (13 + Math.random() * 4) * (1 + (wave - 1) * 0.05)
+      : 0;
+    this.zombieHitPause = 0;
+    this.zombieRunning = false;
     this.radius = 1.45;
     this.moveRadius = 0.95;
     this.meleeDamage = Math.floor((12 + Math.random() * 10) * (1 + (wave - 1) * 0.07));
-    this.meleeRange = 2.1;
+    this.meleeRange = type === 'spider' ? 1.35 : 2.1;
     this.attackRate = Math.max(0.45, 0.75 + Math.random() * 0.35 - (wave - 1) * 0.03);
     this.meleeCooldown = 0.3 + Math.random() * 0.5;
     this.walkPhase = Math.random() * Math.PI * 2;
@@ -369,7 +374,11 @@ export class Robot {
     if (walkRate > 0) {
       this.walkPhase += dt * walkRate;
     }
-    this._flipX = resolveFlipX(this.angle, this._flipX ?? false);
+    if (this.type === 'spider' && this.moving) {
+      if (Math.abs(dx) > 0.001) this._flipX = dx < 0;
+    } else {
+      this._flipX = resolveFlipX(this.angle, this._flipX ?? false);
+    }
   }
 
   _endJump() {
@@ -498,6 +507,19 @@ export class Robot {
       return;
     }
 
+    if (this.type === 'spider') {
+      this.zombieRunning = false;
+      this.speed = this.baseSpeed;
+      if (this.zombieHitPause > 0) {
+        this.zombieHitPause = Math.max(0, this.zombieHitPause - dt);
+        if (this.zombieHitPause > 0) {
+          this.moving = false;
+          this.bob = 0;
+          return;
+        }
+      }
+    }
+
     if (this.jump.charging) {
       this._updateJumpCharge(dt, world);
       this.moving = false;
@@ -512,9 +534,6 @@ export class Robot {
     if (this.stagger > 0) {
       this.stagger -= dt;
       this._applyKnockback(dt, world, player, robots);
-      this.moving = false;
-      this.bob = 0;
-      return;
     }
 
     const prevX = this.x;
@@ -553,17 +572,26 @@ export class Robot {
       this.chasing = true;
       this.angle = Math.atan2(dx, dz);
 
-      moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz);
-
       if (
         canSee
         && dist < this.meleeRange + player.radius
         && this.meleeCooldown <= 0
         && canMeleeTarget(world, this.x, this.z, player.x, player.z)
       ) {
-        onMeleeHit(this);
+        const hit = onMeleeHit(this);
         this.meleeCooldown = this.attackRate;
+        if (this.type === 'spider' && hit) {
+          this.zombieHitPause = 0.2;
+          this.moving = false;
+          this.bob = 0;
+          return;
+        }
       }
+      if (this.zombieRunSpeed && canSee) {
+        this.zombieRunning = true;
+        this.speed = this.zombieRunSpeed;
+      }
+      moving = this._updateHuntMove(dt, player, world, robots, buildings, time, dx, dz);
     } else if (!this.chasing) {
       moving = this._updateWander(dt, world, player, robots, 0.45);
     }
@@ -690,15 +718,9 @@ export class Scout extends Robot {
       return;
     }
 
-    const inAttackEarly = this.shoot.phase === 'charging' || this.shoot.phase === 'firing';
     if (this.stagger > 0) {
       this.stagger -= dt;
       this._applyKnockback(dt, world, player, robots);
-      if (!inAttackEarly) {
-        this.moving = false;
-        this.moveSpeed = 0;
-        return;
-      }
     }
 
     const prevX = this.x;

@@ -3,6 +3,7 @@ import { RaidBase, raidLevel, challengeProgress, newRaidProfile, deployProfile, 
 import { collectWallOccluders, collectPropOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
 import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { World, TILE } from './world.js';
+import { AuthoredRaidWorld, MAP_FOG_TILES, parseRaidMap } from './authoredRaidMap.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
 import { Robot, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
@@ -39,7 +40,7 @@ import {
   entityFeetZ,
   BUILDING_ART_PX,
 } from './buildingGen.js';
-import { chestSpriteName, getItemDisplayName, getItemIconSrc } from './loot.js';
+import { chestSpriteName, getItemDisplayName, getItemIconSrc, rollChestLoot } from './loot.js';
 import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, resolveFlipX, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, updateLocomotion, isSprintAnimSpeed, entityPushRadius } from './collision.js';
 import { drawCollisionDebug } from './collisionDebug.js';
@@ -58,10 +59,11 @@ import {
 } from './viewCull.js';
 const npcCollisionZ = (npc) => npc.z + (npc.getMoveCollider().zOff ?? 0);
 
-const DYNAMIC_SHADOWS = new URLSearchParams(location.search).get('shadows') !== '0';
+const SHADOW_MODE = new URLSearchParams(location.search).get('shadows');
+const DYNAMIC_SHADOWS = SHADOW_MODE === 'dynamic';
+const BAKED_SHADOWS = !DYNAMIC_SHADOWS && SHADOW_MODE !== '0';
 
 /** Y-sort bias — shadows on the floor, under walls and bodies. */
-const SORT_SHADOW = 0;
 const SORT_WALL_BACK = 1;
 const SORT_ENTITY = 2;
 const SORT_GUN = 3;
@@ -150,7 +152,7 @@ class Game {
     this.canvas = document.getElementById('game-canvas');
     this.canvas.setAttribute('tabindex', '0');
     this.canvas.style.outline = 'none';
-    this.ctx = this.canvas.getContext('2d');
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
     this.renderScale = this.mobile ? 1 : RENDER_SCALE;
     this.canvas.width = INTERNAL_W * this.renderScale;
     this.canvas.height = INTERNAL_H * this.renderScale;
@@ -448,8 +450,8 @@ class Game {
       if (this.player && this.world && !reveal.areaBootstrapped) {
         reveal.areaBootstrapped = true;
         this.world.touchChunksAround(this.player.x, this.player.z, reveal.radiusChunks + 1, { eager: true });
-        this.chunkEntities?._populateBuildingsOnly(this.player, reveal.radiusChunks);
-        const cleared = this.world.ensureClearSpawnPosition(this.player.x, this.player.z);
+        if (!this.world.raidMap) this.chunkEntities?._populateBuildingsOnly(this.player, reveal.radiusChunks);
+        const cleared = this.world.raidMap ? this.player : this.world.ensureClearSpawnPosition(this.player.x, this.player.z);
         if (cleared.x !== this.player.x || cleared.z !== this.player.z) {
           this.player.x = cleared.x;
           this.player.z = cleared.z;
@@ -592,23 +594,42 @@ class Game {
 
   async _deployRaid() {
     if (this._deploying || this.running) return;
+    const mapFile = document.getElementById('raid-map-select').value;
+    let raidMap = null;
+    this._deploying = true;
+    try {
+      if (mapFile) {
+        const response = await fetch('./maps/' + encodeURIComponent(mapFile), { cache: 'no-store' });
+        if (!response.ok) throw new Error('Map file could not be loaded.');
+        raidMap = parseRaidMap(await response.json());
+      }
+    } catch (error) {
+      this._deploying = false;
+      this.raidBase.show(this.raidProfile, 'Could not read custom map. ' + error.message);
+      return;
+    }
     const previous = this.raidProfile;
     if (!this._writeRaidProfile(deployProfile(previous))) {
+      this._deploying = false;
       this.raidBase.show(previous, 'Could not save your raid checkpoint.');
       return;
     }
-    this._deploying = true;
     this.audio.playUi('deploy');
     this.raidBase.hide();
     this._showLoadingScreen();
     try {
       await this._paintLoadingProgress(0.08, 'Preparing raid…');
-      await this._bootGame(null, previous.kit);
+      await this._bootGame(null, previous.kit, raidMap);
+      if (raidMap?.warnings.size) {
+        const names = [...raidMap.warnings].slice(0, 3).join(', ');
+        const rest = raidMap.warnings.size - 3;
+        this.showWaveBanner('Map assets skipped: ' + names + (rest > 0 ? ' +' + rest : ''), 5);
+      }
     } catch (error) {
       console.error('Deploy failed:', error);
       const restored = this._writeRaidProfile(previous);
       this.raidProfile = previous;
-      this._showRaidBase(previous, restored ? 'Deploy failed. Your loadout was restored.' : 'Deploy failed. Loadout restored for this session only.');
+      this._showRaidBase(previous, restored ? (mapFile ? 'Custom map failed. ' + error.message : 'Deploy failed. Your loadout was restored.') : 'Deploy failed. Loadout restored for this session only.');
     } finally {
       this._deploying = false;
     }
@@ -1326,7 +1347,7 @@ class Game {
     return z + 0.04;
   }
 
-  async _bootGame(saveData = null, raidKit = null) {
+  async _bootGame(saveData = null, raidKit = null, raidMap = null) {
     const isSaveLoad = !!saveData;
     if (!isSaveLoad) {
       this._beginSpawnReveal();
@@ -1335,7 +1356,7 @@ class Game {
     this.audio.resume();
 
     await this._spritePreload;
-    await this._paintLoadingProgress(0.32, 'Generating terrain…');
+    await this._paintLoadingProgress(0.32, raidMap ? 'Loading custom map…' : 'Generating terrain…');
 
     if (saveData?.worldSeed != null) {
       setWorldSeed(saveData.worldSeed);
@@ -1343,7 +1364,7 @@ class Game {
       rollWorldSeed();
     }
 
-    this.world = new World();
+    this.world = raidMap ? new AuthoredRaidWorld(raidMap, { bakeShadows: BAKED_SHADOWS }) : new World();
     this.world.setSpriteBank(this.sprites);
     await this.world.build();
     await this._paintLoadingProgress(0.56, 'Preparing spawn area…');
@@ -1368,6 +1389,15 @@ class Game {
     this.heldThrowable = null;
     this.thrownItems = [];
     this.dayNight = new DayNightCycle();
+
+    if (raidMap) {
+      for (const chest of this.world.mapChests) {
+        this.chests.restoreInBuilding({ ...chest, slots: rollChestLoot() }, {}, chest);
+      }
+      for (const { x, y, item } of raidMap.layers.loot) {
+        this.groundDrops.dropAt((x + 0.5) * TILE, (y + 0.5) * TILE, item, null, { preserve: true, exact: true });
+      }
+    }
 
     if (saveData) {
       this.player = new Player();
@@ -1396,7 +1426,7 @@ class Game {
     };
     this._nextTerrainWarmup = 0;
     await this._paintLoadingProgress(0.82, 'Locating extraction hatches…');
-    this.hatches = raidKit ? this._placeHatches() : [];
+    this.hatches = raidKit ? (raidMap ? this.world.mapHatches : this._placeHatches()) : [];
     await this._paintLoadingProgress(1, 'Entering the Ruins…');
     this.nearestHatch = null;
     this.raidStartedAt = performance.now();
@@ -1751,7 +1781,9 @@ class Game {
       }
       const lure = !robot.emerging && this.thrownItems.find((item) => item.key === 'flare'
         && item.flight <= 0 && !item.done && Math.hypot(robot.x - item.x, robot.z - item.z) <= TILE * 12);
-      if (lure) {
+      if (lure && !(robot.zombieHitPause > 0)) {
+        robot.zombieRunning = false;
+        if (robot.type === 'spider') robot.speed = robot.baseSpeed;
         robot.combatTarget = null;
         robot.searchPhase = 'investigate';
         robot.hasLastKnown = true;
@@ -1783,8 +1815,7 @@ class Game {
       robot.update(dt, target, this.world, this.robots, (r) => {
         if (this.world.segmentBlocked(r.x, entityFeetZ(r), target.x, entityFeetZ(target), 0.16, false)) return;
         if (target !== this.player) {
-          this._damageRobot(target, r.meleeDamage, r.x, r.z, null, false);
-          return;
+          return this._damageRobot(target, r.meleeDamage, r.x, r.z, null, false);
         }
         if (this.player.takeDamage(r.meleeDamage, time)) {
           this.player.applyMeleeKnockback(r.x, r.z, 2.2 + r.meleeDamage * 0.04);
@@ -1798,6 +1829,7 @@ class Game {
             r.z,
             r.meleeDamage * 0.55,
           ));
+          return true;
         }
       }, (r, angle, damage) => this._enemyShoot(r, angle, damage), this.buildings, time);
       if (robot.emerging) {
@@ -1904,7 +1936,7 @@ class Game {
   }
 
   _spawnRaiders(time) {
-    if (time < this.nextRaiderSpawnCheck) return;
+    if (this.world.raidMap || time < this.nextRaiderSpawnCheck) return;
     this.nextRaiderSpawnCheck = time + 11;
     if (this.robots.filter((enemy) => enemy.type === 'raider' && enemy.alive
       && Math.hypot(enemy.x - this.player.x, enemy.z - this.player.z) < 100).length >= 3) return;
@@ -2246,6 +2278,22 @@ class Game {
 
   /** Door for interact — proximity on mobile; cursor hover + range on desktop. */
   _getInteractDoor() {
+    if (this.world?.raidMap) {
+      let nearest = null;
+      let nearestDistance = TILE * 1.2;
+      for (const door of this.world.mapDoors) {
+        const distance = Math.hypot(door.x - this.player.x, door.z - this.player.z);
+        if (distance > nearestDistance) continue;
+        if (!this.mobile) {
+          const screen = this._worldToScreen(door.x, door.z);
+          if (Math.abs(this.mouse.sx - screen.x) > TILE * PPU / 2
+            || Math.abs(this.mouse.sy - screen.y) > TILE * PPU / 2) continue;
+        }
+        nearest = door;
+        nearestDistance = distance;
+      }
+      return nearest;
+    }
     if (!this.buildings?.buildings?.length || !this.player) return null;
     if (this.mobile) return this.buildings.getNearbyDoor(this.player);
     const hovered = this._getHoveredDoor();
@@ -2257,10 +2305,13 @@ class Game {
     if (!this.running || this._panelOpen()) return false;
     const building = this._getInteractDoor();
     if (!building) return false;
-    if (!this.buildings.toggleDoor(building, this.player)) {
-      if (building.doorOpen) {
-        this.items.setPickupMsg('Clear the doorway first', { error: true, duration: 1.6 });
-      }
+    const occupants = [this.player, ...this.robots.filter((robot) => robot.alive)];
+    const toggled = this.world.raidMap
+      ? this.world.toggleMapDoor(building, occupants)
+      : this.buildings.toggleDoor(building, this.player, occupants);
+    if (toggled && this.world.raidMap) this.audio.doorToggle(building.doorOpen, this._soundOffset(building));
+    if (!toggled) {
+      this.items.setPickupMsg('Clear the doorway first', { error: true, duration: 1.6 });
       return false;
     }
     return true;
@@ -2859,7 +2910,6 @@ class Game {
     ctx.resetTransform();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#2a3a32';
@@ -2919,31 +2969,66 @@ class Game {
     const playerSortZ = this._playerSortZ();
     const playerX = this.player.x;
     const playerZ = this.player.z;
-    const lightView = {
-      minX: Math.floor(viewMinX / TILE) * TILE,
-      maxX: Math.ceil(viewMaxX / TILE) * TILE,
-      minZ: Math.floor(viewMinZ / TILE) * TILE,
-      maxZ: Math.ceil(viewMaxZ / TILE) * TILE,
-    };
-    const occluders = [];
-    if (DYNAMIC_SHADOWS) {
-      occluders.push(...collectWallOccluders(visibleBuildings, lightView),
-        ...collectPropOccluders(visibleBuildings, this._cachedYsortFoliage, lightView, playerX, playerZ));
-    }
-    const colliderZ = playerZ + this.player.getMoveCollider(PPU).zOff;
     const floorPixel = TILE / BUILDING_ART_PX;
-    const lightOrigin = occluders.length ? resolveWallLightOrigin(
-      Math.round(playerX / floorPixel) * floorPixel, Math.round(colliderZ / floorPixel) * floorPixel,
-      playerX, colliderZ, occluders,
-    ) : null;
-    const lightKey = occluders.length ? JSON.stringify([lightOrigin, lightView, occluders]) : null;
-    if (lightKey !== this._wallLightKey) {
-      this._wallLightKey = lightKey;
-      this._wallLightWithoutCaster = new Map();
-      this._wallLight = computeWallVisibility(lightOrigin.x, lightOrigin.z, lightView, occluders, this._wallLightWithoutCaster);
-      if (this._wallLight) {
-        this._wallShadowCanvas ??= document.createElement('canvas');
-        rasterizeWallShadow(this._wallShadowCanvas, this._wallLight, lightView, floorPixel);
+    let lightView, lightKey, shadowMask, drawShadowMask;
+    if (DYNAMIC_SHADOWS) {
+      lightView = {
+        minX: Math.floor(viewMinX / TILE) * TILE,
+        maxX: Math.ceil(viewMaxX / TILE) * TILE,
+        minZ: Math.floor(viewMinZ / TILE) * TILE,
+        maxZ: Math.ceil(viewMaxZ / TILE) * TILE,
+      };
+      const map = this.world.raidMap ? this.world : null;
+      const colliderZ = playerZ + this.player.getMoveCollider(PPU).zOff;
+      // Authored casters only change when a door toggles. Reuse the exact inputs while idle.
+      const inputKey = map && DYNAMIC_SHADOWS
+        ? [map.mapLightRevision, playerX, colliderZ, lightView.minX, lightView.maxX, lightView.minZ, lightView.maxZ].join(',')
+        : null;
+      let lighting = this._authoredLighting;
+      if (!inputKey || lighting?.world !== map || lighting.inputKey !== inputKey) {
+        const occluders = [];
+        if (DYNAMIC_SHADOWS) {
+          const walls = map ? [{ obstacles: map.mapWallObstacles,
+            doorEdgeObstacles: map.mapDoors.filter((door) => door.collision && !door.doorOpen).map((door) => door.obstacle),
+          }] : visibleBuildings;
+          const decor = map ? [{ decor: map.mapDecorCasters }] : visibleBuildings;
+          const foliage = map ? map.mapTreeCasters : this._cachedYsortFoliage;
+          occluders.push(...collectWallOccluders(walls, lightView),
+            ...collectPropOccluders(decor, foliage, lightView, playerX, playerZ));
+        }
+        const lightOrigin = occluders.length ? resolveWallLightOrigin(
+          Math.round(playerX / floorPixel) * floorPixel, Math.round(colliderZ / floorPixel) * floorPixel,
+          playerX, colliderZ, occluders,
+        ) : null;
+        const lightKey = lightOrigin ? JSON.stringify([lightOrigin, lightView, occluders]) : null;
+        lighting = { world: map, inputKey, occluders, lightOrigin, lightKey };
+        this._authoredLighting = inputKey ? lighting : null;
+      }
+      const { occluders, lightOrigin } = lighting;
+      lightKey = lighting.lightKey;
+      if (lightKey !== this._wallLightKey || this._wallLightWorld !== this.world) {
+        this._wallLightWorld = this.world;
+        this._wallLightKey = lightKey;
+        this._shadowCasters = new Map(occluders.filter((box) => box.source).map((box) => [box.source, box]));
+        this._wallLightWithoutCaster = new Map();
+        this._wallLight = lightOrigin ? computeWallVisibility(lightOrigin.x, lightOrigin.z, lightView, occluders, this._wallLightWithoutCaster) : null;
+        if (this._wallLight) {
+          this._wallShadowCanvas ??= document.createElement('canvas');
+          rasterizeWallShadow(this._wallShadowCanvas, this._wallLight, lightView, floorPixel);
+        }
+      }
+      shadowMask = this._wallLight ? this._wallShadowCanvas : null;
+      const shadowOrigin = worldToScreen(lightView.minX, lightView.minZ);
+      drawShadowMask = (context, mask = shadowMask, lift = 0) => {
+        context.imageSmoothingEnabled = false;
+        context.globalAlpha = 0.25;
+        context.drawImage(mask, shadowOrigin.x, shadowOrigin.y - lift,
+          mask.width * floorPixel * PPU, mask.height * floorPixel * PPU);
+      };
+      if (shadowMask) {
+        ctx.save();
+        drawShadowMask(ctx);
+        ctx.restore();
       }
     }
     for (const item of this.thrownItems ?? []) {
@@ -2951,19 +3036,7 @@ class Game {
       const point = worldToScreen(item.x, item.z);
       this.sprites.drawGroundItem(ctx, item.key, point.x, point.y, 18, -item.lift);
     }
-    const shadowMask = this._wallLight ? this._wallShadowCanvas : null;
-    const shadowOrigin = worldToScreen(lightView.minX, lightView.minZ);
-    const drawShadowMask = (context, mask = shadowMask) => {
-      context.imageSmoothingEnabled = false;
-      context.globalAlpha = 0.25;
-      context.drawImage(mask, shadowOrigin.x, shadowOrigin.y,
-        mask.width * floorPixel * PPU, mask.height * floorPixel * PPU);
-    };
-    if (shadowMask) {
-      ctx.save();
-      drawShadowMask(ctx);
-      ctx.restore();
-    }
+    const bakedShade = (x, z) => BAKED_SHADOWS && this.world.isInBakedShadow?.(x, z);
     const lit = (x, z) => pointInWallLight(this._wallLight, x, z);
     const lightPath = this._wallLight && makeWallLightPath(this._wallLight, worldToScreen);
     const drawList = this._drawListScratch;
@@ -2973,11 +3046,41 @@ class Game {
       return { minX: p.x - size, minY: p.y - size, maxX: p.x + size, maxY: p.y + size };
     };
     const shadowGridOrigin = worldToScreen(0, 0);
-    const drawHumanShadow = (point, bounce) => {
-      const feetY = Math.round(point.y + bounce + spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER));
-      drawPixelEllipseShadow(ctx, point.x, feetY, 10, 4, tilePx, shadowGridOrigin);
+    const characterShadows = [];
+    const addCharacterShadow = (point, nativeSize, spriteScale, rx = 10, ry = 4) => {
+      const feetY = point.y + spriteFeetOffset(nativeSize, spriteScale);
+      characterShadows.push({ x: point.x, feetY, rx, ry });
     };
     const brightParticles = [];
+    for (const prop of this.world.mapPropsInView?.(view, TILE * 4) ?? []) {
+      if (!inView(prop.x, prop.z, TILE * (prop.tree ? 4 : 2))) continue;
+      const p = worldToScreen(prop.x, prop.z);
+      const nativeScale = tilePx / 16;
+      const scale = prop.wall ? tilePx / Math.max(prop.image.width, prop.image.height) : nativeScale;
+      const width = prop.layout ? prop.layout.width * nativeScale : Math.round(prop.image.width * scale);
+      const height = prop.layout ? prop.layout.height * nativeScale : Math.round(prop.image.height * scale);
+      const left = prop.layout ? p.x - tilePx / 2 + prop.layout.x * nativeScale : p.x - width / 2;
+      const top = prop.layout ? p.y - tilePx / 2 + prop.layout.y * nativeScale : p.y + tilePx / 2 - height;
+      const z = prop.ySort === false ? -Infinity : prop.z + TILE / 2;
+      drawList.push({
+        z,
+        sortBias: SORT_WALL_FRONT + prop.plane * 0.01,
+        receivesShadow: !prop.wall,
+        shadowSource: prop,
+        bakedShade: !prop.wall && bakedShade(prop.x, prop.z + TILE / 2),
+        shadowLift: !prop.wall && (prop.obstacle || /fol+iage/i.test(prop.asset)) ? Math.round(height / 2) : 0,
+        shadowSplit: top + height / 2,
+        shadowBounds: { minX: left, minY: top, maxX: left + width, maxY: top + height },
+        draw: () => {
+          ctx.drawImage(this.sprites.getBakedShadeBitmap(ctx, prop.image), Math.round(left), Math.round(top), width, height);
+          if (prop.corner) {
+            const edge = prop.corner;
+            ctx.drawImage(edge.image, Math.round(left + edge.x * nativeScale), Math.round(top),
+              edge.width * nativeScale, edge.height * nativeScale);
+          }
+        },
+      });
+    }
     for (const building of visibleBuildings) {
       this.buildings?._ensureBuildingDecorSprites(building, this.sprites);
       for (const piece of building.decor ?? []) {
@@ -2997,26 +3100,6 @@ class Game {
     for (const f of ysortFoliage) {
       if (!inView(f.x, f.z, spritePad)) continue;
       const sortZ = f.sortZ ?? (f.z + (f.sortZBias ?? 0));
-      if (isTreeFoliage(f.kind)) {
-        this.sprites.ensureSprite(f.sprite);
-        drawList.push({
-          z: sortZ,
-          sortBias: SORT_SHADOW,
-          draw: () => {
-            const s = this._worldToScreen(f.x, f.z);
-            const size = tilePx * (f.drawSize ?? 1);
-            drawPixelEllipseShadow(
-              ctx,
-              Math.round(s.x),
-              Math.round(s.y),
-              size * 0.36,
-              size * 0.13,
-              tilePx,
-              shadowGridOrigin,
-            );
-          },
-        });
-      }
       drawList.push({
         z: sortZ,
         sortBias: SORT_WALL_BACK,
@@ -3036,8 +3119,9 @@ class Game {
               anchor: 'bottom-center',
             });
           } else {
-            const drawX = Math.round(s.x - size * 0.5);
-            const drawY = Math.round(s.y - size);
+            const pixel = tilePx / BUILDING_ART_PX;
+            const drawX = shadowGridOrigin.x + Math.round((f.x * PPU - size * 0.5) / pixel) * pixel;
+            const drawY = shadowGridOrigin.y + Math.round((f.z * PPU - size) / pixel) * pixel;
             this.sprites.drawTile(ctx, f.sprite, drawX, drawY, size, tint, f.flipX ?? false);
           }
           ctx.globalAlpha = prevAlpha;
@@ -3047,17 +3131,20 @@ class Game {
     for (const corpse of this.corpses?.corpses ?? []) {
       if (!inView(corpse.x, corpse.z, TILE * 2) || !lit(corpse.x, this.corpses.sortZ(corpse))) continue;
       const corpseScale = CORPSE_DRAW_SCALE * (getEnemyDrawScale(corpse.type) / getEnemyDrawScale('spider'));
-      const corpseSortZ = this.corpses.sortZ(corpse);
-      drawList.push({ z: corpseSortZ, sortBias: SORT_ENTITY, draw: () => {
-        const s = this._corpseScreenPos(corpse);
+      const fall = Math.min(1, Math.max(0, (performance.now() / 1000 - corpse.spawnTime) / 0.12));
+      // SpriteBank mirrors the rotation when flipX is set.
+      const angle = -Math.PI / 4 * (1 - fall * fall);
+      const s = this._corpseScreenPos(corpse);
+      characterShadows.push({ x: s.x, feetY: s.y + 3, rx: 12 * corpseScale, ry: 3 * corpseScale });
+      drawList.push({ z: -Infinity, sortBias: SORT_ENTITY, bakedShade: bakedShade(corpse.x, corpse.z), draw: () => {
         this.sprites.draw(
           ctx,
-          corpse.type === 'spider' ? 'spider' : corpseSpriteName(corpse.type),
+          corpse.type === 'spider' ? `zombie_dead${corpse.variant ?? 1}` : corpseSpriteName(corpse.type),
           s.x,
           s.y,
           corpseScale,
-          corpse.type === 'spider' ? Math.PI / 2 : 0,
-          false,
+          angle,
+          corpse.flipX ?? false,
           'center',
         );
       }});
@@ -3092,7 +3179,10 @@ class Game {
     }
     for (const chest of this.chests.chests) {
       if (!inView(chest.x, chest.z, TILE * 2)) continue;
-      drawList.push({ z: chest.z + 0.02, sortBias: SORT_ENTITY, receivesShadow: true,
+      const chestScreen = this._chestScreenPos(chest);
+      drawList.push({ z: chest.ySort === false ? -Infinity : chest.z + 0.02, sortBias: SORT_ENTITY + (chest.plane ?? 0) * 0.01, receivesShadow: true, bakedShade: bakedShade(chest.x, chest.z),
+        shadowLift: chest.spriteHeight ? Math.round(chest.spriteHeight * SPRITE_CHEST / 2) : 0,
+        shadowSplit: chestScreen.y + ((chest.spriteHeight ?? 0) / 2 - CHEST_DRAW_PIVOT.ny) * SPRITE_CHEST,
         shadowBounds: shadowBounds(chest.x, chest.z, tilePx * 2), draw: () => {
         const s = this._chestScreenPos(chest);
         this.sprites.draw(
@@ -3111,7 +3201,7 @@ class Game {
     for (const drop of this.groundDrops?.drops ?? []) {
       if (!inView(drop.x, drop.z, TILE * 2) || !lit(drop.x, drop.z)) continue;
       const bob = Math.sin(dropDrawTime * 2.4 + drop.bobPhase) * 1.1;
-      drawList.push({ z: drop.sortZ, sortBias: SORT_ENTITY, draw: () => {
+      drawList.push({ z: drop.sortZ, sortBias: SORT_ENTITY, bakedShade: bakedShade(drop.x, drop.z), draw: () => {
         const s = this._worldToScreen(drop.x, drop.z);
         drawPixelEllipseShadow(
           ctx,
@@ -3139,9 +3229,9 @@ class Game {
       if (robot.type === 'raider') {
         const z = this._feetSortZ(robot.x, robot.z, CHAR_NATIVE_PX, SPRITE_PLAYER);
         const point = this._entityToScreen(robot.x, robot.z);
-        drawList.push({ z, sortBias: SORT_SHADOW, draw: () => drawHumanShadow(point, 0) });
-        drawList.push({ z, sortBias: SORT_ENTITY, draw: () => {
-          const flip = Math.sin(robot.angle) < 0;
+        const flip = Math.sin(robot.angle) < 0;
+        addCharacterShadow(point, CHAR_NATIVE_PX, SPRITE_PLAYER);
+        drawList.push({ z, sortBias: SORT_ENTITY, bakedShade: bakedShade(robot.x, npcCollisionZ(robot)), draw: () => {
           this.sprites.draw(ctx, getPlayerSheet(robot, robot.renderMoving), point.x, point.y, SPRITE_PLAYER, 0, flip, 'center', 0,
             getPlayerAnim(robot, dropDrawTime, robot.renderMoving), true);
           const gun = WEAPONS[robot.weaponKey];
@@ -3172,43 +3262,12 @@ class Game {
       const enemyNativePx = getEnemyNativePx(robot.type);
       const enemyDrawScale = getEnemyDrawScale(robot.type);
       const robotSortZ = this._feetSortZ(robot.x, robot.z, enemyNativePx, enemyDrawScale);
-      const isSpider = robot.type === 'spider';
-      const isScout = robot.type === 'scout';
-      drawList.push({ z: robotSortZ, sortBias: SORT_SHADOW, draw: () => {
-        if (!robot.alive && !robot.emerging) return;
-        const emerge = robot.getEmergeT();
-        const shadowLift = isScout ? 4 : (isSpider ? 4 : 0);
-        const shadowRx = (isScout ? 15 : 10) * emerge;
-        const shadowRy = (isScout ? 5.5 : 4) * emerge;
-        if (shadowRx < 2 || shadowRy < 2) return;
-        const shake = robot.getEmergeShake();
-        const s = this._worldToScreen(robot.x, robot.z);
-        const bury = (1 - emerge) * 32;
-        const enemyDrawScale = getEnemyDrawScale(robot.type);
-        const scale = enemyDrawScale * (0.15 + emerge * 0.85);
-        const chargeShake = robot.jump?.charging
-          ? Math.sin(performance.now() / 1000 * 28) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
-          : 0;
-        const drawX = s.x + shake.x + chargeShake;
-        const shootPhase = robot.shoot?.phase ?? null;
-        const robotMoving = robot.renderMoving && !robot.emerging
-          && shootPhase !== 'charging' && shootPhase !== 'firing';
-        const canWalkBounce = robotMoving
-          && !robot.jump?.active && !robot.jump?.charging;
-        const walkBounce = getWalkBounceY(
-          robot.walkPhase,
-          canWalkBounce,
-          isScout ? 2.2 : 1.8,
-        );
-        const walkBouncePx = Math.round(walkBounce);
-        const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
-        const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
-        const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
-        const anchorY = s.y - bury + shake.y + emergeBob + jumpBob + chargeBob;
-        const feetY = Math.round(anchorY + spriteFeetOffset(enemyNativePx, scale) + walkBouncePx);
-        drawPixelEllipseShadow(ctx, drawX, feetY - shadowLift, shadowRx, shadowRy, tilePx, shadowGridOrigin);
-      }});
-      drawList.push({ z: robotSortZ, sortBias: SORT_ENTITY, draw: () => {
+      if (!robot.emerging) {
+        const scout = robot.type === 'scout';
+        addCharacterShadow(this._entityToScreen(robot.x, robot.z), enemyNativePx, enemyDrawScale,
+          scout ? 15 : 10, scout ? 5.5 : 4);
+      }
+      drawList.push({ z: robotSortZ, sortBias: SORT_ENTITY, bakedShade: bakedShade(robot.x, npcCollisionZ(robot)), draw: () => {
         const drawTime = performance.now() / 1000;
         const emerge = robot.getEmergeT();
         const shake = robot.getEmergeShake();
@@ -3243,7 +3302,7 @@ class Game {
           ctx.ellipse(s.x, s.y + 9, 8 + hole * 6, 3 + hole * 3, 0, 0, Math.PI * 2);
         ctx.fill();
         }
-        const bodySheet = getEnemyBodySheet(robot.type, robotMoving, shootPhase);
+        const bodySheet = robotMoving && robot.zombieRunning ? 'spider_run' : getEnemyBodySheet(robot.type, robotMoving, shootPhase);
         const bodyAnim = getEnemyBodyAnim(
           robot.type,
           robotMoving,
@@ -3277,16 +3336,39 @@ class Game {
     const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
     const idleBreath = Math.round(this._weaponBreathY ?? 0);
     const playerAnim = getPlayerAnim(this.player, drawTime);
-    drawList.push({ z: playerSortZ, sortBias: SORT_SHADOW, draw: () => {
-      const s = this._worldToScreen(this.player.x, this.player.z);
-      drawHumanShadow(s, playerBounce);
-    }});
-    drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, draw: () => {
+    addCharacterShadow(this._entityToScreen(playerX, playerZ), CHAR_NATIVE_PX, SPRITE_PLAYER);
+    const pixelScale = tilePx / 16;
+    const layer = this._characterShadowLayer ??= document.createElement('canvas');
+    // Match the rounded ground-chunk pixel grid even while the camera is moving.
+    const phase = (value) => ((Math.round(value) % pixelScale) + pixelScale) % pixelScale - pixelScale;
+    const maskX = phase(camT.x);
+    const maskY = phase(camT.y);
+    const width = Math.ceil((INTERNAL_W - maskX) / pixelScale);
+    const height = Math.ceil((INTERNAL_H - maskY) / pixelScale);
+    if (layer.width !== width) layer.width = width;
+    if (layer.height !== height) layer.height = height;
+    const mask = layer.getContext('2d');
+    mask.setTransform(1 / pixelScale, 0, 0, 1 / pixelScale, -maskX / pixelScale, -maskY / pixelScale);
+    mask.clearRect(maskX, maskY, width * pixelScale, height * pixelScale);
+    mask.imageSmoothingEnabled = false;
+    mask.globalCompositeOperation = 'source-over';
+    for (const shadow of characterShadows) {
+      drawPixelEllipseShadow(mask, shadow.x, shadow.feetY, shadow.rx, shadow.ry, tilePx, shadowGridOrigin, true);
+    }
+    mask.globalCompositeOperation = 'destination-out';
+    this.world.eraseBakedShadowOverlap?.(mask, view, (x, z) => ({ x: camT.x + x * PPU, y: camT.y + z * PPU }), pixelScale);
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.drawImage(layer, maskX, maskY, width * pixelScale, height * pixelScale);
+    ctx.restore();
+    const playerShade = bakedShade(playerX, playerZ + this.player.getMoveCollider(PPU).zOff);
+    drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, bakedShade: playerShade, draw: () => {
       const s = this._entityToScreen(this.player.x, this.player.z);
       this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim, true);
     }});
-    const gunClip = insideBuilding ? buildingGunClipBounds(insideBuilding) : null;
-    drawList.push({ z: playerSortZ + 0.02, sortBias: SORT_GUN, draw: () => {
+    const gunClip = insideBuilding ? buildingGunClipBounds(insideBuilding)
+      : this.world.getGunClipBounds?.(playerX, playerSortZ, playerSortZ + Math.cos(this.player.angle) * TILE);
+    drawList.push({ z: playerSortZ + 0.02, sortBias: SORT_GUN, bakedShade: playerShade, draw: () => {
       if (this.heldThrowable) {
         const point = this._entityToScreen(this.player.x, this.player.z);
         this.sprites.drawGroundItem(ctx, this.heldThrowable.key, point.x + Math.sin(this.player.angle) * 12, point.y + 8, 18);
@@ -3365,7 +3447,7 @@ class Game {
     drawList.sort((a, b) => (a.z - b.z) || ((a.sortBias ?? 0) - (b.sortBias ?? 0)));
     // Group consecutive props while keeping their depth relative to walls and entities.
     const sceneContext = ctx;
-    const casterBySource = shadowMask ? new Map(occluders.filter((box) => box.source).map((box) => [box.source, box])) : null;
+    const casterBySource = this._shadowCasters;
     for (let i = 0; i < drawList.length; i++) {
       const entry = drawList[i];
       if (shadowMask && entry.receivesShadow) {
@@ -3385,7 +3467,7 @@ class Game {
         }
         const first = i;
         const bounds = { ...entry.shadowBounds };
-        while (!caster && drawList[i + 1]?.receivesShadow
+        while (!caster && !entry.shadowLift && drawList[i + 1]?.receivesShadow && !drawList[i + 1].shadowLift
           && !casterBySource.has(drawList[i + 1].shadowSource)) {
           const next = drawList[++i].shadowBounds;
           bounds.minX = Math.min(bounds.minX, next.minX);
@@ -3404,12 +3486,14 @@ class Game {
         }
         if (!this._propShadowLayer) this._propShadowLayer = document.createElement('canvas');
         const layer = this._propShadowLayer;
-        if (layer.width !== this.canvas.width) layer.width = this.canvas.width;
-        if (layer.height !== this.canvas.height) layer.height = this.canvas.height;
-        ctx = layer.getContext('2d');
-        ctx.imageSmoothingEnabled = false;
         const scale = this.renderScale;
-        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        if (layer.width < width * scale) layer.width = Math.min(this.canvas.width, Math.ceil(width * scale / 64) * 64);
+        if (layer.height < height * scale) layer.height = Math.min(this.canvas.height, Math.ceil(height * scale / 64) * 64);
+        ctx = layer.getContext('2d');
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.imageSmoothingEnabled = false;
+        ctx.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
         ctx.clearRect(x, y, width, height);
         ctx.save();
         ctx.beginPath();
@@ -3417,15 +3501,35 @@ class Game {
         ctx.clip();
         for (let j = first; j <= i; j++) drawList[j].draw();
         ctx.globalCompositeOperation = 'source-atop';
+        if (entry.shadowLift) {
+          const split = Math.max(y, Math.min(y + height, Math.round(entry.shadowSplit)));
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, y, width, split - y);
+          ctx.clip();
+          drawShadowMask(ctx, mask, entry.shadowLift);
+          ctx.restore();
+          ctx.beginPath();
+          ctx.rect(x, split, width, y + height - split);
+          ctx.clip();
+        }
         drawShadowMask(ctx, mask);
         ctx.restore();
         ctx = sceneContext;
-        ctx.drawImage(layer, x * scale, y * scale, width * scale, height * scale, x, y, width, height);
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(layer, 0, 0, width * scale, height * scale, x, y, width, height);
+        ctx.restore();
       } else if (lightPath && entry.lightOnly) {
         ctx.save();
         ctx.clip(lightPath);
         entry.draw();
         ctx.restore();
+      } else if (entry.bakedShade) {
+        ctx.bakedSpriteShade = true;
+        entry.draw();
+        ctx.bakedSpriteShade = false;
       } else {
         entry.draw();
       }
@@ -3434,10 +3538,10 @@ class Game {
     this._drawPlayerCooldown(ctx, performance.now() / 1000);
 
     applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);
-    const bounds = getWorldBoundsWorld();
+    const bounds = this.world.bounds ?? getWorldBoundsWorld();
     const near = worldToScreen(bounds.minX, bounds.minZ);
     const far = worldToScreen(bounds.maxX, bounds.maxZ);
-    const fogWidth = TILE * PPU * 7;
+    const fogWidth = TILE * PPU * MAP_FOG_TILES;
     for (const [edge, direction, limit, horizontal] of [
       [near.x, 1, INTERNAL_W, true], [far.x, -1, INTERNAL_W, true],
       [near.y, 1, INTERNAL_H, false], [far.y, -1, INTERNAL_H, false],
@@ -3792,12 +3896,30 @@ class Game {
       document.getElementById('raid-performance').textContent =
         `${Math.round(1000 * perf.frames / perf.total)} FPS · max ${perf.peak.toFixed(0)} ms\n`
         + `CPU ${(renderStart - updateStart).toFixed(1)} + draw ${renderMs.toFixed(1)} ms\n`
-        + `NPC max ${perf.npcPeak.toFixed(1)} ms · shadows ${DYNAMIC_SHADOWS ? 'on' : 'off'}`;
+        + `NPC max ${perf.npcPeak.toFixed(1)} ms · shadows ${DYNAMIC_SHADOWS ? 'dynamic' : BAKED_SHADOWS && this.world.raidMap ? 'baked' : 'contact'}`;
       Object.assign(perf, { frames: 0, total: 0, peak: 0, npcPeak: 0, updated: now });
     }
     this._scheduleFrame();
   }
 }
+
+const raidMapSelect = document.getElementById('raid-map-select');
+const raidMapStatus = document.getElementById('raid-map-status');
+raidMapSelect.disabled = true;
+fetch('./maps/catalog.json', { cache: 'no-store' })
+  .then((response) => {
+    if (!response.ok) throw new Error('Map list unavailable.');
+    return response.json();
+  })
+  .then((maps) => {
+    for (const name of maps) {
+      const title = name.replace(/\.json$/i, '').replace(/[-_]+/g, ' ');
+      raidMapSelect.append(new Option(title.charAt(0).toUpperCase() + title.slice(1), name));
+    }
+    if (maps.length) raidMapSelect.value = maps[0];
+  })
+  .catch(() => { raidMapStatus.textContent = 'Map list unavailable. Procedural map is available.'; })
+  .finally(() => { raidMapSelect.disabled = false; });
 
 try {
   window.game = new Game();

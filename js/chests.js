@@ -153,7 +153,7 @@ export class ChestManager {
   }
 
   /** Restore chest loot/state when loading a save. */
-  restoreInBuilding(saved, building) {
+  restoreInBuilding(saved, building, { collision = true, ySort, plane, spriteWidth, spriteHeight } = {}) {
     const chest = {
       x: saved.x,
       z: saved.z,
@@ -164,12 +164,16 @@ export class ChestManager {
       homeCz: building.homeCz,
       homeBuilding: building,
       obstacle: null,
+      ySort,
+      spriteWidth,
+      spriteHeight,
+      plane,
     };
     if (!building.chests) building.chests = [];
     if (!building.chestTiles) building.chestTiles = [];
     building.chests.push(chest);
     building.chest = building.chests[0];
-    this._registerObstacle(chest);
+    if (collision) this._registerObstacle(chest);
     this.chests.push(chest);
     return chest;
   }
@@ -196,14 +200,15 @@ export class ChestManager {
   }
 
   _registerObstacle(chest) {
-    const width = chest.variant === 'chest_metal' ? 14 : 12;
+    const width = chest.spriteWidth ?? (chest.variant === 'chest_metal' ? 14 : 12);
     const halfW = Math.round(width * CHEST_DRAW_SCALE) / CHEST_GAME_PPU / 2;
-    const halfH = Math.round(13 * CHEST_DRAW_SCALE) / CHEST_GAME_PPU / 2;
+    const fullHeight = Math.round((chest.spriteHeight ?? 13) * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
+    const halfH = fullHeight / (chest.spriteHeight ? 4 : 2);
     const pivot = Math.round(8 * CHEST_DRAW_SCALE) / CHEST_GAME_PPU;
     chest.obstacle = {
       kind: 'aabb',
       x: chest.x + halfW - pivot,
-      z: chest.z + halfH - pivot,
+      z: chest.z + fullHeight - halfH - pivot,
       halfW,
       halfH,
       blocksBullets: false,

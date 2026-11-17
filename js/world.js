@@ -60,7 +60,7 @@ function segmentHitsBox(x, z, dx, dz, cx, cz, halfW, halfH) {
     <= Math.min(1, Math.max(tx0, tx1), Math.max(tz0, tz1));
 }
 
-const BAKE_VERSION = 101;
+const BAKE_VERSION = 102;
 const MAX_CACHED_CHUNKS = 256;
 const MAX_GROUND_OVERLAYS = 32;
 
@@ -738,8 +738,8 @@ export class World {
     for (const f of chunk.foliage) {
       if (isYsortFoliage(f.kind)) continue;
       const fTint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
-      const fx = Math.round(f.x * ppu) - originPxX - half;
-      const fz = Math.round(f.z * ppu) - originPxZ - half;
+      const fx = Math.round((f.x * ppu - half) / (tilePx / 16)) * (tilePx / 16) - originPxX;
+      const fz = Math.round((f.z * ppu - half) / (tilePx / 16)) * (tilePx / 16) - originPxZ;
       sprites.stampTile(ctx, f.sprite, fx, fz, px, fTint);
     }
 
@@ -862,8 +862,8 @@ export class World {
     for (const f of chunk.foliage) {
       if (isYsortFoliage(f.kind)) continue;
       const tint = isTintedFoliage(f.kind) && f.tintKey ? unpackTintGradient(f.tintKey) : null;
-      const x = Math.round(f.x * ppu - tilePx * 0.5);
-      const z = Math.round(f.z * ppu - tilePx * 0.5);
+      const x = Math.round((f.x * ppu - tilePx * 0.5) / (tilePx / 16)) * (tilePx / 16);
+      const z = Math.round((f.z * ppu - tilePx * 0.5) / (tilePx / 16)) * (tilePx / 16);
       sprites.stampTile(ctx, f.sprite, x, z, tilePx, tint);
     }
   }

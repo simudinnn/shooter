@@ -4049,3 +4049,18 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
+#raid-base .raid-map-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#overlay #raid-base .raid-map-controls .ui-slice-button {
+  padding: 8px 12px;
+}
+#raid-base #raid-map-status {
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}

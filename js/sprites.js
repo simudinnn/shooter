@@ -114,6 +114,10 @@ const BUILDING_ASSET_PATHS = Object.fromEntries([
 const CORE_ASSETS = {
   spider: 'assets/enemies/zombie.png',
   spider_walk: 'assets/enemies/zombie_walk.png',
+  spider_run: 'assets/enemies/zombie_run.png',
+  zombie_dead1: 'assets/enemies/zombie_dead1.png',
+  zombie_dead2: 'assets/enemies/zombie_dead2.png',
+  zombie_dead3: 'assets/enemies/zombie_dead3.png',
   scout: 'assets/enemies/scout.png',
   scout_walk: 'assets/enemies/scout_walk.png',
   scout_charge: 'assets/enemies/charge.png',
@@ -165,6 +169,7 @@ export const SPRITE_ANIM = {
     player_walk: { fps: 10, loop: true },
     player_run: { fps: 14, loop: true },
     spider_walk: { fps: 10, loop: true },
+    spider_run: { fps: 12, loop: true },
     scout_walk: { fps: 6, loop: true, frameW: 32, frameH: 32 },
     scout_charge: { fps: 10, loop: false, frameW: 32, frameH: 32 },
     glock_reload: { fps: 10, loop: false, frameW: 24, frameH: 24 },
@@ -1345,6 +1350,24 @@ export class SpriteBank {
     });
   }
 
+  getBakedShadeBitmap(ctx, image) {
+    if (!ctx.bakedSpriteShade) return image;
+    const cache = this._bakedShadeBitmaps ??= new WeakMap();
+    let shaded = cache.get(image);
+    if (!shaded) {
+      shaded = document.createElement('canvas');
+      shaded.width = image.width;
+      shaded.height = image.height;
+      const g = shaded.getContext('2d');
+      g.drawImage(image, 0, 0);
+      g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = 'rgba(0, 0, 0, 0.23)';
+      g.fillRect(0, 0, shaded.width, shaded.height);
+      cache.set(image, shaded);
+    }
+    return shaded;
+  }
+
   draw(ctx, name, sx, sy, scale = 2, angle = 0, flipX = false, pivot = 'center', chopTilt = 0, anim = null, subpixel = false) {
     const img = this.images[name] ?? this._getImage(name);
     if (!img) return;
@@ -1384,7 +1407,7 @@ export class SpriteBank {
     if (flipX) ctx.scale(-1, 1);
     if (angle) ctx.rotate(angle);
     if (chopTilt) ctx.rotate(chopTilt);
-    ctx.drawImage(img, srcX, srcY, fw, fh, -ox, -oy, dw, dh);
+    ctx.drawImage(this.getBakedShadeBitmap(ctx, img), srcX, srcY, fw, fh, -ox, -oy, dw, dh);
     ctx.restore();
   }
 
@@ -1425,7 +1448,7 @@ export class SpriteBank {
     const drawX = Math.round(sx - dw * 0.5);
     const drawY = Math.round(sy - dh + bobY);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(bitmap, drawX, drawY, dw * bitmap.width / resPx, dh * bitmap.height / resPx);
+    ctx.drawImage(this.getBakedShadeBitmap(ctx, bitmap), drawX, drawY, dw * bitmap.width / resPx, dh * bitmap.height / resPx);
   }
 
   drawGroundItemLabel(ctx, label, sx, sy, bobY = 0, itemDisplayPx = 20) {

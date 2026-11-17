@@ -71,8 +71,8 @@ const SHADOW_STAMP_MAX = 48;
 const SHADOW_BANDS = 4;
 const SHADOW_BAND_ALPHA = [108, 82, 58, 36];
 
-function _getShadowStamp(rx, ry) {
-  const key = `${rx},${ry}`;
+function _getShadowStamp(rx, ry, solid) {
+  const key = `${rx},${ry},${solid}`;
   const hit = _shadowStampCache.get(key);
   if (hit) return hit;
 
@@ -95,7 +95,7 @@ function _getShadowStamp(rx, ry) {
       if (dist2 < 1) {
         const t = Math.sqrt(dist2);
         const band = Math.min(SHADOW_BANDS - 1, Math.floor(t * SHADOW_BANDS));
-        a = SHADOW_BAND_ALPHA[band] ?? 0;
+        a = solid ? 255 : (SHADOW_BAND_ALPHA[band] ?? 0);
       }
       const i = (y * w + x) * 4;
       px[i + 3] = a;
@@ -114,13 +114,13 @@ function _getShadowStamp(rx, ry) {
 }
 
 /** Soft ellipse shadow drawn on the tile pixel grid — crisp pixels, no vector blur. */
-export function drawPixelEllipseShadow(ctx, cx, cy, rx, ry, tilePx, gridOrigin = { x: 0, y: 0 }) {
+export function drawPixelEllipseShadow(ctx, cx, cy, rx, ry, tilePx, gridOrigin = { x: 0, y: 0 }, solid = false) {
   const step = Math.max(1, tilePx >> 4);
   const srx = Math.max(step * 3, Math.round(rx / step) * step);
   const sry = Math.max(step * 2, Math.round(ry / step) * step);
   const sx = gridOrigin.x + snapScreenAxis(cx - gridOrigin.x, tilePx);
   const sy = gridOrigin.y + snapScreenAxis(cy - gridOrigin.y, tilePx);
-  const stamp = _getShadowStamp(srx / step, sry / step);
+  const stamp = _getShadowStamp(srx / step, sry / step, solid);
   const prev = ctx.imageSmoothingEnabled;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(stamp, sx - srx, sy - sry, srx * 2, sry * 2);

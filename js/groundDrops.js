@@ -84,8 +84,10 @@ export class GroundDropManager {
       preserve,
     };
     this.drops.push(drop);
-    const expendable = this.drops.filter((entry) => !entry.preserve);
-    if (expendable.length > GROUND_DROP_MAX) this.remove(expendable[0]);
+    if (!preserve) {
+      const expendable = this.drops.filter((entry) => !entry.preserve);
+      if (expendable.length > GROUND_DROP_MAX) this.remove(expendable[0]);
+    }
     return drop;
   }
 

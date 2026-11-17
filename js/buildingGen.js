@@ -800,6 +800,19 @@ export function playerOccupiesDoorCloseBlock(building, player) {
   return playerHitsClosedDoorObstacles(building, player);
 }
 
+export function moveColliderOverlapsRect(entity, rect) {
+  const shape = entity.getMoveCollider?.();
+  const x = entity.x;
+  const z = entity.z + (shape?.zOff ?? 0);
+  if (shape?.kind === 'aabb') {
+    return aabbOverlap2D({ minX: x - shape.halfW, maxX: x + shape.halfW,
+      minZ: z - shape.halfH, maxZ: z + shape.halfH }, rect);
+  }
+  const nearestX = Math.max(rect.minX, Math.min(rect.maxX, x));
+  const nearestZ = Math.max(rect.minZ, Math.min(rect.maxZ, z));
+  return Math.hypot(x - nearestX, z - nearestZ) < (shape?.radius ?? entity.radius ?? 0);
+}
+
 function aabbOverlap2D(a, b) {
   return a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
 }

@@ -50,7 +50,8 @@ import {
   buildDoorTileEdgeObstacles,
   getDoorWorldPos,
   isNearDoor,
-  wouldClosingDoorTrapPlayer,
+  getDoorTileFootStrip,
+  moveColliderOverlapsRect,
   DOOR_INTERACT_DIST,
   wallSpriteId,
 } from './buildingGen.js';
@@ -644,10 +645,11 @@ export class BuildingManager {
     return isNearDoor(building, player.x, player.z, maxDist);
   }
 
-  toggleDoor(building, player = null) {
+  toggleDoor(building, player = null, occupants = player ? [player] : []) {
     if (!building) return false;
     if (!player && !building.doorOpen && performance.now() < (building.manualCloseUntil ?? 0)) return false;
-    if (building.doorOpen && player && wouldClosingDoorTrapPlayer(building, player)) {
+    const mat = getDoorTileFootStrip(building);
+    if (occupants.some((entity) => moveColliderOverlapsRect(entity, mat))) {
       return false;
     }
     building.doorOpen = !building.doorOpen;
