@@ -58,6 +58,7 @@ const RARITY_WEIGHT = {
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
+  { key: 'jewlery', rarity: 'rare', min: 1, max: 1 },
   {
     "key": "blueprint",
     "rarity": "epic",

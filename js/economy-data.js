@@ -613,6 +613,7 @@ export default {
       "rifle_box": 35,
       "shotgun_box": 30,
       "sniper_box": 45,
+      "jewlery": 120,
       "cash": 1
     },
     "equipment": {

@@ -19,6 +19,7 @@ export const MATERIAL_KEYS = [
   "rifle_box",
   "shotgun_box",
   "sniper_box",
+  "jewlery",
   "cash"
 ];
 
@@ -32,6 +33,7 @@ const DISPLAY_NAMES = {
   shotgun_box: 'Shotgun Ammo Box',
   sniper_box: 'Sniper Ammo Box',
   cash: 'Cash',
+  jewlery: 'Jewelry',
   adhesive: 'Adhesive',
   battery: 'Battery',
   blueprint: 'Blueprint',
