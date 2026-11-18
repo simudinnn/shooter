@@ -14,7 +14,7 @@ const CATALOG_CATEGORIES = [
   ['Weapons', ['weapon', 'melee', 'throwable']],
   ['Ammo', ['ammo']],
   ['Consumables', ['consumable', 'bandage']],
-  ['Materials', ['material']],
+  ['Supplies & valuables', ['material']],
 ];
 
 function catalogCategory(item) {
@@ -28,16 +28,6 @@ export function getSellPrice(item) {
 }
 const XP_PER_LEVEL = 100;
 const XP_LEVEL_INCREMENT = 25;
-const EQUIPMENT_REPAIR_MATERIALS = {
-  backpack_1: { cloth: 2 },
-  backpack2: { fabric: 2 },
-  backpack3: { fabric: 2, rubber: 1 },
-  tool_belt: { cloth: 2 },
-  vest: { cloth: 2 },
-  hunting_vest: { fabric: 2 },
-  police_vest: { fabric: 2, metal: 1 },
-  military_vest: { fabric: 2, metal: 2 },
-};
 const levelCost = (level) => XP_PER_LEVEL + (level - 1) * XP_LEVEL_INCREMENT;
 const levelStart = (level) => (level - 1) * (XP_PER_LEVEL + (level - 2) * XP_LEVEL_INCREMENT / 2);
 
@@ -134,7 +124,7 @@ const CHALLENGES = [
   { id: 'first_extract', title: 'First Return', description: 'Complete one successful extraction.', metric: 'extractions', goal: 1, xp: 100 },
   { id: 'robot_hunter', title: 'Zombie Hunter', description: 'Extract after killing five zombies across raids.', metric: 'extractedKills', goal: 5,
     xp: 150, item: { kind: 'equipment', key: 'vest' } },
-  { id: 'workshop', title: 'Field Technician', description: 'Craft three items at the base station.', metric: 'crafts', goal: 3,
+  { id: 'workshop', title: 'Return Trip', description: 'Complete three extractions.', metric: 'extractions', goal: 3,
     xp: 100, item: { kind: 'material', key: 'mechanical_comp', amount: 3 } },
   { id: 'extract_5', title: 'Reliable Runner', description: 'Complete five successful extractions.', metric: 'extractions', goal: 5,
     xp: 200, item: { kind: 'equipment', key: 'backpack_1' } },
@@ -144,10 +134,10 @@ const ROTATION_MS = 3 * 60 * 60 * 1000;
 const ROTATING_CHALLENGES = [
   { title: 'Quick Extraction', metric: 'extractions', goal: 1, xp: 80 },
   { title: 'Zombie Sweep', metric: 'extractedKills', goal: 3, xp: 120 },
-  { title: 'Workshop Shift', metric: 'crafts', goal: 2, xp: 90 },
+  { title: 'Return Trip', metric: 'extractions', goal: 2, xp: 90 },
   { title: 'Double Return', metric: 'extractions', goal: 2, xp: 140 },
   { title: 'Heavy Patrol', metric: 'extractedKills', goal: 6, xp: 180 },
-  { title: 'Supply Run', metric: 'crafts', goal: 4, xp: 150 },
+  { title: 'Supply Run', metric: 'extractions', goal: 4, xp: 150 },
 ];
 
 export function refreshChallengeRotation(profile, now = Date.now()) {
@@ -799,6 +789,18 @@ export class RaidBase {
         const description = document.createElement('p');
         description.textContent = getItemDescription(item);
         detail.append(description);
+        if (item.kind === 'material' && item.key.endsWith('_box')) {
+          actions.push(['Open', () => this.transact((next, player) => {
+            const current = next.stash[i];
+            if (!current || current.key !== item.key) return 'Item is no longer available.';
+            const ammoType = current.key.replace('_box', '');
+            const amount = { pistol: 48, rifle: 60, shotgun: 24, sniper: 20 }[ammoType];
+            if (!amount) return 'Unknown ammunition box.';
+            if ((current.amount ?? 1) > 1) next.stash[i] = { ...current, amount: current.amount - 1 };
+            else next.stash[i] = null;
+            if (!storeInStash(next, player, [{ kind: 'ammo', ammoType, amount }])) return 'Stash is full.';
+          })]);
+        }
         this.addRepairAction(item, actions, (next) => next.stash[i]);
         this.addRecycleAction(item, actions, (next, player, quantity) => recycleAtBase(next, player, i, quantity));
         this.addSplitAction(item, actions, (next, amount) => {
@@ -871,8 +873,8 @@ export class RaidBase {
     const equipment = item.kind === 'equipment';
     if (!equipment && item.kind !== 'weapon' && item.kind !== 'melee') return;
     const costs = equipment
-      ? { sewing_kit: 1, ...(EQUIPMENT_REPAIR_MATERIALS[item.key] ?? { cloth: 2 }) }
-      : { repair_kit: 1, metal: 2, ...(item.kind === 'weapon' ? { gun_parts: 1 } : { wood: 1 }) };
+      ? { sewing_kit: 1 }
+      : { repair_kit: 1 };
     actions.push(['Repair', () => this.openQuantityDialog('Repair', item, 1, (next, player) => {
       const current = getItem(next, player);
       if (!current || itemDurability(current) >= MAX_DURABILITY) return 'Item does not need repair.';

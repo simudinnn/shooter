@@ -136,36 +136,12 @@ export function craftRecipe(player, recipe) {
 
 export const recycleBatchSize = (item) => item?.kind === 'ammo' ? economy.economy.ammoRecycleBatch : 1;
 
-export function getRecycleYields(item, count = 1, level = Infinity) {
-  if (!item) return null;
-  const id = item.kind + '.' + (item.key ?? item.ammoType);
-  if (level < (economy.recycleLevels[id] ?? economy.recycleLevels[item.kind] ?? 1)) return null;
-  const scale = item.kind === 'ammo' ? Math.floor(count / recycleBatchSize(item)) : Math.max(1, Math.floor(count));
-  if (!scale) return [];
-  const custom = RECYCLE_TABLE.items[id];
-  if (custom) return custom.map(({ key, amount }) => ({ key, amount: amount * scale }));
-  if (item.kind === 'weapon') return RECYCLE_TABLE.weapon;
-  if (item.kind === 'melee') return RECYCLE_TABLE.melee;
-  if (item.kind === 'bandage' || item.kind === 'ammo' || (item.kind === 'consumable' && item.key === 'bandage')) {
-    const table = item.kind === 'ammo' ? RECYCLE_TABLE.ammo : RECYCLE_TABLE.bandage;
-    return table.map((entry) => ({
-      key: entry.key,
-      amount: entry.amount * scale,
-    }));
-  }
-  if (item.kind === 'material') {
-    const table = RECYCLE_TABLE.material[item.key];
-    if (!table) return null;
-    return table.map((entry) => ({
-      key: entry.key,
-      amount: entry.amount * scale,
-    }));
-  }
-  return null;
+export function getRecycleYields() {
+  return [];
 }
 
 export function canRecycleItem(item, level = Infinity) {
-  return Boolean(getRecycleYields(item, item?.amount ?? 1, level)?.length);
+  return false;
 }
 
 export function applyRecycleYields(player, yields) {

@@ -4066,3 +4066,6 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 }
 /* Preserve source pixels in the high-resolution framebuffer. */
 #game-canvas { image-rendering: pixelated; }
+
+/* Crafting has been retired from the raid economy. */
+#craft-panel, #inv-craft-toggle { display: none !important; }

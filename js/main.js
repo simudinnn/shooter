@@ -2138,7 +2138,7 @@ class Game {
           }] : []),
           ...(robot.bandages > 0 ? [{ kind: 'consumable', key: 'bandage', amount: robot.bandages }] : []),
           weapon ? { kind: 'ammo', ammoType: getWeaponAmmoType(robot.weaponKey), amount: weapon.magSize }
-            : { kind: 'material', key: 'mechanical_comp', amount: 2 },
+            : { kind: 'material', key: 'cash', amount: 15 },
         ];
         for (const item of loot) this.groundDrops.dropAt(robot.x, robot.z, item, null, { preserve: true });
         const index = this.robots.indexOf(robot);

@@ -9,6 +9,7 @@ import {
   normalizeAmmoItem,
 } from './ammo.js';
 import {
+  MATERIAL_KEYS,
   getMaterialDisplayName,
   materialSpritePath,
   normalizeMaterialItem,
@@ -40,12 +41,9 @@ export const CHEST_ROWS = 2;
 export const CHEST_VARIANTS = ['chest_wood', 'chest_metal', 'chest_rust', 'chest_moss'];
 
 /** Crafting materials that chests can roll. */
-export const CHEST_MATERIAL_KEYS = [
-  'adhesive', 'chemicals', 'cloth', 'fabric', 'fuel', 'glass',
-  'nails', 'plank', 'plastic', 'rope', 'rubber', 'tape', 'wood',
-];
+export const CHEST_MATERIAL_KEYS = MATERIAL_KEYS.filter((key) => !key.endsWith('_kit'));
 
-export const CHEST_KIT_KEYS = ['repair_kit', 'sewing_kit', 'splint_kit', 'upgrade_kit'];
+export const CHEST_KIT_KEYS = ['repair_kit', 'sewing_kit', 'upgrade_kit'];
 
 const CHEST_LOOT_KEYS = [...CHEST_MATERIAL_KEYS, ...CHEST_KIT_KEYS];
 
@@ -60,33 +58,120 @@ const RARITY_WEIGHT = {
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
-  { key: 'metal', rarity: 'common', min: 1, max: 2 },
-  { key: 'plastic', rarity: 'common', min: 1, max: 2 },
-  { key: 'fabric', rarity: 'common', min: 1, max: 2 },
-  { key: 'glass', rarity: 'common', min: 1, max: 2 },
-  { key: 'nails', rarity: 'common', min: 1, max: 2 },
-  { key: 'wires', rarity: 'common', min: 1, max: 2 },
-  { key: 'chemicals', rarity: 'common', min: 1, max: 2 },
-  { key: 'cloth', rarity: 'common', min: 1, max: 1 },
-  { key: 'wood', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'adhesive', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'plank', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'rope', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'rubber', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'tape', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'electrical_comp', rarity: 'uncommon', min: 1, max: 1 },
-  { key: 'spring', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'battery', rarity: 'uncommon', min: 1, max: 2 },
-  { key: 'fuel', rarity: 'rare', min: 1, max: 1 },
-  { key: 'copper_coil', rarity: 'rare', min: 1, max: 1 },
-  { key: 'mechanical_comp', rarity: 'rare', min: 1, max: 1 },
-  { key: 'microchip', rarity: 'rare', min: 1, max: 2 },
-  { key: 'electrical_trans', rarity: 'rare', min: 1, max: 1 },
-  { key: 'repair_kit', rarity: 'epic', min: 1, max: 1 },
-  { key: 'sewing_kit', rarity: 'epic', min: 1, max: 1 },
-  { key: 'splint_kit', rarity: 'epic', min: 1, max: 1 },
-  { key: 'upgrade_kit', rarity: 'epic', min: 1, max: 1 },
-  { key: 'military_comp', rarity: 'epic', min: 1, max: 1 },
+  {
+    "key": "blueprint",
+    "rarity": "epic",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "blueprint_old",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "fuel",
+    "rarity": "uncommon",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "military_comp",
+    "rarity": "epic",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "electrical_trans",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "electrical_comp",
+    "rarity": "uncommon",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "repair_kit",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "sewing_kit",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "splint_kit",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "upgrade_kit",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "equipment_pack",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "military_pack",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "archive_pack",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "industrial_pack",
+    "rarity": "rare",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "pistol_box",
+    "rarity": "uncommon",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "rifle_box",
+    "rarity": "uncommon",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "shotgun_box",
+    "rarity": "uncommon",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "sniper_box",
+    "rarity": "uncommon",
+    "min": 1,
+    "max": 1
+  },
+  {
+    "key": "cash",
+    "rarity": "common",
+    "min": 1,
+    "max": 40
+  }
 ];
 
 const LOOT_ENTRY_BY_KEY = Object.fromEntries(LOOT_ENTRIES.map((e) => [e.key, e]));
@@ -118,7 +203,9 @@ function rollChestAmmoItem() {
 }
 
 function rollChestBandageItem() {
-  return { kind: 'consumable', key: 'bandage', amount: 1 + Math.floor(Math.random() * 2) };
+  const pool = ['bandage', 'bandage', 'apple', 'apple', 'medkit', 'vaccine'];
+  const key = pool[Math.floor(Math.random() * pool.length)];
+  return { kind: 'consumable', key, amount: key === 'bandage' ? 1 + Math.floor(Math.random() * 2) : 1 };
 }
 
 function rollChestMeleeItem() {
@@ -191,6 +278,7 @@ export function rollChestLootSlot() {
  */
 export function rollWeightedLootSlot(allowedKeys) {
   const pool = allowedKeys
+    .filter((key) => MATERIAL_KEYS.includes(key))
     .map((key) => LOOT_ENTRY_BY_KEY[key])
     .filter(Boolean);
   if (!pool.length) return null;
@@ -304,7 +392,13 @@ export function getItemDescription(item) {
     return getThrowableDescription(normalized.key);
   }
   if (item.kind === 'material') {
-    return 'Crafting material.';
+    if (item.key.endsWith('_pack')) return 'Sealed loot pack. Sell in the safe zone.';
+    if (item.key.endsWith('_box')) return 'Sealed ammunition box. Open for ammunition.';
+    if (item.key === 'blueprint') return 'Blueprint for a permanent shop unlock.';
+    if (item.key === 'blueprint_old') return 'Already studied blueprint. Valuable to traders.';
+    if (item.key.endsWith('_kit')) return 'Repair kit. No additional materials required.';
+    if (item.key === 'fuel') return 'Fuel for machinery. Can also be sold.';
+    return 'Valuable. Sell in the safe zone.';
   }
   if (item.kind === 'throwable') {
     return 'Throwable item.';

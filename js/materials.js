@@ -2,20 +2,40 @@ import { customItems } from './customContent.js';
 export const MATERIAL_STACK_MAX = 50;
 
 export const MATERIAL_KEYS = [
-  'adhesive', 'battery', 'blueprint', 'blueprint_old', 'chemicals', 'cloth',
-  'copper_coil', 'electrical_comp', 'electrical_trans', 'fabric', 'fuel', 'glass',
-  'glass_bottle', 'gun_parts', 'mechanical_comp', 'metal', 'metal_pipe', 'metal_sheet',
-  'microchip', 'military_comp', 'nails', 'plank', 'plastic', 'repair_kit', 'rope',
-  'rubber', 'sewing_kit', 'splint_kit', 'spring', 'stick', 'tape', 'upgrade_kit',
-  'wires', 'wood',
-  ...Object.keys(customItems),
+  "blueprint",
+  "blueprint_old",
+  "fuel",
+  "military_comp",
+  "electrical_trans",
+  "electrical_comp",
+  "repair_kit",
+  "sewing_kit",
+  "upgrade_kit",
+  "equipment_pack",
+  "military_pack",
+  "archive_pack",
+  "industrial_pack",
+  "pistol_box",
+  "rifle_box",
+  "shotgun_box",
+  "sniper_box",
+  "cash"
 ];
 
 const DISPLAY_NAMES = {
+  equipment_pack: 'Equipment Pack',
+  military_pack: 'Military Pack',
+  archive_pack: 'Archive Pack',
+  industrial_pack: 'Industrial Pack',
+  pistol_box: 'Pistol Ammo Box',
+  rifle_box: 'Rifle Ammo Box',
+  shotgun_box: 'Shotgun Ammo Box',
+  sniper_box: 'Sniper Ammo Box',
+  cash: 'Cash',
   adhesive: 'Adhesive',
   battery: 'Battery',
   blueprint: 'Blueprint',
-  blueprint_old: 'Old Blueprint',
+  blueprint_old: 'Studied Blueprint',
   chemicals: 'Chemicals',
   cloth: 'Cloth',
   copper_coil: 'Copper Coil',
@@ -49,6 +69,8 @@ const DISPLAY_NAMES = {
 };
 
 export function materialSpritePath(key) {
+  if (key === 'cash') return 'assets/items/misc/cash.png';
+  if (key.endsWith('_box')) return 'assets/items/weapons/' + key + '.png';
   return customItems[key]?.icon ?? `assets/items/materials/${key}.png`;
 }
 

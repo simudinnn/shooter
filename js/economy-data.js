@@ -46,33 +46,6 @@ export default {
       }
     },
     {
-      "level": 2,
-      "price": 25,
-      "item": {
-        "kind": "material",
-        "key": "cloth",
-        "amount": 5
-      }
-    },
-    {
-      "level": 3,
-      "price": 30,
-      "item": {
-        "kind": "material",
-        "key": "metal",
-        "amount": 5
-      }
-    },
-    {
-      "level": 5,
-      "price": 38,
-      "item": {
-        "kind": "material",
-        "key": "chemicals",
-        "amount": 4
-      }
-    },
-    {
       "level": 8,
       "price": 48,
       "item": {
@@ -242,370 +215,45 @@ export default {
       },
       "price": 420,
       "level": 21
-    }
-  ],
-  "crafting": [
-    {
-      "id": "plank",
-      "output": {
-        "kind": "material",
-        "key": "plank",
-        "amount": 1
-      },
-      "costs": {
-        "wood": 3
-      },
-      "level": 1
     },
     {
-      "id": "metal_sheet",
-      "output": {
-        "kind": "material",
-        "key": "metal_sheet",
-        "amount": 1
-      },
-      "costs": {
-        "metal": 3
-      },
-      "level": 1
-    },
-    {
-      "id": "metal_pipe",
-      "output": {
-        "kind": "material",
-        "key": "metal_pipe",
-        "amount": 1
-      },
-      "costs": {
-        "metal": 3,
-        "tape": 1
-      },
-      "level": 1
-    },
-    {
-      "id": "copper_coil",
-      "output": {
-        "kind": "material",
-        "key": "copper_coil",
-        "amount": 1
-      },
-      "costs": {
-        "wires": 3,
-        "tape": 1
-      },
-      "level": 4
-    },
-    {
-      "id": "glass_bottle",
-      "output": {
-        "kind": "material",
-        "key": "glass_bottle",
-        "amount": 1
-      },
-      "costs": {
-        "glass": 3
-      },
-      "level": 1
-    },
-    {
-      "id": "adhesive",
-      "output": {
-        "kind": "material",
-        "key": "adhesive",
-        "amount": 1
-      },
-      "costs": {
-        "chemicals": 2,
-        "rubber": 1
-      },
-      "level": 1
-    },
-    {
-      "id": "bandage",
-      "output": {
+      "level": 1,
+      "price": 12,
+      "item": {
         "kind": "consumable",
-        "key": "bandage",
+        "key": "apple",
+        "amount": 2
+      }
+    },
+    {
+      "level": 1,
+      "price": 65,
+      "item": {
+        "kind": "consumable",
+        "key": "medkit",
         "amount": 1
-      },
-      "costs": {
-        "cloth": 2,
-        "adhesive": 1
-      },
-      "level": 1
+      }
     },
     {
-      "id": "pistol_ammo",
-      "output": {
-        "kind": "ammo",
-        "ammoType": "pistol",
-        "amount": 12
-      },
-      "costs": {
-        "metal": 2,
-        "chemicals": 1
-      },
-      "level": 1
-    },
-    {
-      "id": "shotgun_ammo",
-      "output": {
-        "kind": "ammo",
-        "ammoType": "shotgun",
-        "amount": 6
-      },
-      "costs": {
-        "metal": 2,
-        "chemicals": 1,
-        "plastic": 1
-      },
-      "level": 1
-    },
-    {
-      "id": "rifle_ammo",
-      "output": {
-        "kind": "ammo",
-        "ammoType": "rifle",
-        "amount": 15
-      },
-      "costs": {
-        "metal": 3,
-        "chemicals": 2
-      },
-      "level": 4
-    },
-    {
-      "id": "sniper_ammo",
-      "output": {
-        "kind": "ammo",
-        "ammoType": "sniper",
-        "amount": 6
-      },
-      "costs": {
-        "metal": 3,
-        "chemicals": 2,
-        "plastic": 2
-      },
-      "level": 8
-    },
-    {
-      "id": "spring",
-      "output": {
-        "kind": "material",
-        "key": "spring",
+      "level": 1,
+      "price": 55,
+      "item": {
+        "kind": "consumable",
+        "key": "vaccine",
         "amount": 1
-      },
-      "costs": {
-        "metal": 3
-      },
-      "level": 1
+      }
     },
     {
-      "id": "mechanical_comp",
-      "output": {
-        "kind": "material",
-        "key": "mechanical_comp",
-        "amount": 1
-      },
-      "costs": {
-        "metal": 3,
-        "spring": 2
-      },
-      "level": 3
-    },
-    {
-      "id": "electrical_comp",
-      "output": {
-        "kind": "material",
-        "key": "electrical_comp",
-        "amount": 1
-      },
-      "costs": {
-        "plastic": 3,
-        "microchip": 3
-      },
-      "level": 5
-    },
-    {
-      "id": "repair_kit",
-      "output": {
-        "kind": "material",
-        "key": "repair_kit",
-        "amount": 1
-      },
-      "costs": {
-        "metal": 3,
-        "tape": 2,
-        "adhesive": 2
-      },
-      "level": 5
-    },
-    {
-      "id": "sewing_kit",
-      "output": {
+      "level": 1,
+      "price": 55,
+      "item": {
         "kind": "material",
         "key": "sewing_kit",
         "amount": 1
-      },
-      "costs": {
-        "cloth": 3,
-        "rope": 2,
-        "fabric": 3
-      },
-      "level": 4
-    },
-    {
-      "id": "splint_kit",
-      "output": {
-        "kind": "material",
-        "key": "splint_kit",
-        "amount": 1
-      },
-      "costs": {
-        "plank": 3,
-        "tape": 2
-      },
-      "level": 1
-    },
-    {
-      "id": "fabric",
-      "output": {
-        "kind": "material",
-        "key": "fabric",
-        "amount": 1
-      },
-      "costs": {
-        "cloth": 2
-      },
-      "level": 1
-    },
-    {
-      "id": "fuel",
-      "output": {
-        "kind": "material",
-        "key": "fuel",
-        "amount": 1
-      },
-      "costs": {
-        "plastic": 3,
-        "chemicals": 3
-      },
-      "level": 3
-    },
-    {
-      "id": "battery",
-      "output": {
-        "kind": "material",
-        "key": "battery",
-        "amount": 1
-      },
-      "costs": {
-        "metal": 2,
-        "chemicals": 3
-      },
-      "level": 1
-    },
-    {
-      "id": "glock",
-      "output": {
-        "kind": "weapon",
-        "key": "glock"
-      },
-      "costs": {
-        "gun_parts": 1,
-        "metal": 3,
-        "spring": 1
-      },
-      "level": 6
-    },
-    {
-      "id": "knife",
-      "output": {
-        "kind": "melee",
-        "key": "knife"
-      },
-      "costs": {
-        "metal": 2
-      },
-      "level": 1
-    },
-    {
-      "id": "wooden_bat",
-      "output": {
-        "kind": "melee",
-        "key": "wooden_bat"
-      },
-      "costs": {
-        "plank": 2,
-        "tape": 1
-      },
-      "level": 1
-    },
-    {
-      "id": "crowbar",
-      "output": {
-        "kind": "melee",
-        "key": "crowbar"
-      },
-      "costs": {
-        "metal": 3,
-        "metal_pipe": 1
-      },
-      "level": 4
-    },
-    {
-      "id": "fire_axe",
-      "output": {
-        "kind": "melee",
-        "key": "fire_axe"
-      },
-      "costs": {
-        "metal": 3,
-        "plank": 2,
-        "mechanical_comp": 1
-      },
-      "level": 8
-    },
-    {
-      "id": "vest",
-      "output": {
-        "kind": "equipment",
-        "key": "vest"
-      },
-      "costs": {
-        "fabric": 3,
-        "cloth": 2,
-        "tape": 1
-      },
-      "level": 7
-    },
-    {
-      "id": "tool_belt",
-      "output": {
-        "kind": "equipment",
-        "key": "tool_belt"
-      },
-      "costs": {
-        "fabric": 2,
-        "cloth": 3,
-        "metal": 2,
-        "tape": 2
-      },
-      "level": 5
-    },
-    {
-      "id": "backpack_1",
-      "output": {
-        "kind": "equipment",
-        "key": "backpack_1"
-      },
-      "costs": {
-        "cloth": 4,
-        "rope": 2,
-        "fabric": 2
-      },
-      "level": 4
+      }
     }
   ],
+  "crafting": [],
   "recycling": {
     "items": {
       "equipment.backpack_1": [
@@ -954,9 +602,18 @@ export default {
       "sewing_kit": 8,
       "splint_kit": 5,
       "military_comp": 130,
-      "blueprint_old": 8,
-      "blueprint": 14,
-      "upgrade_kit": 24
+      "blueprint_old": 110,
+      "blueprint": 150,
+      "upgrade_kit": 24,
+      "equipment_pack": 90,
+      "military_pack": 140,
+      "archive_pack": 160,
+      "industrial_pack": 75,
+      "pistol_box": 20,
+      "rifle_box": 35,
+      "shotgun_box": 30,
+      "sniper_box": 45,
+      "cash": 1
     },
     "equipment": {
       "backpack_1": 14,
