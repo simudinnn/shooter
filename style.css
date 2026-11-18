@@ -4064,3 +4064,5 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
   max-inline-size: 100%;
   overflow-wrap: anywhere;
 }
+/* Preserve source pixels in the high-resolution framebuffer. */
+#game-canvas { image-rendering: pixelated; }

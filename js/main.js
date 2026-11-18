@@ -153,7 +153,7 @@ class Game {
     this.canvas.setAttribute('tabindex', '0');
     this.canvas.style.outline = 'none';
     this.ctx = this.canvas.getContext('2d', { alpha: false });
-    this.renderScale = this.mobile ? 1 : RENDER_SCALE;
+    this.renderScale = RENDER_SCALE;
     this.canvas.width = INTERNAL_W * this.renderScale;
     this.canvas.height = INTERNAL_H * this.renderScale;
     this.ctx.imageSmoothingEnabled = false;
@@ -161,21 +161,25 @@ class Game {
   }
 
   _resizeCanvas() {
-    const bufW = INTERNAL_W * this.renderScale;
-    const bufH = INTERNAL_H * this.renderScale;
+
     const vw = window.visualViewport?.width ?? window.innerWidth;
     const vh = window.visualViewport?.height ?? window.innerHeight;
-    const scale = Math.max(vw / bufW, vh / bufH);
+    const logicalScale = Math.max(vw / INTERNAL_W, vh / INTERNAL_H);
+    this.renderScale = Math.min(4, Math.max(RENDER_SCALE, logicalScale * (window.devicePixelRatio || 1)));
+    const bufW = Math.ceil(INTERNAL_W * this.renderScale);
+    const bufH = Math.ceil(INTERNAL_H * this.renderScale);
+    if (this.canvas.width !== bufW) this.canvas.width = bufW;
+    if (this.canvas.height !== bufH) this.canvas.height = bufH;
+    const scale = logicalScale / this.renderScale;
     this._visibleHalfWidth = Math.min(INTERNAL_W, vw / (scale * this.renderScale)) / 2;
     this._visibleHalfHeight = Math.min(INTERNAL_H, vh / (scale * this.renderScale)) / 2;
     this.displayScale = scale;
-    const dpr = window.devicePixelRatio || 1;
-    const width = Math.ceil(bufW * scale * dpr) / dpr;
-    const height = Math.ceil(bufH * scale * dpr) / dpr;
+    const width = INTERNAL_W * logicalScale;
+    const height = INTERNAL_H * logicalScale;
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
-    this.canvas.style.left = `${Math.round((vw - width) * 0.5 * dpr) / dpr}px`;
-    this.canvas.style.top = `${Math.round((vh - height) * 0.5 * dpr) / dpr}px`;
+    this.canvas.style.left = `${(vw - width) * 0.5}px`;
+    this.canvas.style.top = `${(vh - height) * 0.5}px`;
     this.canvas.style.transform = 'none';
   }
 
@@ -1245,13 +1249,6 @@ class Game {
   }
 
   _worldToScreen(wx, wz) {
-    if (this.player && wx === this.player.x && wz === this.player.z) {
-      const camera = this._camera();
-      return {
-        x: (INTERNAL_W >> 1) + Math.round((wx - camera.x) * PPU),
-        y: (INTERNAL_H >> 1) + Math.round((wz - camera.z) * PPU),
-      };
-    }
     return worldToScreen(wx, wz, this._camPxX, this._camPxZ, this._camLeanPxX, this._camLeanPxZ);
   }
 
@@ -2730,8 +2727,8 @@ class Game {
 
   _getGunScreenPose(drawTime) {
     const playerGs = this._entityToScreen(this.player.x, this.player.z);
-    const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
-    const idleBreath = Math.round(this._weaponBreathY ?? 0);
+    const playerBounce = getPlayerBounceY(this.player, drawTime);
+    const idleBreath = (this._weaponBreathY ?? 0);
     const lunge = this.player.getMeleeSwingLunge(drawTime);
     const weaponDraw = this.player.getWeaponDraw(drawTime);
     const weaponAnim = weaponDraw.frame != null
@@ -2751,9 +2748,9 @@ class Game {
       const meleePose = isHand
         ? getHandHoldPose(this.player, punchExtend)
         : getMeleeHoldPose(this.player, lunge);
-      const meleeOffX = Math.round((meleePose.worldX - this.player.x) * PPU);
-      const meleeOffY = Math.round((meleePose.worldZ - this.player.z) * PPU);
-      const bodyBounce = Math.round(getPlayerBounceY(this.player));
+      const meleeOffX = ((meleePose.worldX - this.player.x) * PPU);
+      const meleeOffY = ((meleePose.worldZ - this.player.z) * PPU);
+      const bodyBounce = (getPlayerBounceY(this.player));
       const handBounce = isHand && this.player.isMoving ? -bodyBounce : bodyBounce;
       return {
         isMelee: true,
@@ -2771,8 +2768,8 @@ class Game {
 
     const gunAim = gunAimTransform(this.player.angle, this.player._flipX ?? false);
     const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
-    const holdOffX = Math.round(Math.sin(this.player.angle) * holdDist * PPU);
-    const holdOffY = Math.round(Math.cos(this.player.angle) * holdDist * PPU);
+    const holdOffX = (Math.sin(this.player.angle) * holdDist * PPU);
+    const holdOffY = (Math.cos(this.player.angle) * holdDist * PPU);
     const normalSx = playerGs.x + holdOffX;
     const normalSy = playerGs.y + holdOffY;
     let sx;
@@ -2784,8 +2781,8 @@ class Game {
       const normalY = normalSy + playerBounce + idleBreath;
       const centerY = playerGs.y + playerBounce + idleBreath;
       const holdX = getReloadHoldScreenX(playerGs.x, reloadPose.flipX);
-      sx = normalSx + Math.round((holdX - normalSx) * b);
-      sy = normalY + Math.round((centerY - normalY) * b);
+      sx = normalSx + ((holdX - normalSx) * b);
+      sy = normalY + ((centerY - normalY) * b);
       aimAngle = reloadPose.angle;
       aimFlip = reloadPose.flipX;
     } else {
@@ -3072,10 +3069,10 @@ class Game {
         shadowSplit: top + height / 2,
         shadowBounds: { minX: left, minY: top, maxX: left + width, maxY: top + height },
         draw: () => {
-          ctx.drawImage(this.sprites.getBakedShadeBitmap(ctx, prop.image), Math.round(left), Math.round(top), width, height);
+          ctx.drawImage(this.sprites.getBakedShadeBitmap(ctx, prop.image), left, top, width, height);
           if (prop.corner) {
             const edge = prop.corner;
-            ctx.drawImage(edge.image, Math.round(left + edge.x * nativeScale), Math.round(top),
+            ctx.drawImage(edge.image, left + edge.x * nativeScale, top,
               edge.width * nativeScale, edge.height * nativeScale);
           }
         },
@@ -3115,13 +3112,12 @@ class Game {
           if (isTreeFoliage(f.kind) && fadeAlpha < 0.999) ctx.globalAlpha = prevAlpha * fadeAlpha;
           this.sprites.ensureSprite(f.sprite);
           if (isTreeFoliage(f.kind)) {
-            this.sprites.drawPropSprite(ctx, f.sprite, Math.round(s.x), Math.round(s.y), size, {
+            this.sprites.drawPropSprite(ctx, f.sprite, s.x, s.y, size, {
               anchor: 'bottom-center',
             });
           } else {
-            const pixel = tilePx / BUILDING_ART_PX;
-            const drawX = shadowGridOrigin.x + Math.round((f.x * PPU - size * 0.5) / pixel) * pixel;
-            const drawY = shadowGridOrigin.y + Math.round((f.z * PPU - size) / pixel) * pixel;
+            const drawX = s.x - size * 0.5;
+            const drawY = s.y - size;
             this.sprites.drawTile(ctx, f.sprite, drawX, drawY, size, tint, f.flipX ?? false);
           }
           ctx.globalAlpha = prevAlpha;
@@ -3277,7 +3273,7 @@ class Game {
         const chargeShake = robot.jump?.charging
           ? Math.sin(drawTime * 28) * 2.5 * (1 - (robot.jump.chargeLeft ?? 0) / 0.5)
           : 0;
-        const drawX = Math.round(s.x + shake.x + chargeShake);
+        const drawX = s.x + shake.x + chargeShake;
         const shootPhase = robot.shoot?.phase ?? null;
         const isScout = robot.type === 'scout';
         const robotMoving = robot.renderMoving && !robot.emerging
@@ -3289,11 +3285,11 @@ class Game {
           canWalkBounce,
           isScout ? 2.2 : 1.8,
         );
-        const walkBouncePx = Math.round(walkBounce);
+        const walkBouncePx = walkBounce;
         const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
         const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
         const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
-        const anchorY = Math.round(s.y - bury + shake.y + emergeBob + jumpBob + chargeBob);
+        const anchorY = s.y - bury + shake.y + emergeBob + jumpBob + chargeBob;
         const drawY = anchorY + walkBouncePx;
         if (robot.emerging) {
           const hole = 1 - emerge;
@@ -3333,23 +3329,24 @@ class Game {
     const drawTime = performance.now() / 1000;
     const playerSheet = getPlayerSheet(this.player);
     const playerFlip = getPlayerFlipX(this.player);
-    const playerBounce = Math.round(getPlayerBounceY(this.player, drawTime));
-    const idleBreath = Math.round(this._weaponBreathY ?? 0);
+    const playerBounce = (getPlayerBounceY(this.player, drawTime));
+    const idleBreath = (this._weaponBreathY ?? 0);
     const playerAnim = getPlayerAnim(this.player, drawTime);
     addCharacterShadow(this._entityToScreen(playerX, playerZ), CHAR_NATIVE_PX, SPRITE_PLAYER);
     const pixelScale = tilePx / 16;
     const layer = this._characterShadowLayer ??= document.createElement('canvas');
     // Match the rounded ground-chunk pixel grid even while the camera is moving.
-    const phase = (value) => ((Math.round(value) % pixelScale) + pixelScale) % pixelScale - pixelScale;
+    const phase = (value) => ((value % pixelScale) + pixelScale) % pixelScale - pixelScale;
     const maskX = phase(camT.x);
     const maskY = phase(camT.y);
-    const width = Math.ceil((INTERNAL_W - maskX) / pixelScale);
-    const height = Math.ceil((INTERNAL_H - maskY) / pixelScale);
+    const shadowScale = this.renderScale;
+    const width = Math.ceil((INTERNAL_W - maskX) * shadowScale);
+    const height = Math.ceil((INTERNAL_H - maskY) * shadowScale);
     if (layer.width !== width) layer.width = width;
     if (layer.height !== height) layer.height = height;
     const mask = layer.getContext('2d');
-    mask.setTransform(1 / pixelScale, 0, 0, 1 / pixelScale, -maskX / pixelScale, -maskY / pixelScale);
-    mask.clearRect(maskX, maskY, width * pixelScale, height * pixelScale);
+    mask.setTransform(shadowScale, 0, 0, shadowScale, -maskX * shadowScale, -maskY * shadowScale);
+    mask.clearRect(maskX, maskY, width / shadowScale, height / shadowScale);
     mask.imageSmoothingEnabled = false;
     mask.globalCompositeOperation = 'source-over';
     for (const shadow of characterShadows) {
@@ -3359,7 +3356,7 @@ class Game {
     this.world.eraseBakedShadowOverlap?.(mask, view, (x, z) => ({ x: camT.x + x * PPU, y: camT.y + z * PPU }), pixelScale);
     ctx.save();
     ctx.globalAlpha = 0.28;
-    ctx.drawImage(layer, maskX, maskY, width * pixelScale, height * pixelScale);
+    ctx.drawImage(layer, maskX, maskY, width / shadowScale, height / shadowScale);
     ctx.restore();
     const playerShade = bakedShade(playerX, playerZ + this.player.getMoveCollider(PPU).zOff);
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, bakedShade: playerShade, draw: () => {

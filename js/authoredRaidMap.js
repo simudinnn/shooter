@@ -90,6 +90,8 @@ export function parseRaidMap(data) {
   if (data?.version !== 1 || data.tileSize !== 16 || !size(data.width) || !size(data.height)) {
     throw new Error('Expected a version 1 map from the map editor.');
   }
+  const defaultGround = data.defaultGround ?? 'assets/world/floor_dirt.png';
+  if (!isMapLayerAsset('tiles', defaultGround)) throw new Error('Invalid default ground.');
   const warnings = new Set();
   const layers = {};
   for (const layer of ['tiles', 'props', 'loot']) {
@@ -121,7 +123,7 @@ export function parseRaidMap(data) {
       }
     }
   }
-  return { width: data.width, height: data.height, layers, warnings };
+  return { width: data.width, height: data.height, defaultGround, layers, warnings };
 }
 
 function loadImage(asset) {
@@ -159,7 +161,7 @@ export class AuthoredRaidWorld extends World {
 
   async build() {
     const { tiles, props } = this.raidMap.layers;
-    const dirt = 'assets/world/floor_dirt.png';
+    const dirt = this.raidMap.defaultGround;
     const assets = new Set([dirt, ...tiles.map(({ asset }) => asset)]);
     for (const { asset } of props) {
       if (asset === hatchAsset || asset === PLAYER_SPAWN_ASSET) continue;
@@ -184,7 +186,9 @@ export class AuthoredRaidWorld extends World {
         ctx.imageSmoothingEnabled = false;
         if (floor) {
           for (let py = 0; py < canvas.height; py += 16) {
-            for (let px = 0; px < canvas.width; px += 16) ctx.drawImage(floor, px, py, 16, 16);
+            for (let px = 0; px < canvas.width; px += 16) isOverlappingFloorGrass(dirt)
+              ? ctx.drawImage(floor, 2, 2, 16, 16, px, py, 16, 16)
+              : ctx.drawImage(floor, px, py, 16, 16);
           }
         }
         this.mapGround.set(this._chunkKey(x / CHUNK_TILES, y / CHUNK_TILES), { canvas, ctx });
@@ -237,39 +241,50 @@ export class AuthoredRaidWorld extends World {
       }
       const { rgba, bottom } = source;
       if (bottom < 0) return;
-      const depth = sideWall ? height : Math.max(1, Math.round((bottom + 1) * height / image.height * compression));
       const ground = foot - height + Math.ceil((bottom + 1) * height / image.height) - 1;
-      for (let row = 0; row < depth; row++) {
-        const y = Math.round(sideWall ? foot - height : ground) + row;
+      const put = (x, y) => {
+        const cx = Math.floor(x / span);
         const cz = Math.floor(y / span);
+        const key = this._chunkKey(cx, cz);
+        const chunk = this.mapGround.get(key);
+        if (!chunk) return;
+        const localX = x - cx * span;
         const localY = y - cz * span;
-        const sourceY = sideWall ? Math.floor(row * image.height / height)
-          : bottom - Math.floor(row * (bottom + 1) / depth);
-        let edge = image.width - 1;
-        if (sideWall) {
-          while (edge >= 0 && rgba[(sourceY * image.width + edge) * 4 + 3] < 32) edge--;
-          if (edge < 0) continue;
+        if (localX >= chunk.canvas.width || localY >= chunk.canvas.height) return;
+        let pixels = target.get(key);
+        if (!pixels) {
+          pixels = new Uint8Array(chunk.canvas.width * chunk.canvas.height);
+          target.set(key, pixels);
         }
-        const projectedWidth = sideWall ? 6 : width;
-        const rowX = Math.round(left + (sideWall ? Math.floor(edge * width / image.width) : row * 0.75));
-        for (let col = 0; col < projectedWidth; col++) {
-          const sourceX = sideWall ? edge : Math.floor(col * image.width / width);
-          const alpha = rgba[(sourceY * image.width + sourceX) * 4 + 3];
-          if (!alpha) continue;
-          const x = rowX + col;
-          const cx = Math.floor(x / span);
-          const key = this._chunkKey(cx, cz);
-          const chunk = this.mapGround.get(key);
-          if (!chunk || localY >= chunk.canvas.height) continue;
-          const localX = x - cx * span;
-          if (localX >= chunk.canvas.width) continue;
-          let pixels = target.get(key);
-          if (!pixels) {
-            pixels = new Uint8Array(chunk.canvas.width * chunk.canvas.height);
-            target.set(key, pixels);
+        pixels[localY * chunk.canvas.width + localX] = 255;
+      };
+      if (sideWall) {
+        // A side wall extends along the ground. Sweep its PNG along the same sun ray as the front wall.
+        const depth = Math.max(1, Math.round(16 * compression));
+        for (let row = 0; row < height; row++) {
+          const sy = Math.floor(row * image.height / height);
+          for (let col = 0; col < width; col++) {
+            const sx = Math.floor(col * image.width / width);
+            if (rgba[(sy * image.width + sx) * 4 + 3] < 32) continue;
+            for (let distance = 0; distance <= depth; distance++) {
+              put(Math.round(left + col + distance * 0.75), Math.round(foot - height + row + distance));
+            }
           }
-          const index = localY * chunk.canvas.width + localX;
-          pixels[index] = 255;
+        }
+      } else {
+        // Forward-project every opaque sprite pixel so thin details survive the flattening.
+        const stretchX = width / image.width;
+        const stretchY = height / image.height;
+        for (let sy = 0; sy <= bottom; sy++) {
+          const distance = (bottom - sy) * stretchY * compression;
+          const y = Math.round(ground + distance);
+          for (let sx = 0; sx < image.width; sx++) {
+            if (rgba[(sy * image.width + sx) * 4 + 3] < 32) continue;
+            const x = Math.round(left + sx * stretchX + distance * 0.75);
+            for (let dy = 0; dy < Math.max(1, Math.ceil(stretchY * compression)); dy++) {
+              for (let dx = 0; dx < Math.max(1, Math.ceil(stretchX)); dx++) put(x + dx, y + dy);
+            }
+          }
         }
       }
     };
@@ -280,8 +295,7 @@ export class AuthoredRaidWorld extends World {
       const width = layout?.width ?? Math.round(image.width * size);
       const height = layout?.height ?? Math.round(image.height * size);
       const left = prop.x * scale + (layout ? layout.x - 8 : -width / 2);
-      const barrel = /\/barrel[^/]*\.png$/i.test(prop.asset);
-      const compression = prop.tree ? 0.62 : prop.wall ? 0.49 : barrel ? 0.33 : 0.46;
+      const compression = prop.tree ? 0.62 : prop.wall ? 0.49 : 0.62;
       stamp(target, image, left, prop.z * scale + 8, width, height, compression, prop.wall && layout?.width === 4);
     };
     for (const prop of this.mapProps) {
@@ -528,7 +542,7 @@ export class AuthoredRaidWorld extends World {
         const mask = this.mapGround.get(this._chunkKey(x, z))?.shadowCoverage;
         if (!mask) continue;
         const point = project(x * span, z * span);
-        ctx.drawImage(mask, Math.round(point.x), Math.round(point.y), mask.width * pixelScale, mask.height * pixelScale);
+        ctx.drawImage(mask, point.x, point.y, mask.width * pixelScale, mask.height * pixelScale);
       }
     }
   }
@@ -541,13 +555,23 @@ export class AuthoredRaidWorld extends World {
     const minZ = Math.max(0, Math.floor((camZ - halfH - pad) / span));
     const maxX = Math.min(Math.ceil(this.raidMap.width / CHUNK_TILES) - 1, Math.floor((camX + halfW + pad) / span));
     const maxZ = Math.min(Math.ceil(this.raidMap.height / CHUNK_TILES) - 1, Math.floor((camZ + halfH + pad) / span));
-    for (let z = minZ; z <= maxZ; z++) {
-      for (let x = minX; x <= maxX; x++) {
-        const { canvas } = this.mapGround.get(this._chunkKey(x, z));
-        ctx.drawImage(canvas, Math.round(camTx + x * span * ppu),
-          Math.round(camTy + z * span * ppu), canvas.width * scale, canvas.height * scale);
+    const key = [minX, minZ, maxX, maxZ, this.mapLightRevision].join(',');
+    if (this._terrainView?.key !== key) {
+      const canvas = this._terrainView?.canvas ?? document.createElement('canvas');
+      const chunkPx = CHUNK_TILES * 16;
+      canvas.width = Math.max(1, (maxX - minX + 1) * chunkPx);
+      canvas.height = Math.max(1, (maxZ - minZ + 1) * chunkPx);
+      const g = canvas.getContext('2d');
+      for (let z = minZ; z <= maxZ; z++) {
+        for (let x = minX; x <= maxX; x++) {
+          const chunk = this.mapGround.get(this._chunkKey(x, z));
+          if (chunk) g.drawImage(chunk.canvas, (x - minX) * chunkPx, (z - minZ) * chunkPx);
+        }
       }
+      this._terrainView = { key, canvas };
     }
+    ctx.drawImage(this._terrainView.canvas, camTx + minX * span * ppu,
+      camTy + minZ * span * ppu, this._terrainView.canvas.width * scale, this._terrainView.canvas.height * scale);
   }
 
   _reachableCells(start) {

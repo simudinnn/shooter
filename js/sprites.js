@@ -1368,7 +1368,7 @@ export class SpriteBank {
     return shaded;
   }
 
-  draw(ctx, name, sx, sy, scale = 2, angle = 0, flipX = false, pivot = 'center', chopTilt = 0, anim = null, subpixel = false) {
+  draw(ctx, name, sx, sy, scale = 2, angle = 0, flipX = false, pivot = 'center', chopTilt = 0, anim = null, subpixel = true) {
     const img = this.images[name] ?? this._getImage(name);
     if (!img) return;
     const fb = this.flipbooks[name];
@@ -1397,13 +1397,13 @@ export class SpriteBank {
       pivotY = fh * 0.5;
     }
     if (flipX) pivotX = fw - pivotX;
-    const dw = Math.round(fw * scale);
-    const dh = Math.round(fh * scale);
-    const ox = Math.round(pivotX * scale);
-    const oy = Math.round(pivotY * scale);
+    const dw = (fw * scale);
+    const dh = (fh * scale);
+    const ox = (pivotX * scale);
+    const oy = (pivotY * scale);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    ctx.translate(subpixel ? sx : Math.round(sx), subpixel ? sy : Math.round(sy));
+    ctx.translate(subpixel ? sx : (sx), subpixel ? sy : (sy));
     if (flipX) ctx.scale(-1, 1);
     if (angle) ctx.rotate(angle);
     if (chopTilt) ctx.rotate(chopTilt);
@@ -1445,8 +1445,8 @@ export class SpriteBank {
     if (!bitmap) return;
     const dw = Math.round(displayPx);
     const dh = Math.round(displayPx);
-    const drawX = Math.round(sx - dw * 0.5);
-    const drawY = Math.round(sy - dh + bobY);
+    const drawX = (sx - dw * 0.5);
+    const drawY = (sy - dh + bobY);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.getBakedShadeBitmap(ctx, bitmap), drawX, drawY, dw * bitmap.width / resPx, dh * bitmap.height / resPx);
   }
@@ -1461,9 +1461,9 @@ export class SpriteBank {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillStyle = 'rgba(8, 8, 12, 0.72)';
-    ctx.fillText(text, Math.round(sx) + 1, labelY + 1);
+    ctx.fillText(text, (sx) + 1, labelY + 1);
     ctx.fillStyle = '#e8e4dc';
-    ctx.fillText(text, Math.round(sx), labelY);
+    ctx.fillText(text, (sx), labelY);
     ctx.restore();
   }
 
@@ -1565,8 +1565,8 @@ export class SpriteBank {
     const nw = img.naturalWidth || img.width || 0;
     const nh = img.naturalHeight || img.height || 0;
     if (!nw || !nh) return false;
-    const drawH = Math.round(drawHeight);
-    const drawW = Math.round(drawH * (nw / nh));
+    const drawH = (drawHeight);
+    const drawW = (drawH * (nw / nh));
     const anchor = opts.anchor ?? 'bottom-center';
     let x = screenX;
     let y = screenY;
@@ -1578,7 +1578,7 @@ export class SpriteBank {
       y -= drawH * 0.5;
     }
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, Math.round(x), Math.round(y), drawW, drawH);
+    ctx.drawImage(img, x, y, drawW, drawH);
     return true;
   }
 
@@ -1622,8 +1622,8 @@ export class SpriteBank {
     const px = Math.round(tilePx);
     const bmp = this.getTileBitmap(name, px, tint);
     if (!bmp) return;
-    const x = Math.round(sx);
-    const y = Math.round(sy);
+    const x = (sx);
+    const y = (sy);
     const prev = ctx.globalAlpha;
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = alpha;
@@ -1637,8 +1637,8 @@ export class SpriteBank {
     if (!bmp) return;
     ctx.globalCompositeOperation = 'source-over';
     ctx.imageSmoothingEnabled = false;
-    const drawX = Math.round(sx);
-    const drawY = Math.round(sy);
+    const drawX = (sx);
+    const drawY = (sy);
     if (flipX) {
       ctx.save();
       ctx.translate(drawX + px, drawY);

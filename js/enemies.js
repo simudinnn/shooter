@@ -616,7 +616,17 @@ export class Robot {
   }
 
   static _isValidSpawn(world, x, z, radius, existing, player, minPlayerDist) {
-    if (world.checkCollision(x, z, radius)) return false;
+    const move = Robot.prototype.getMoveCollider.call({ type: 'spider' });
+    const clearance = 0.65;
+    const shape = { ...move, radius: Math.max(radius, move.radius) + clearance };
+    if (world.checkCollisionShape(x, z, shape)) return false;
+    // Validate room to leave the spawn instead of accepting a narrow pocket beside a wall.
+    const step = shape.radius;
+    let exits = 0;
+    for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+      if (!world.checkCollisionShape(x + dx, z + dz, shape)) exits++;
+    }
+    if (exits < 2) return false;
     if (player) {
       const pdx = x - player.x;
       const pdz = z - player.z;

@@ -37,25 +37,25 @@ export function snapCamLean(v) {
   return Math.round(v * PPU) / PPU;
 }
 
-/** World position → screen pixels (integer). */
+/** Continuous world-to-screen projection shared by terrain and entities. */
 export function worldToScreen(wx, wz, camPxX, camPxZ, leanPxX, leanPxZ) {
   return {
-    x: Math.round(wx * PPU) - camPxX - leanPxX + (INTERNAL_W >> 1),
-    y: Math.round(wz * PPU) - camPxZ - leanPxZ + (INTERNAL_H >> 1),
+    x: wx * PPU - camPxX - leanPxX + (INTERNAL_W >> 1),
+    y: wz * PPU - camPxZ - leanPxZ + (INTERNAL_H >> 1),
   };
 }
 
 export function camPixelsFromPlayer(px, pz) {
   return {
-    x: Math.round(px * PPU),
-    z: Math.round(pz * PPU),
+    x: px * PPU,
+    z: pz * PPU,
   };
 }
 
 export function leanPixelsFromOffset(offX, offZ) {
   return {
-    x: Math.round(offX * PPU),
-    z: Math.round(offZ * PPU),
+    x: offX * PPU,
+    z: offZ * PPU,
   };
 }
 
@@ -118,8 +118,8 @@ export function drawPixelEllipseShadow(ctx, cx, cy, rx, ry, tilePx, gridOrigin =
   const step = Math.max(1, tilePx >> 4);
   const srx = Math.max(step * 3, Math.round(rx / step) * step);
   const sry = Math.max(step * 2, Math.round(ry / step) * step);
-  const sx = gridOrigin.x + snapScreenAxis(cx - gridOrigin.x, tilePx);
-  const sy = gridOrigin.y + snapScreenAxis(cy - gridOrigin.y, tilePx);
+  const sx = cx;
+  const sy = cy;
   const stamp = _getShadowStamp(srx / step, sry / step, solid);
   const prev = ctx.imageSmoothingEnabled;
   ctx.imageSmoothingEnabled = false;

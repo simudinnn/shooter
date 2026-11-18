@@ -122,7 +122,7 @@ export function getDoorScreenHitBox(building, worldToScreen) {
     ? Math.round(tilePx * (OPEN_DOOR_ART_W / BUILDING_ART_PX))
     : tilePx;
   const drawH = tilePx;
-  const x = building.doorOpen ? Math.round(tileX + tilePx - drawW) : tileX;
+  const x = building.doorOpen ? tileX + tilePx - drawW : tileX;
   const cx = x + drawW * 0.5;
   const cy = tileY + drawH * 0.5;
   return {
@@ -151,7 +151,7 @@ function drawBuildingTile(sprites, ctx, name, x, y, tilePx) {
   if (!img) return false;
   const px = Math.round(tilePx);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, Math.round(x), Math.round(y), px, px);
+  ctx.drawImage(img, x, y, px, px);
   return true;
 }
 
@@ -161,8 +161,8 @@ function drawOpenDoorSprite(sprites, ctx, name, tileX, tileY, tilePx) {
   if (!img) return false;
   const drawW = Math.round(tilePx * (OPEN_DOOR_ART_W / BUILDING_ART_PX));
   const drawH = Math.round(tilePx);
-  const x = Math.round(tileX + tilePx - drawW);
-  const y = Math.round(tileY);
+  const x = tileX + tilePx - drawW;
+  const y = tileY;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, x, y, drawW, drawH);
   return true;
@@ -181,8 +181,8 @@ function drawBuildingArt(sprites, ctx, name, feetX, feetY, tilePx, artW = BUILDI
   const drawW = Math.max(2, Math.round((artW / BUILDING_ART_PX) * tilePx));
   const drawH = Math.round((artH / BUILDING_ART_PX) * tilePx);
   const segH = Math.round(tilePx);
-  const x = Math.round(feetX - drawW * 0.5);
-  const y = Math.round(feetY - drawH + tilePx * 0.08);
+  const x = feetX - drawW * 0.5;
+  const y = feetY - drawH + tilePx * 0.08;
   ctx.imageSmoothingEnabled = false;
   const segments = Math.max(1, Math.round(artH / BUILDING_ART_PX));
   if (segments > 1) {
@@ -200,8 +200,8 @@ function buildingTileTopLeft(originX, originZ, tx, tz, worldToScreen) {
   const corner = worldToScreen(originX + tx * TILE, originZ + tz * TILE);
   const next = worldToScreen(originX + (tx + 1) * TILE, originZ + (tz + 1) * TILE);
   return {
-    x: Math.round(Math.min(corner.x, next.x)),
-    y: Math.round(Math.min(corner.y, next.y)),
+    x: Math.min(corner.x, next.x),
+    y: Math.min(corner.y, next.y),
   };
 }
 
@@ -209,7 +209,7 @@ function drawSnappedWallSprite(sprites, ctx, name, x, y, w, h) {
   const img = sprites?.images?.[name];
   if (!img) return false;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+  ctx.drawImage(img, x, y, w, h);
   return true;
 }
 function drawPlaceholderFloor(ctx, x, y, w, h) {
@@ -283,8 +283,8 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
         if (!hasSprite(sprites, tileName)) continue;
         const corner = worldToScreen(originX + tx * TILE, originZ + tz * TILE);
         const next = worldToScreen(originX + (tx + 1) * TILE, originZ + (tz + 1) * TILE);
-        const x = Math.round(Math.min(corner.x, next.x));
-        const y = Math.round(Math.min(corner.y, next.y));
+        const x = Math.min(corner.x, next.x);
+        const y = Math.min(corner.y, next.y);
         drawBuildingTile(sprites, ctx, tileName, x, y, tilePx);
         drewArt = true;
       }
@@ -295,8 +295,8 @@ export function drawBuildingFloors(ctx, building, worldToScreen, tilePx, sprites
     const interior = building.interior;
     const s0 = worldToScreen(interior.minX, interior.minZ);
     const s1 = worldToScreen(interior.maxX, interior.maxZ);
-    const x = Math.round(Math.min(s0.x, s1.x));
-    const y = Math.round(Math.min(s0.y, s1.y));
+    const x = Math.min(s0.x, s1.x);
+    const y = Math.min(s0.y, s1.y);
     const fw = Math.round(Math.abs(s1.x - s0.x));
     const fh = Math.round(Math.abs(s1.y - s0.y));
     drawPlaceholderFloor(ctx, x, y, fw, fh);
@@ -324,8 +324,8 @@ export function drawBuildingRoof(ctx, building, worldToScreen, tilePx, alpha, sp
   const raiseZ = roofRaiseWorld();
   const s0 = worldToScreen(roof.originX, roof.originZ - raiseZ);
   const s1 = worldToScreen(roof.originX + roof.w, roof.originZ + roof.h - raiseZ);
-  const baseX = Math.round(Math.min(s0.x, s1.x));
-  const baseY = Math.round(Math.min(s0.y, s1.y));
+  const baseX = Math.min(s0.x, s1.x);
+  const baseY = Math.min(s0.y, s1.y);
   const edgeRows = Math.floor(h / 2);
   const hasEdge = sprites && hasSprite(sprites, style.roofEdge);
   const hasFill = sprites && hasSprite(sprites, style.roofFill);
