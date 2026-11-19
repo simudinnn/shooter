@@ -2134,6 +2134,8 @@ export class InventoryUI {
     if (!this.chestEl || !this.chest) return;
     const slotCount = this.chest.slots?.length ?? CHEST_SLOT_COUNT;
     const isGround = this.chest.isGround;
+    this.root.querySelector('#chest-panel')?.style.setProperty('--loot-columns', !isGround && slotCount === 5 ? '5' : '4');
+    this.root.querySelector('#chest-panel')?.style.setProperty('--loot-rows', !isGround && slotCount === 5 ? '1' : '2');
     if (isGround) {
       this.chestEl.style.gridTemplateColumns = '';
       this.chestEl.style.gridTemplateRows = '';
@@ -2141,11 +2143,11 @@ export class InventoryUI {
     } else if (slotCount === 5) {
       this.chestEl.style.gridTemplateColumns = 'repeat(5, var(--chest-slot-size))';
       this.chestEl.style.gridTemplateRows = 'var(--chest-slot-size)';
-      this.chestEl.style.width = 'calc(var(--chest-slot-size) * 5 + 24px)';
+      this.chestEl.style.width = 'calc(var(--chest-slot-size) * 5 + 44px)';
     } else {
       this.chestEl.style.gridTemplateColumns = 'repeat(4, var(--chest-slot-size))';
       this.chestEl.style.gridTemplateRows = 'repeat(2, var(--chest-slot-size))';
-      this.chestEl.style.width = 'calc(var(--chest-slot-size) * 4 + 18px)';
+      this.chestEl.style.width = 'calc(var(--chest-slot-size) * 4 + 38px)';
     }
     if (this._renderedChest !== (isGround ? this.game.groundDrops : this.chest)) {
       this.chestEl.replaceChildren();
