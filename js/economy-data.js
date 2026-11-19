@@ -2,16 +2,16 @@ export default {
   "shop": [
     {
       "level": 1,
-      "price": 20,
+      "price": 60,
       "item": {
-        "kind": "ammo",
-        "ammoType": "pistol",
-        "amount": 24
+        "kind": "material",
+        "key": "pistol_box",
+        "amount": 1
       }
     },
     {
       "level": 1,
-      "price": 15,
+      "price": 23,
       "item": {
         "kind": "consumable",
         "key": "bandage",
@@ -20,34 +20,34 @@ export default {
     },
     {
       "level": 4,
-      "price": 32,
+      "price": 96,
       "item": {
-        "kind": "ammo",
-        "ammoType": "shotgun",
-        "amount": 12
+        "kind": "material",
+        "key": "shotgun_box",
+        "amount": 1
       }
     },
     {
       "level": 8,
-      "price": 44,
+      "price": 132,
       "item": {
-        "kind": "ammo",
-        "ammoType": "rifle",
-        "amount": 30
+        "kind": "material",
+        "key": "rifle_box",
+        "amount": 1
       }
     },
     {
       "level": 12,
-      "price": 52,
+      "price": 130,
       "item": {
-        "kind": "ammo",
-        "ammoType": "sniper",
-        "amount": 12
+        "kind": "material",
+        "key": "sniper_box",
+        "amount": 1
       }
     },
     {
       "level": 8,
-      "price": 48,
+      "price": 72,
       "item": {
         "kind": "material",
         "key": "repair_kit",
@@ -56,7 +56,7 @@ export default {
     },
     {
       "level": 5,
-      "price": 48,
+      "price": 72,
       "item": {
         "kind": "melee",
         "key": "wooden_bat"
@@ -64,7 +64,7 @@ export default {
     },
     {
       "level": 4,
-      "price": 125,
+      "price": 188,
       "item": {
         "kind": "weapon",
         "key": "glock",
@@ -73,7 +73,7 @@ export default {
     },
     {
       "level": 3,
-      "price": 115,
+      "price": 173,
       "item": {
         "kind": "equipment",
         "key": "backpack_1"
@@ -81,7 +81,7 @@ export default {
     },
     {
       "level": 5,
-      "price": 140,
+      "price": 210,
       "item": {
         "kind": "equipment",
         "key": "vest"
@@ -93,7 +93,7 @@ export default {
         "key": "upgrade_kit",
         "amount": 1
       },
-      "price": 175,
+      "price": 263,
       "level": 12
     },
     {
@@ -101,7 +101,7 @@ export default {
         "kind": "weapon",
         "key": "revolver"
       },
-      "price": 175,
+      "price": 263,
       "level": 6
     },
     {
@@ -109,7 +109,7 @@ export default {
         "kind": "weapon",
         "key": "uzi"
       },
-      "price": 240,
+      "price": 360,
       "level": 10
     },
     {
@@ -117,7 +117,7 @@ export default {
         "kind": "weapon",
         "key": "m870"
       },
-      "price": 290,
+      "price": 435,
       "level": 12
     },
     {
@@ -125,7 +125,7 @@ export default {
         "kind": "weapon",
         "key": "m16"
       },
-      "price": 380,
+      "price": 570,
       "level": 16
     },
     {
@@ -133,7 +133,7 @@ export default {
         "kind": "weapon",
         "key": "famas"
       },
-      "price": 420,
+      "price": 630,
       "level": 19
     },
     {
@@ -141,7 +141,7 @@ export default {
         "kind": "weapon",
         "key": "fal"
       },
-      "price": 475,
+      "price": 713,
       "level": 22
     },
     {
@@ -149,7 +149,7 @@ export default {
         "kind": "weapon",
         "key": "m24"
       },
-      "price": 525,
+      "price": 788,
       "level": 24
     },
     {
@@ -157,7 +157,7 @@ export default {
         "kind": "throwable",
         "key": "grenade"
       },
-      "price": 70,
+      "price": 105,
       "level": 10
     },
     {
@@ -165,7 +165,7 @@ export default {
         "kind": "throwable",
         "key": "molotov"
       },
-      "price": 58,
+      "price": 87,
       "level": 7
     },
     {
@@ -173,7 +173,7 @@ export default {
         "kind": "throwable",
         "key": "flare"
       },
-      "price": 36,
+      "price": 54,
       "level": 4
     },
     {
@@ -181,7 +181,7 @@ export default {
         "kind": "equipment",
         "key": "hunting_vest"
       },
-      "price": 185,
+      "price": 278,
       "level": 8
     },
     {
@@ -189,7 +189,7 @@ export default {
         "kind": "equipment",
         "key": "police_vest"
       },
-      "price": 275,
+      "price": 413,
       "level": 14
     },
     {
@@ -197,7 +197,7 @@ export default {
         "kind": "equipment",
         "key": "military_vest"
       },
-      "price": 430,
+      "price": 645,
       "level": 22
     },
     {
@@ -205,7 +205,7 @@ export default {
         "kind": "equipment",
         "key": "backpack2"
       },
-      "price": 250,
+      "price": 375,
       "level": 12
     },
     {
@@ -213,12 +213,12 @@ export default {
         "kind": "equipment",
         "key": "backpack3"
       },
-      "price": 420,
+      "price": 630,
       "level": 21
     },
     {
       "level": 1,
-      "price": 12,
+      "price": 18,
       "item": {
         "kind": "consumable",
         "key": "apple",
@@ -227,7 +227,7 @@ export default {
     },
     {
       "level": 1,
-      "price": 65,
+      "price": 98,
       "item": {
         "kind": "consumable",
         "key": "medkit",
@@ -236,7 +236,7 @@ export default {
     },
     {
       "level": 1,
-      "price": 55,
+      "price": 83,
       "item": {
         "kind": "consumable",
         "key": "vaccine",
@@ -245,11 +245,35 @@ export default {
     },
     {
       "level": 1,
-      "price": 55,
+      "price": 83,
       "item": {
         "kind": "material",
         "key": "sewing_kit",
         "amount": 1
+      }
+    },
+    {
+      "level": 1,
+      "price": 45,
+      "item": {
+        "kind": "melee",
+        "key": "knife"
+      }
+    },
+    {
+      "level": 7,
+      "price": 110,
+      "item": {
+        "kind": "melee",
+        "key": "crowbar"
+      }
+    },
+    {
+      "level": 11,
+      "price": 175,
+      "item": {
+        "kind": "melee",
+        "key": "fire_axe"
       }
     }
   ],
@@ -614,7 +638,16 @@ export default {
       "shotgun_box": 30,
       "sniper_box": 45,
       "jewlery": 120,
-      "cash": 1
+      "cash": 1,
+      "keycard": 60,
+      "key": 25,
+      "laptop": 150,
+      "phone": 45,
+      "barbed_wire": 12,
+      "gas_bottle": 20,
+      "generator": 100,
+      "matches": 3,
+      "radar": 120
     },
     "equipment": {
       "backpack_1": 14,
@@ -641,6 +674,26 @@ export default {
       "wooden_bat": 6,
       "crowbar": 10,
       "fire_axe": 25
+    },
+    "ammo": {
+      "pistol": 1,
+      "rifle": 2,
+      "shotgun": 2,
+      "sniper": 3
+    },
+    "consumable": {
+      "bandage": 3,
+      "apple": 2,
+      "medkit": 12,
+      "vaccine": 15
+    },
+    "bandage": {
+      "bandage": 3
+    },
+    "throwable": {
+      "grenade": 12,
+      "molotov": 8,
+      "flare": 6
     }
   }
 };

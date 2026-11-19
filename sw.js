@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v525';
+const CACHE = 'robot-ruins-v548';
 
 function buildingKitSprites() {
   return [
@@ -118,6 +118,31 @@ const SHELL = [
   './js/workbench.js',
   './js/worldMap.js',
   './js/player.js',
+  './js/itemFootprint.js',
+  './js/cash.js',
+  './js/containers.js',
+  './js/tools.js',
+  './js/structures.js',
+  './structures/catalog.json',
+  './structures/cabin.json',
+  './structures/storehouse.json',
+  './js/batchInventory.js',
+  './assets/items/materials/radar_on.png',
+  './assets/items/materials/keycard.png',
+  './assets/items/materials/key.png',
+  './assets/items/materials/laptop.png',
+  './assets/items/materials/phone.png',
+  './assets/items/tools/barbed_wire.png',
+  './assets/items/tools/gas_bottle.png',
+  './assets/items/tools/generator.png',
+  './assets/items/tools/matches.png',
+  './assets/items/tools/radar.png',
+  './assets/ui/outline_9slice.png',
+  './assets/ui/red_button_9slice.png',
+  './assets/ui/1x2_slot.png',
+  './assets/ui/1x3_slot.png',
+  './assets/ui/2x1_slot.png',
+  './assets/ui/3x1_slot.png',
   './js/bulletCollision.js',
   './js/enemies.js',
   './js/enemyNav.js',
@@ -211,6 +236,7 @@ const ASSETS = [
   './assets/items/weapons/rifle_ammo.png',
   './assets/items/weapons/shotgun_ammo.png',
   './assets/items/weapons/sniper_ammo.png',
+  './assets/items/materials/jewlery.png',
   './assets/items/consumable/bandage.png',
   './assets/items/weapons/sniper_box.png',
   './assets/items/weapons/shotgun_box.png',
@@ -270,7 +296,7 @@ self.addEventListener('activate', (event) => {
 async function serve(request, url) {
   const cache = await caches.open(CACHE);
   const navigation = request.mode === 'navigate';
-  const code = navigation || /\.(?:js|css|html|webmanifest)$/.test(url.pathname);
+  const code = /\/structures\//.test(url.pathname) || navigation || /\.(?:js|css|html|webmanifest)$/.test(url.pathname);
   const cached = await cache.match(request);
   if (!code && cached) return cached;
 
@@ -297,7 +323,7 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin || request.headers.has('range')) return;
-  if (request.mode !== 'navigate' && !/\/(?:js|assets|icons|sounds)\//.test(url.pathname)
+  if (request.mode !== 'navigate' && !/\/(?:js|assets|icons|sounds|structures)\//.test(url.pathname)
     && !/\/(?:style\.css|manifest\.webmanifest)$/.test(url.pathname)) return;
   event.respondWith(serve(request, url));
 });

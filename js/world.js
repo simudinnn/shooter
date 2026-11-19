@@ -1302,6 +1302,7 @@ export class World {
       const dz = z1 - z0;
       const lengthSq = dx * dx + dz * dz;
       for (const obs of obstacles) {
+        if (obs === opts.ignoreObstacle) continue;
         if (opts.soundTrace && (!(obs.edgeDir || obs.isDoor || obs.doorSeal) || obs.blocksVision === false)) continue;
         if (opts.feetTrace && obs.blocksBullets === false) continue;
         if (opts.sightTrace && obs.blocksVision === false) continue;

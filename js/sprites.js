@@ -1,3 +1,4 @@
+import { drawOutlinedCanvasText } from './pixelText.js';
 import { customEnemies, customWeapons } from './customContent.js';
 import { EQUIPMENT_ITEM_KEYS, equipmentSpritePath } from './equipment.js';
 /**
@@ -122,6 +123,7 @@ const CORE_ASSETS = {
   scout_walk: 'assets/enemies/scout_walk.png',
   scout_charge: 'assets/enemies/charge.png',
   ...MATERIAL_ASSET_PATHS,
+  radar_on:'assets/items/materials/radar_on.png',
   ...DEAD_ENEMY_ASSET_PATHS,
   ...WORLD_ASSET_PATHS,
   ...BUILDING_ASSET_PATHS,
@@ -1422,16 +1424,21 @@ export class SpriteBank {
     const srcW = img.width || 16;
     const srcH = img.height || 16;
     const c = document.createElement('canvas');
-    c.width = resPx + 2;
-    c.height = resPx + 2;
+    const scale = resPx / Math.max(srcW, srcH);
+    const iconWidth = srcW * scale;
+    const iconHeight = srcH * scale;
+    const iconX = (resPx - iconWidth) / 2;
+    const iconY = resPx - iconHeight;
+    c.width = resPx + 1;
+    c.height = resPx + 1;
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
-    g.drawImage(img, 0, 0, srcW, srcH, 1, 2, resPx, resPx);
+    g.drawImage(img, 0, 0, srcW, srcH, iconX + 0.5, iconY + 0.5, iconWidth, iconHeight);
     g.globalCompositeOperation = 'source-in';
     g.fillStyle = 'rgba(0, 0, 0, 0.24)';
     g.fillRect(0, 0, c.width, c.height);
     g.globalCompositeOperation = 'source-over';
-    g.drawImage(img, 0, 0, srcW, srcH, 0, 0, resPx, resPx);
+    g.drawImage(img, 0, 0, srcW, srcH, iconX, iconY, iconWidth, iconHeight);
     this._groundItemBitmaps.set(key, c);
     return c;
   }
@@ -1443,9 +1450,9 @@ export class SpriteBank {
   drawGroundItem(ctx, spriteName, sx, sy, displayPx = 20, bobY = 0, resPx = 10) {
     const bitmap = this._getGroundItemBitmap(spriteName, resPx);
     if (!bitmap) return;
-    const dw = Math.round(displayPx);
-    const dh = Math.round(displayPx);
-    const drawX = (sx - dw * 0.5);
+    const dw = displayPx;
+    const dh = displayPx;
+    const drawX = sx - dw * 0.5;
     const drawY = (sy - dh + bobY);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.getBakedShadeBitmap(ctx, bitmap), drawX, drawY, dw * bitmap.width / resPx, dh * bitmap.height / resPx);
@@ -1454,16 +1461,16 @@ export class SpriteBank {
   drawGroundItemLabel(ctx, label, sx, sy, bobY = 0, itemDisplayPx = 20) {
     if (!label) return;
     const text = label.length > 18 ? `${label.slice(0, 17)}…` : label;
-    const labelY = Math.round(sy - itemDisplayPx - 3 + bobY);
+    const labelY = sy - itemDisplayPx - 3 + bobY;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.font = '8px GamePixel, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillStyle = 'rgba(8, 8, 12, 0.72)';
-    ctx.fillText(text, (sx) + 1, labelY + 1);
+    drawOutlinedCanvasText(ctx,text, (sx) + 1, labelY + 1);
     ctx.fillStyle = '#e8e4dc';
-    ctx.fillText(text, (sx), labelY);
+    drawOutlinedCanvasText(ctx,text, (sx), labelY);
     ctx.restore();
   }
 

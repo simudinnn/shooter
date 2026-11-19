@@ -1,3 +1,4 @@
+import { drawOutlinedCanvasText } from './pixelText.js';
 import { TILE, BASE_RADIUS, getTerrainMapColorFromTile } from './worldGen.js';
 
 /** Square viewport radius — fills minimap corners when zoomed in. */
@@ -138,6 +139,6 @@ export class Minimap {
     ctx.fillStyle = 'rgb(255, 230, 0)';
     ctx.font = '9px Segoe UI, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('MAP', 6, 12);
+    drawOutlinedCanvasText(ctx,'MAP', 6, 12);
   }
 }

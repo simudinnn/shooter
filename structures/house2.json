@@ -1,0 +1,788 @@
+{
+  "version": 1,
+  "width": 9,
+  "height": 9,
+  "tileSize": 16,
+  "layers": {
+    "tiles": [
+      {
+        "x": 1,
+        "y": 2,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 1,
+        "y": 3,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 1,
+        "y": 4,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 1,
+        "y": 5,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 1,
+        "y": 6,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 1,
+        "y": 7,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 2,
+        "y": 7,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 3,
+        "y": 7,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 4,
+        "y": 7,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 5,
+        "y": 7,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 6,
+        "y": 7,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 7,
+        "y": 7,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 7,
+        "y": 6,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 7,
+        "y": 5,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 7,
+        "y": 4,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 7,
+        "y": 3,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 7,
+        "y": 2,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 6,
+        "y": 2,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 5,
+        "y": 2,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 4,
+        "y": 2,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 3,
+        "y": 2,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 2,
+        "y": 2,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 2,
+        "y": 3,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 2,
+        "y": 4,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 3,
+        "y": 4,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 4,
+        "y": 4,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 5,
+        "y": 4,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 6,
+        "y": 4,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 6,
+        "y": 3,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 5,
+        "y": 3,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 4,
+        "y": 3,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 3,
+        "y": 3,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 2,
+        "y": 5,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 2,
+        "y": 6,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 3,
+        "y": 6,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 4,
+        "y": 6,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 5,
+        "y": 6,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 5,
+        "y": 5,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 6,
+        "y": 5,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 4,
+        "y": 5,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 3,
+        "y": 5,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 6,
+        "y": 6,
+        "asset": "assets/buildings/floor/parket.png",
+        "plane": 0
+      },
+      {
+        "x": 4,
+        "y": 8,
+        "asset": "assets/world/floor_path.png",
+        "plane": 0
+      }
+    ],
+    "props": [
+      {
+        "x": 1,
+        "y": 1,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 3,
+        "y": 1,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 5,
+        "y": 1,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 1,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 1,
+        "y": 2,
+        "asset": "assets/buildings/walls/wall_ew.png#west",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "asset": "assets/buildings/walls/wall_ew.png#west",
+        "plane": 1,
+        "offsetX": 0,
+        "offsetY": 0,
+        "collision": false
+      },
+      {
+        "x": 1,
+        "y": 3,
+        "asset": "assets/buildings/walls/wall_ew.png#west",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 1,
+        "y": 4,
+        "asset": "assets/buildings/walls/wall_ew.png#west",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 1,
+        "y": 5,
+        "asset": "assets/buildings/walls/wall_ew.png#west",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 1,
+        "y": 6,
+        "asset": "assets/buildings/walls/wall_ew.png#west",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 1,
+        "y": 7,
+        "asset": "assets/buildings/walls/wall_ew.png#west",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 2,
+        "asset": "assets/buildings/walls/wall_ew.png#east",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 1,
+        "asset": "assets/buildings/walls/wall_ew.png#east",
+        "plane": 1,
+        "offsetX": 0,
+        "offsetY": 0,
+        "collision": false
+      },
+      {
+        "x": 7,
+        "y": 5,
+        "asset": "assets/buildings/walls/wall_ew.png#east",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 6,
+        "asset": "assets/buildings/walls/wall_ew.png#east",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 7,
+        "asset": "assets/buildings/walls/wall_ew.png#east",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 1,
+        "y": 7,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 1,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 3,
+        "y": 7,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 5,
+        "y": 7,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 7,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 1,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 5,
+        "y": 4,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 6,
+        "y": 4,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 4,
+        "asset": "assets/buildings/walls/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 3,
+        "asset": "assets/buildings/walls/wall_ew.png#east",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 7,
+        "y": 4,
+        "asset": "assets/buildings/walls/wall_ew.png#east",
+        "plane": 1,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 4,
+        "y": 7,
+        "asset": "assets/buildings/doors/mat_wood.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 4,
+        "y": 7,
+        "asset": "assets/buildings/doors/closed_wood.png",
+        "plane": 1,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 6,
+        "y": 1,
+        "asset": "assets/buildings/doors/mat_wood.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 6,
+        "y": 1,
+        "asset": "assets/buildings/doors/closed_wood.png",
+        "plane": 1,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 2,
+        "y": 7,
+        "asset": "assets/buildings/windows/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 6,
+        "y": 7,
+        "asset": "assets/buildings/windows/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 4,
+        "y": 1,
+        "asset": "assets/buildings/windows/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 2,
+        "y": 1,
+        "asset": "assets/buildings/windows/gray.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      {
+        "x": 3,
+        "y": 2,
+        "asset": "assets/buildings/chests/moss.png",
+        "plane": 0,
+        "offsetX": 1,
+        "offsetY": -8
+      },
+      {
+        "x": 7,
+        "y": 5,
+        "asset": "assets/buildings/misc/fridge.png",
+        "plane": 1,
+        "offsetX": -3,
+        "offsetY": -8
+      },
+      {
+        "x": 6,
+        "y": 5,
+        "asset": "assets/buildings/chests/metal.png",
+        "plane": 0,
+        "offsetX": -2,
+        "offsetY": -8
+      },
+      {
+        "x": 6,
+        "y": 6,
+        "asset": "assets/buildings/misc/table.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": -5
+      },
+      {
+        "x": 1,
+        "y": 8,
+        "asset": "assets/buildings/misc/trash.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": -5
+      },
+      {
+        "x": 0,
+        "y": 4,
+        "asset": "assets/buildings/misc/pallet.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": 2
+      },
+      {
+        "x": 0,
+        "y": 3,
+        "asset": "assets/buildings/misc/pallet.png",
+        "plane": 0,
+        "offsetX": 2,
+        "offsetY": 2
+      },
+      {
+        "x": 1,
+        "y": 2,
+        "asset": "assets/buildings/chests/rust.png",
+        "plane": 1,
+        "offsetX": 4,
+        "offsetY": -8
+      },
+      {
+        "x": 2,
+        "y": 8,
+        "asset": "assets/world/foliage_bush.png",
+        "plane": 0,
+        "offsetX": 4,
+        "offsetY": -8
+      },
+      {
+        "x": 5,
+        "y": 8,
+        "asset": "assets/world/foliage_bush2.png",
+        "plane": 0,
+        "offsetX": 5,
+        "offsetY": -8
+      },
+      {
+        "x": 7,
+        "y": 7,
+        "asset": "assets/world/foliage_grass_tall.png",
+        "plane": 2,
+        "offsetX": 7,
+        "offsetY": 4
+      },
+      {
+        "x": 8,
+        "y": 6,
+        "asset": "assets/world/foliage_grass_tall2.png",
+        "plane": 0,
+        "offsetX": -5,
+        "offsetY": -4
+      },
+      {
+        "x": 8,
+        "y": 1,
+        "asset": "assets/world/foliage_grass_tall.png",
+        "plane": 0,
+        "offsetX": -6,
+        "offsetY": -2
+      },
+      {
+        "x": 4,
+        "y": 1,
+        "asset": "assets/world/foliage_grass_tall2.png",
+        "plane": 1,
+        "offsetX": 6,
+        "offsetY": -5
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "asset": "assets/world/foliage_grass_tall2.png",
+        "plane": 2,
+        "offsetX": -7,
+        "offsetY": -3
+      },
+      {
+        "x": 0,
+        "y": 7,
+        "asset": "assets/world/foliage_grass_tall2.png",
+        "plane": 0,
+        "offsetX": 7,
+        "offsetY": 4
+      },
+      {
+        "x": 1,
+        "y": 8,
+        "asset": "assets/world/foliage_grass_tall2.png",
+        "plane": 1,
+        "offsetX": 6,
+        "offsetY": -8
+      },
+      {
+        "x": 0,
+        "y": 3,
+        "asset": "assets/world/foliage_grass_tall2.png",
+        "plane": 1,
+        "offsetX": 4,
+        "offsetY": 5
+      },
+      {
+        "x": 3,
+        "y": 8,
+        "asset": "assets/world/foliage_grass3.png",
+        "plane": 0,
+        "offsetX": 0,
+        "offsetY": -2
+      },
+      {
+        "x": 6,
+        "y": 8,
+        "asset": "assets/world/foliage_grass2.png",
+        "plane": 0,
+        "offsetX": 7,
+        "offsetY": 1
+      },
+      {
+        "x": 8,
+        "y": 7,
+        "asset": "assets/world/foliage_grass3.png",
+        "plane": 0,
+        "offsetX": 1,
+        "offsetY": -1
+      },
+      {
+        "x": 8,
+        "y": 2,
+        "asset": "assets/world/foliage_grass2.png",
+        "plane": 0,
+        "offsetX": -5,
+        "offsetY": -6
+      },
+      {
+        "x": 8,
+        "y": 0,
+        "asset": "assets/world/foliage_grass2.png",
+        "plane": 0,
+        "offsetX": -7,
+        "offsetY": 6
+      },
+      {
+        "x": 5,
+        "y": 0,
+        "asset": "assets/world/foliage_grass.png",
+        "plane": 0,
+        "offsetX": 4,
+        "offsetY": 4
+      },
+      {
+        "x": 4,
+        "y": 0,
+        "asset": "assets/world/foliage_grass2.png",
+        "plane": 0,
+        "offsetX": -2,
+        "offsetY": 1
+      },
+      {
+        "x": 1,
+        "y": 0,
+        "asset": "assets/world/foliage_grass3.png",
+        "plane": 0,
+        "offsetX": -1,
+        "offsetY": 3
+      },
+      {
+        "x": 0,
+        "y": 2,
+        "asset": "assets/world/foliage_grass4.png",
+        "plane": 0,
+        "offsetX": 2,
+        "offsetY": -7
+      },
+      {
+        "x": 0,
+        "y": 5,
+        "asset": "assets/world/foliage_grass4.png",
+        "plane": 0,
+        "offsetX": 1,
+        "offsetY": -4
+      },
+      {
+        "x": 0,
+        "y": 7,
+        "asset": "assets/world/foliage_grass2.png",
+        "plane": 1,
+        "offsetX": 4,
+        "offsetY": -4
+      },
+      {
+        "x": 1,
+        "y": 8,
+        "asset": "assets/world/foliage_grass2.png",
+        "plane": 2,
+        "offsetX": -6,
+        "offsetY": 0
+      },
+      {
+        "x": 2,
+        "y": 8,
+        "asset": "assets/world/foliage_grass3.png",
+        "plane": 1,
+        "offsetX": -6,
+        "offsetY": 0
+      }
+    ],
+    "loot": []
+  },
+  "type": "structure",
+  "name": "house2",
+  "weight": 1
+}

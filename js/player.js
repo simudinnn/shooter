@@ -1,8 +1,9 @@
+import { storageLayout, canEquipHand } from './itemFootprint.js';
 import { customWeapons } from './customContent.js';
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
 import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX } from './sprites.js';
 import { AMMO_STACK_MAX, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
-import { MATERIAL_STACK_MAX, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
+import { MATERIAL_STACK_MAX, materialStackMax, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
 import {
   CONSUMABLE_STACK_MAX,
   getConsumableHealAmount,
@@ -508,6 +509,7 @@ export class Player {
   }
 
   _preferredHandSlotForItem(item) {
+    if (!canEquipHand(1, item)) return 0;
     if (!this.handSlots[this.activeHandSlot]) return this.activeHandSlot;
     if (!this.handSlots[1 - this.activeHandSlot]) return 1 - this.activeHandSlot;
     return this.activeHandSlot;
@@ -535,8 +537,14 @@ export class Player {
     if (handIndex !== 0 && handIndex !== 1) return false;
     if (inventorySlotIndex != null && !this.isItemSlotUnlocked(inventorySlotIndex)) return false;
     const incoming = this._normalizeHandItem(incomingItem);
-    if (!incoming) return false;
+    if(incoming) { delete incoming.storageCell; incoming.rotated=false; }
+    if (!incoming || !canEquipHand(handIndex, incoming)) return false;
     const outgoing = this.getHandSlotItem(handIndex);
+    if (inventorySlotIndex != null) {
+      const candidate = this.itemSlots.slice();
+      candidate[inventorySlotIndex] = outgoing;
+      if (storageLayout(candidate, this.inventoryCapacity, 5).overflow) return false;
+    }
     if (handIndex === this.activeHandSlot) {
       if (incoming.kind === 'melee') this._abortReloadForMeleeSwitch();
       else this._cancelActiveReload();
@@ -660,6 +668,7 @@ export class Player {
     const incoming = this._normalizeWeaponItem(item);
     if (!incoming) return false;
     const targetHand = handIndex ?? this._preferredHandSlotForItem(incoming);
+    if (!canEquipHand(targetHand, incoming)) return false;
     const outgoing = this.getHandSlotItem(targetHand);
     if (targetHand === this.activeHandSlot) this._cancelActiveReload();
     this.handSlots[targetHand] = {
@@ -675,6 +684,18 @@ export class Player {
     return true;
   }
 
+  findStorageSlot(item = {}) {
+    const capacity = this.storageCapacity ?? this.inventoryCapacity;
+    const columns = this.storageColumns ?? 5;
+    for (let index = 0; index < this.itemSlots.length; index++) {
+      if (this.itemSlots[index] || !this.isItemSlotUnlocked(index)) continue;
+      const candidate = this.itemSlots.slice();
+      candidate[index] = item;
+      if (!storageLayout(candidate, capacity, columns).overflow) return index;
+    }
+    return -1;
+  }
+
   isItemSlotUnlocked(index) {
     return Number.isInteger(index) && index >= 0 && index < this.inventoryCapacity;
   }
@@ -688,6 +709,14 @@ export class Player {
     for (let index = this.inventoryCapacity; index < this.itemSlots.length; index++) {
       if (this.itemSlots[index]) drops.push(this.itemSlots[index]);
       this.itemSlots[index] = null;
+    }
+    const layout = storageLayout(this.itemSlots, this.inventoryCapacity, 5);
+    if (layout.overflow) {
+      for (const [index, position] of layout.positions) {
+        if (!this.itemSlots[index] || position.cell < this.inventoryCapacity) continue;
+        drops.push(this.itemSlots[index]);
+        this.itemSlots[index] = null;
+      }
     }
     return drops;
   }
@@ -717,6 +746,7 @@ export class Player {
   equipMeleeFromChest(chestSlots, chestIndex, item, handIndex = null) {
     if (!item || item.kind !== 'melee' || !MELEE_WEAPONS[item.key]) return false;
     const targetHand = handIndex ?? this._preferredHandSlotForItem(item);
+    if(!canEquipHand(targetHand,item))return false;
     const outgoing = this.getHandSlotItem(targetHand);
     if (targetHand === this.activeHandSlot) this._abortReloadForMeleeSwitch();
     this.handSlots[targetHand] = this._normalizeHandItem(item);
@@ -773,7 +803,7 @@ export class Player {
 
   grantRandomWeapon() {
     const key = WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)];
-    const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+    const idx = this.findStorageSlot({ kind: 'weapon', key });
     if (idx < 0) return null;
     const cfg = WEAPONS[key];
     this.itemSlots[idx] = { kind: 'weapon', key, ammo: cfg.magSize };
@@ -782,7 +812,7 @@ export class Player {
 
   grantRandomMelee() {
     const key = MELEE_KEYS[Math.floor(Math.random() * MELEE_KEYS.length)];
-    const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+    const idx = this.findStorageSlot();
     if (idx < 0) return null;
     this.itemSlots[idx] = { kind: 'melee', key };
     return key;
@@ -843,7 +873,7 @@ export class Player {
     }
 
     while (left > 0) {
-      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      const idx = this.findStorageSlot();
       if (idx < 0) break;
       const add = Math.min(left, AMMO_STACK_MAX);
       this.itemSlots[idx] = { kind: 'ammo', ammoType, amount: add };
@@ -867,7 +897,7 @@ export class Player {
       left -= add;
     }
     while (left > 0) {
-      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      const idx = this.findStorageSlot();
       if (idx < 0) break;
       const add = Math.min(left, CONSUMABLE_STACK_MAX);
       this.itemSlots[idx] = { kind: 'consumable', key, amount: add };
@@ -931,23 +961,23 @@ export class Player {
     return true;
   }
 
-  addMaterialToInventory(key, amount = 1) {
+  addMaterialToInventory(key, amount = 1, tier = undefined) {
     let left = Math.max(1, Math.floor(amount));
     for (let i = 0; i < this.itemSlots.length && left > 0; i++) {
       if (!this.isItemSlotUnlocked(i)) continue;
       const slot = this.itemSlots[i];
-      if (slot?.kind !== 'material' || slot.key !== key) continue;
-      const room = MATERIAL_STACK_MAX - (slot.amount ?? 1);
+      if (slot?.kind !== 'material' || slot.key !== key || ((key.endsWith('_pack')||key==='keycard') && (slot.tier??1)!==(tier??1))) continue;
+      const room = materialStackMax({key}) - (slot.amount ?? 1);
       if (room <= 0) continue;
       const add = Math.min(room, left);
       slot.amount = (slot.amount ?? 1) + add;
       left -= add;
     }
     while (left > 0) {
-      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      const idx = this.findStorageSlot();
       if (idx < 0) break;
-      const add = Math.min(left, MATERIAL_STACK_MAX);
-      this.itemSlots[idx] = { kind: 'material', key, amount: add };
+      const add = Math.min(left, materialStackMax({key}));
+      this.itemSlots[idx] = { kind: 'material', key, amount: add, ...((key.endsWith('_pack')||key==='keycard')?{tier:tier??1}:{}) };
       left -= add;
     }
     return amount - left;
@@ -960,7 +990,7 @@ export class Player {
       this.restoreEquipmentSlot(equipmentIndex, item);
       return { ok: true, remainder: null };
     }
-    const handIndex = this.handSlots.indexOf(null);
+    const handIndex = this.handSlots.findIndex((entry, index) => !entry && canEquipHand(index, item));
     if (handIndex >= 0 && this.equipIntoHandSlot(handIndex, item)) {
       return { ok: true, remainder: null };
     }
@@ -968,6 +998,7 @@ export class Player {
   }
 
   tryStoreItem(item) {
+    if(item){item={...item};delete item.storageCell;}
     if (!item) return { ok: false, remainder: null };
     if (item.kind === 'ammo') {
       const ammoType = item.ammoType ?? 'pistol';
@@ -995,7 +1026,7 @@ export class Player {
     if (item.kind === 'equipment') {
       const normalized = normalizeEquipmentItem(item);
       if (!normalized) return { ok: false, remainder: item };
-      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      const idx = this.findStorageSlot();
       if (idx < 0) return { ok: false, remainder: item };
       this.itemSlots[idx] = { ...normalized };
       return { ok: true, remainder: null };
@@ -1003,38 +1034,38 @@ export class Player {
     if (item.kind === 'throwable') {
       const normalized = normalizeThrowableItem(item);
       if (!normalized) return { ok: false, remainder: item };
-      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      const idx = this.findStorageSlot();
       if (idx < 0) return { ok: false, remainder: item };
       this.itemSlots[idx] = { ...normalized };
       return { ok: true, remainder: null };
     }
     if (item.kind === 'material') {
       const normalized = normalizeMaterialItem(item);
-      const stored = this.addMaterialToInventory(normalized.key, normalized.amount);
+      const stored = this.addMaterialToInventory(normalized.key, normalized.amount, normalized.tier);
       if (stored >= normalized.amount) return { ok: true, remainder: null };
       if (stored > 0) {
         return {
           ok: true,
-          remainder: { kind: 'material', key: normalized.key, amount: normalized.amount - stored },
+          remainder: { ...normalized, amount: normalized.amount - stored },
         };
       }
       return { ok: false, remainder: item };
     }
     if (item.kind === 'weapon') {
       if (!WEAPONS[item.key]) return { ok: false, remainder: item };
-      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      const idx = this.findStorageSlot(item);
       if (idx < 0) return { ok: false, remainder: item };
       this.itemSlots[idx] = this._normalizeWeaponItem(item);
       return { ok: true, remainder: null };
     }
     if (item.kind === 'melee') {
       if (!MELEE_WEAPONS[item.key]) return { ok: false, remainder: item };
-      const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+      const idx = this.findStorageSlot();
       if (idx < 0) return { ok: false, remainder: item };
       this.itemSlots[idx] = this._normalizeHandItem(item);
       return { ok: true, remainder: null };
     }
-    const idx = this.itemSlots.findIndex((s, i) => s == null && this.isItemSlotUnlocked(i));
+    const idx = this.findStorageSlot();
     if (idx < 0) return { ok: false, remainder: item };
     this.itemSlots[idx] = item;
     return { ok: true, remainder: null };

@@ -1,3 +1,4 @@
+import { isPack, isTieredItem, packTier, rollPackTier } from './containers.js';
 import { content, contentKey, customWeapons } from './customContent.js';
 import { WEAPONS, MELEE_WEAPONS } from './player.js';
 import { weaponItemSpritePath } from './sprites.js';
@@ -47,17 +48,26 @@ export const CHEST_KIT_KEYS = ['repair_kit', 'sewing_kit', 'upgrade_kit'];
 
 const CHEST_LOOT_KEYS = [...CHEST_MATERIAL_KEYS, ...CHEST_KIT_KEYS];
 
-export const LOOT_EMPTY_WEIGHT = 1000;
+export const LOOT_EMPTY_WEIGHT = 1600;
 
 const RARITY_WEIGHT = {
-  common: 50,
-  uncommon: 40,
-  rare: 30,
-  epic: 20,
+  common: 35,
+  uncommon: 14,
+  rare: 4,
+  epic: 1,
 };
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
+  { key: 'keycard', rarity: 'rare', min: 1, max: 1 },
+  { key: 'key', rarity: 'epic', min: 1, max: 1 },
+  { key: 'laptop', rarity: 'epic', min: 1, max: 1 },
+  { key: 'phone', rarity: 'uncommon', min: 1, max: 1 },
+  { key: 'barbed_wire', rarity: 'uncommon', min: 1, max: 1 },
+  { key: 'gas_bottle', rarity: 'uncommon', min: 1, max: 1 },
+  { key: 'generator', rarity: 'rare', min: 1, max: 1 },
+  { key: 'matches', rarity: 'common', min: 1, max: 1 },
+  { key: 'radar', rarity: 'rare', min: 1, max: 1 },
   { key: 'jewlery', rarity: 'rare', min: 1, max: 1 },
   {
     "key": "blueprint",
@@ -145,33 +155,33 @@ const LOOT_ENTRIES = [
   },
   {
     "key": "pistol_box",
-    "rarity": "uncommon",
+    "rarity": "rare",
     "min": 1,
     "max": 1
   },
   {
     "key": "rifle_box",
-    "rarity": "uncommon",
+    "rarity": "rare",
     "min": 1,
     "max": 1
   },
   {
     "key": "shotgun_box",
-    "rarity": "uncommon",
+    "rarity": "rare",
     "min": 1,
     "max": 1
   },
   {
     "key": "sniper_box",
-    "rarity": "uncommon",
+    "rarity": "rare",
     "min": 1,
     "max": 1
   },
   {
     "key": "cash",
-    "rarity": "common",
+    "rarity": "epic",
     "min": 1,
-    "max": 40
+    "max": 8
   }
 ];
 
@@ -182,15 +192,15 @@ const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 
 /** Chest gear category weights (compete with materials + empty). */
 const CHEST_GEAR_WEIGHT = {
-  ammo: 22,
+  ammo: 5,
   bandage: 22,
-  melee: 12,
-  weapon: 8,
+  melee: 2,
+  weapon: 1,
 };
 
 const EQUIPMENT_LOOT_WEIGHTS = {
-  backpack_1: 12, backpack2: 5, backpack3: 2,
-  vest: 9, hunting_vest: 7, police_vest: 5, military_vest: 3,
+  backpack_1: 2, backpack2: 0.7, backpack3: 0.2,
+  vest: 1.5, hunting_vest: 1, police_vest: 0.5, military_vest: 0.3,
 };
 
 function rollMaterialAmount(entry) {
@@ -227,7 +237,7 @@ function buildChestLootOptions() {
     if (!entry) continue;
     options.push({
       weight: RARITY_WEIGHT[entry.rarity],
-      roll: () => ({ kind: 'material', key: entry.key, amount: rollMaterialAmount(entry) }),
+      roll: () => ({ kind: 'material', key: entry.key, amount: rollMaterialAmount(entry), ...((entry.key.endsWith('_pack')||entry.key==='keycard')?{tier:rollPackTier()}:{}) }),
     });
   }
   options.push({ weight: CHEST_GEAR_WEIGHT.ammo, roll: rollChestAmmoItem });
@@ -354,7 +364,7 @@ export function getItemDisplayName(item) {
   }
   if (item.kind === 'material') {
     const normalized = normalizeMaterialItem(item);
-    return getMaterialDisplayName(normalized.key, normalized.amount);
+    return (isTieredItem(normalized)?'Tier '+packTier(normalized)+' ':'')+getMaterialDisplayName(normalized.key, normalized.amount);
   }
   return '';
 }
@@ -393,7 +403,9 @@ export function getItemDescription(item) {
     return getThrowableDescription(normalized.key);
   }
   if (item.kind === 'material') {
-    if (item.key.endsWith('_pack')) return 'Sealed loot pack. Sell in the safe zone.';
+    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',matches:'Matches. Their purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Access functionality is not assigned yet.',key:'A key. Lock functionality is not assigned yet.',laptop:'Valuable laptop. Sell to the trader.',phone:'Valuable phone. Sell to the trader.'};
+    if(tools[item.key])return tools[item.key];
+    if (isPack(item)) return 'Tier '+packTier(item)+' sealed pack. Open for random loot or sell. Rare weapons and blueprints are not guaranteed.';
     if (item.key.endsWith('_box')) return 'Sealed ammunition box. Open for ammunition.';
     if (item.key === 'blueprint') return 'Blueprint for a permanent shop unlock.';
     if (item.key === 'blueprint_old') return 'Already studied blueprint. Valuable to traders.';
@@ -429,7 +441,7 @@ export function getItemIconSrc(item) {
     const normalized = normalizeThrowableItem(item);
     return throwableSpritePath(normalized?.key ?? item.key);
   }
-  if (item.kind === 'material') return materialSpritePath(item.key);
+  if (item.kind === 'material') return item.key==='radar'&&item.radarOn?'assets/items/materials/radar_on.png':materialSpritePath(item.key);
   return '';
 }
 
@@ -460,7 +472,7 @@ export function getItemSpriteName(item) {
     const normalized = normalizeThrowableItem(item);
     return normalized?.key ?? null;
   }
-  if (item.kind === 'material') return item.key;
+  if (item.kind === 'material') return item.key==='radar'&&item.radarOn?'radar_on':item.key;
   return null;
 }
 

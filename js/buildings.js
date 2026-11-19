@@ -146,12 +146,18 @@ function hasSprite(sprites, name) {
   return !!(img && (img.naturalWidth > 0 || img.width > 0));
 }
 
+// A half-screen-pixel bleed closes fractional rasterization seams without snapping the camera.
+export function drawWallImage(ctx, image, x, y, width, height) {
+  ctx.drawImage(image, x - 0.5, y - 0.5, width + 1, height + 1);
+}
+
 function drawBuildingTile(sprites, ctx, name, x, y, tilePx) {
   const img = sprites?.images?.[name];
   if (!img) return false;
-  const px = Math.round(tilePx);
+  const px = tilePx;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, x, y, px, px);
+  if (/^bld_(wall|window)_/.test(name)) drawWallImage(ctx, img, x, y, px, px);
+  else ctx.drawImage(img, x, y, px, px);
   return true;
 }
 
@@ -209,7 +215,7 @@ function drawSnappedWallSprite(sprites, ctx, name, x, y, w, h) {
   const img = sprites?.images?.[name];
   if (!img) return false;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, x, y, w, h);
+  drawWallImage(ctx, img, x, y, w, h);
   return true;
 }
 function drawPlaceholderFloor(ctx, x, y, w, h) {
@@ -434,8 +440,8 @@ export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, spr
   const { tx, tz, orient } = wall;
   const style = buildingStyle(building);
   const { x: tileX, y: tileY } = buildingTileTopLeft(originX, originZ, tx, tz, worldToScreen);
-  const segH = Math.round(tilePx);
-  const ewDrawW = Math.max(2, Math.round(tilePx / 4));
+  const segH = tilePx;
+  const ewDrawW = tilePx / 4;
 
   if (sprites) {
     const primary = wallSpriteId(style, orient);
@@ -477,15 +483,15 @@ export function drawDecorPiece(ctx, sprites, piece, tilePx, worldToScreen) {
   if (piece.interior) {
     const img = sprites.images[piece.sprite];
     const nativeH = img?.naturalHeight || img?.height || 16;
-    const drawH = Math.round((nativeH / 16) * tilePx);
-    sprites.drawPropSprite(ctx, piece.sprite, Math.round(ss.x), Math.round(ss.y), drawH, {
+    const drawH = (nativeH / 16) * tilePx;
+    sprites.drawPropSprite(ctx, piece.sprite, ss.x, ss.y, drawH, {
       anchor: 'center',
     });
     return;
   }
 
   const { drawH } = barrelScreenSize(tilePx);
-  sprites.drawPropSprite(ctx, piece.sprite, Math.round(ss.x), Math.round(ss.y), drawH, {
+  sprites.drawPropSprite(ctx, piece.sprite, ss.x, ss.y, drawH, {
     anchor: 'center',
   });
 }

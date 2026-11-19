@@ -198,7 +198,7 @@ export class ChunkEntityManager {
     const nextChests = [];
     for (const chest of this.game.chests.chests) {
       const home = chest.homeBuilding;
-      if (home?.persistentTown || home?.townId || home?.townAnchorId) {
+      if (chest.authored || home?.persistentTown || home?.townId || home?.townAnchorId) {
         nextChests.push(chest);
         continue;
       }

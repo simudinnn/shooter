@@ -30,7 +30,7 @@ canvas {
 }
 
 :root {
-  --tooltip-bg: #1a0b0b;
+  --tooltip-bg: #252525;
   --tooltip-border: #898989;
   --pixel-font: 'GamePixel';
   --pixel-text-scale: 3;
@@ -4069,3 +4069,189 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 
 /* Crafting has been retired from the raid economy. */
 #craft-panel, #inv-craft-toggle { display: none !important; }
+
+/* FAL 3 × 1 storage prototype. */
+.inventory-wide-item { aspect-ratio: var(--item-width) / var(--item-height) !important; width: 100%; }
+.inventory-wide-item img, .inventory-wide-item .inv-slot-icon { width: 92% !important; height: 78% !important; object-fit: contain; }
+#raid-stash > [hidden], #raid-kit > [hidden], #inv-items-grid > [hidden] { display: none !important; }
+
+.inv-wide-drag .inv-slot-icon { width: 216px; max-width: 216px; height: 72px; max-height: 72px; object-fit: contain; }
+.inv-chest-slot[hidden] { display: none !important; }
+
+/* Multi-cell inventory slots keep their supplied frames and item proportions. */
+.inventory-wide-item { position:relative; height:100%; min-height:0; }
+.inventory-wide-item > img:not(.inv-slot-label):not(.raid-gear-placeholder) { width:90% !important; height:82% !important; object-fit:contain; }
+.inventory-rotated-item > img:not(.inv-slot-label):not(.raid-gear-placeholder) { position:absolute; left:50%;top:50%;width:calc(var(--item-height) * 82%) !important;height:calc(90% / var(--item-height)) !important;max-width:none !important;max-height:none !important;transform:translate(-50%,-50%) rotate(90deg); }
+.inv-drag-ghost { display:flex;align-items:center;justify-content:center; }
+.inv-drag-ghost > .inv-slot-icon { width:90%;height:90%;max-width:none;max-height:none;object-fit:contain; }
+.inv-weapons-grid .inv-weapon-slot { width:100%;height:auto;max-height:none;aspect-ratio:var(--item-width) / 1;justify-self:start; }
+.inv-weapons-grid .inv-weapon-slot[data-hand-width="2"] { width:66.6667%; }
+#raid-gear .raid-base-slot[data-hand-width] { height:auto;min-height:0;aspect-ratio:var(--item-width) / 1 !important;align-self:center; }
+#raid-gear .raid-base-slot[data-hand-width="2"] { width:66.6667%;justify-self:start; }
+
+.inv-chest-grid { grid-auto-rows: var(--chest-slot-size); }
+
+/* All inventory and equipment slots use the original square frame. */
+.inv-weapons-grid .inv-weapon-slot, #raid-gear .raid-base-slot[data-hand-width] { width:auto; height:min(100%,var(--inv-gear-slot-size,100%)); aspect-ratio:1 !important; justify-self:center; }
+#raid-gear .raid-base-slot[data-hand-width] { width:100%;height:100%; }
+
+.inv-pack-tier { position:absolute;left:5%;top:5%;pointer-events:none; }
+
+/* A 16px item fits the 18px slot with the same pixel scale in both inventories. */
+:is(.inv-item-slot,.inv-chest-slot,.inv-equip-slot,.inv-weapon-slot,.raid-base-slot) { container-type:inline-size; }
+:is(.inv-item-slot,.inv-chest-slot,.inv-equip-slot,.inv-weapon-slot) > .inv-slot-icon:not(.inv-slot-label),
+#raid-base .raid-base-slot > img:not(.raid-gear-placeholder) {
+ width:88.888889% !important;height:88.888889% !important;max-width:88.888889% !important;max-height:88.888889% !important;object-fit:contain !important;
+ filter:drop-shadow(5.555556cqw 5.555556cqw 0 #0004);
+}
+.raid-drag-ghost,.inv-drag-ghost > .inv-slot-icon { filter:drop-shadow(1px 1px 0 #0004); }
+.inv-pack-tier, #raid-base .raid-base-slot > .inv-pack-tier {
+ position:absolute;left:8%;top:8%;right:auto !important;bottom:auto !important;z-index:2;pointer-events:none;width:auto;height:auto;line-height:1;
+}
+.inv-pack-tier > .inv-pixel-text-img, #raid-base .raid-base-slot .inv-pack-tier > img {
+ position:static;inset:auto;width:auto !important;height:auto !important;max-width:none !important;max-height:none !important;transform:none;
+ filter:brightness(0) saturate(100%) invert(81%) sepia(75%) saturate(541%) hue-rotate(354deg) brightness(98%) contrast(93%);
+}
+
+/* Two source pixels of padding on each side of an 18px slot. */
+:is(.inv-item-slot,.inv-chest-slot,.inv-equip-slot,.inv-weapon-slot) > .inv-slot-icon:not(.inv-slot-label),
+#raid-base .raid-base-slot > img:not(.raid-gear-placeholder) {
+ width:77.777778% !important;height:77.777778% !important;max-width:77.777778% !important;max-height:77.777778% !important;
+ filter:drop-shadow(2.777778cqw 2.777778cqw 0 #0004);
+}
+.raid-drag-ghost,.inv-drag-ghost > .inv-slot-icon { filter:drop-shadow(.5px .5px 0 #0004); }
+.inv-stack-count, #raid-base .raid-item-count > .inv-pixel-text-img {
+ filter:drop-shadow(.6px 0 0 #000) drop-shadow(-.6px 0 0 #000) drop-shadow(0 .6px 0 #000) drop-shadow(0 -.6px 0 #000);
+}
+.raid-shop-price > img,.raid-shop-price-icon { width:40px;height:40px;object-fit:contain; }
+#raid-base #raid-selection button .raid-shop-price-icon { flex-basis:32px;width:32px;height:32px; }
+#raid-base .raid-base-balance > img { width:54px;height:54px;object-fit:contain; }
+#pack-radar { padding:6px 10px;border:1px solid #555;background:#151a15d9;color:#879181;font-family:var(--pixel-font);font-size:18px; }
+#pack-radar.lit { color:#b7ff72;border-color:#97d756;box-shadow:0 0 10px #99ec4466;text-shadow:0 0 6px #bbff77; }
+#pack-radar[hidden] { display:none; }
+@media(max-width:700px){#raid-base .raid-base-balance > img{width:40px;height:40px;}}
+
+#pack-radar { display:flex;align-items:center;gap:8px; }
+#pack-radar > img { width:36px;height:36px;object-fit:contain;image-rendering:pixelated; }
+
+/* Thin outlines follow the text colour for native UI text. Atlas labels are outlined when rendered. */
+:where(body,button,input,select,textarea,label,p,span,h1,h2,h3,h4,div) { text-shadow:.5px 0 color-mix(in srgb,currentColor 20%,black),-.5px 0 color-mix(in srgb,currentColor 20%,black),0 .5px color-mix(in srgb,currentColor 20%,black),0 -.5px color-mix(in srgb,currentColor 20%,black); }
+.inv-stack-count,#raid-base .raid-item-count > .inv-pixel-text-img { filter:none; }
+
+.item-multi-selected { outline:2px solid #e5bb54 !important;outline-offset:-3px;box-shadow:inset 0 0 0 3px #e5bb5466 !important; }
+.inventory-batch-actions { position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:500;display:flex;gap:10px;padding:10px;background:#252525;border:1px solid #a69059; }
+.inventory-batch-actions[hidden] { display:none; }
+.inventory-batch-actions button { font-size:16px;padding:8px 12px; }
+
+.batch-drag-count { position:absolute;right:0;bottom:0;padding:3px 6px;background:#252525;color:#efce78;border:1px solid #efce78;font-size:18px;line-height:1; }
+
+:is(.inv-item-slot,.inv-chest-slot) > .inv-slot-icon.inv-slot-lock,
+#raid-base .raid-base-slot[data-locked="true"] > img { width:100% !important;height:100% !important;max-width:100% !important;max-height:100% !important;filter:none;opacity:1; }
+.inv-context-slider-track::before { background:#292929; }
+:is(#raid-base,#inventory) .raid-quantity-dialog input::-webkit-slider-runnable-track { background:#292929; }
+:is(#raid-base,#inventory) .raid-quantity-dialog input::-moz-range-track { background:#292929; }
+.raid-sale-pile { display:flex !important;flex-wrap:wrap;gap:12px;max-width:320px;justify-content:center; }
+.raid-sale-pile > div { display:flex;align-items:center;gap:3px; }
+
+/* Outlined native text; bitmap glyph outlines are baked into their images. */
+:where(body,button,input,select,textarea,label,p,span,h1,h2,h3,h4,div) { -webkit-text-stroke:.7px color-mix(in srgb,currentColor 23%,black);paint-order:stroke fill; }
+.inv-pack-tier > .inv-pixel-text-img,#raid-base .raid-base-slot .inv-pack-tier > img { filter:brightness(0) saturate(100%) invert(81%) sepia(75%) saturate(541%) hue-rotate(354deg) brightness(98%) contrast(93%) drop-shadow(1px 0 #5c4615) drop-shadow(-1px 0 #5c4615) drop-shadow(0 1px #5c4615) drop-shadow(0 -1px #5c4615); }
+
+/* Plain text everywhere; only quantity and tier bitmaps request their own outlines. */
+:where(body,button,input,select,textarea,label,p,span,h1,h2,h3,h4,div) { -webkit-text-stroke:0 !important;text-shadow:none !important; }
+.inv-pack-tier > .inv-pixel-text-img,#raid-base .raid-base-slot .inv-pack-tier > img { filter:none !important; }
+/* Real locks fill the slot. Locked shop items keep the normal item padding. */
+#raid-base #raid-shop .raid-base-slot[data-locked="true"] > img:not(.raid-gear-placeholder) {width:77.777778% !important;height:77.777778% !important;max-width:77.777778% !important;max-height:77.777778% !important;}
+.option-unavailable,button:disabled { opacity:.42;filter:grayscale(1); }
+.raid-sale-pile { display:flex !important;flex-wrap:wrap;gap:8px 0 !important;padding-right:20px;max-width:250px; }
+.raid-sale-pile > div { position:relative;flex:0 0 25px;width:25px;overflow:visible; }
+:is(#raid-base,#inventory) .raid-quantity-dialog .raid-sale-pile > div > img { flex:none;width:46px;height:46px;max-width:none;object-fit:contain; }
+.inv-cursor-follow {width:128px !important;height:128px !important;}
+.menu-cursor-follow {width:64px;height:64px;}
+/* Use the supplied nine-slice for interaction outlines without changing layout. */
+:where(button,a,input,select,textarea,.inv-slot-sprite,.inv-context-slider-track) {outline:none !important;}
+button,.inv-slot-sprite {position:relative;}
+button::after,.inv-slot-sprite::after {content:'';position:absolute;inset:-2px;border:4px solid transparent;border-image:url('assets/ui/outline_9slice.png') 4 stretch;pointer-events:none;opacity:0;z-index:5;box-sizing:border-box;}
+button:not(:disabled):hover::after,button:focus-visible::after,.inv-slot-sprite.inv-drop-target::after,.inv-slot-sprite.item-multi-selected::after {opacity:1;}
+.item-multi-selected {outline:none !important;box-shadow:none !important;}
+input[type="range"],input[type="range"]:focus-visible,.inv-context-slider-track:has(:focus-visible) {outline:none !important;box-shadow:none !important;}
+
+.inv-slot-sprite.inv-selected::after,.inv-craft-pick-selected::after,.inv-slot-sprite:focus::after {opacity:1;}
+:is(button,.inv-slot-sprite):is(:focus,:focus-visible,:hover,.inv-selected,.item-multi-selected) {outline:none !important;box-shadow:none !important;}
+#inventory :is(#inventory-panel,#chest-panel,#craft-panel) {outline:none !important;}
+:is(.inv-context-menu,.raid-quantity-dialog,.menu-frame) {border-image:url('assets/ui/outline_9slice.png') 4 stretch;}
+:is(input:not([type="range"]),select,textarea):focus-visible {border-image:url('assets/ui/outline_9slice.png') 4 stretch;outline:none !important;}
+
+.inv-cursor-follow {width:80px !important;height:80px !important;}
+.menu-cursor-follow {width:80px;height:80px;}
+/* The pseudo element's containing block excludes the button border. Extend by that exact width. */
+button.ui-slice-button::after {inset:calc(-1 * var(--ui-btn-border));border-width:var(--ui-btn-border);border-image-slice:2;}
+.inv-slot-sprite {overflow:visible;}
+.inv-slot-sprite::after {inset:-5.555556cqw;border-width:5.555556cqw;border-image-slice:1;}
+:is(.inv-context-menu,.raid-quantity-dialog,.menu-frame,.raid-base-section) {border-image:url('assets/ui/outline_9slice.png') 2 stretch;}
+#raid-base .raid-base-top nav button {border-image:url('assets/ui/outline_9slice.png') 2 stretch;}
+#raid-base :is(.raid-catalog-heading,.raid-base-section h2) {border-image:url('assets/ui/outline_9slice.png') 1 stretch;}
+
+/* Leave room inside scrollports for the expanded slot outline. */
+#raid-stash,#raid-kit,#raid-gear,.inv-items-grid,.inv-chest-grid {padding:10px;scroll-padding:10px;}
+#raid-stash {box-sizing:border-box;}
+#overlay #raid-base .raid-base-mission #raid-deploy,
+#overlay #raid-base .raid-base-mission #raid-deploy:is(:hover,:focus,:focus-visible,:active) {outline:none !important;box-shadow:none !important;filter:none !important;animation:none;}
+#raid-deploy::after,#raid-deploy-now::after {display:none !important;}
+#raid-map-select {min-width:150px !important;max-width:280px;min-height:36px;padding:5px 12px;font-size:16px;}
+#raid-map-select .inv-pixel-text-img {max-height:18px;object-fit:contain;}
+
+#raid-deploy-confirm,#raid-deploy-confirm:is(:hover,:focus,:focus-visible) {box-shadow:none !important;outline:none !important;filter:none !important;}
+#raid-deploy-confirm::after {display:none !important;}
+.inv-slot-sprite:is(:hover,:focus,.item-multi-selected,.inv-selected) {z-index:2;}
+.inv-items-grid,.inv-chest-grid,#raid-kit,#raid-gear {box-sizing:border-box;}
+
+/* Keep the equation together when the pile wraps onto multiple rows. */
+:is(#raid-base,#inventory) .raid-quantity-dialog .raid-batch-sale-preview {display:flex;flex-direction:column;align-items:center;gap:16px;}
+:is(#raid-base,#inventory) .raid-quantity-dialog .raid-sale-total {display:flex;flex-flow:row nowrap;align-items:center;justify-content:center;gap:14px;}
+.raid-sale-total > div {display:flex;align-items:center;gap:8px;white-space:nowrap;}
+:is(dialog,.raid-quantity-dialog,.inv-context-menu,.menu-frame,.raid-base-section,#raid-settings,#raid-deploy-dialog,#raid-challenges article),
+:is(dialog,.raid-quantity-dialog,.inv-context-menu,.menu-frame):is(:focus,:focus-visible) {
+ outline:none !important;border:0 !important;border-image:none !important;border-radius:0 !important;
+ box-shadow:0 8px 24px #0009 !important;
+}
+#inventory :is(#inventory-panel,#chest-panel,#craft-panel) {outline:none !important;box-shadow:0 8px 24px #0009;}
+
+/* Pointer clicks and empty-slot hover do not leave selection outlines. */
+#inventory .inv-slot-sprite::after {opacity:0;}
+#inventory .inv-slot-sprite:is(.item-multi-selected,.inv-drop-target)::after,
+#inventory .inv-slot-sprite:focus-visible::after {opacity:1;}
+.inv-cursor-follow {width:40px !important;height:40px !important;}
+
+/* Shared UI palette and action hierarchy. */
+:root {--ui-panel-bg:#252823;--ui-panel-shadow:0 8px 24px #0009;--ui-divider:#8b7a4d66;}
+.inv-context-menu {background:var(--ui-panel-bg) !important;}
+:is(#raid-settings,#raid-reset-dialog,#raid-deploy-dialog,.raid-quantity-dialog,.menu-frame) {background:var(--ui-panel-bg) !important;box-shadow:var(--ui-panel-shadow) !important;}
+#raid-settings fieldset {border:1px solid var(--ui-divider);}
+:is(.ui-action-red,#raid-reset-dialog button[value="reset"],#raid-deploy-confirm).ui-slice-button {border-image-source:url('assets/ui/red_button_9slice.png') !important;}
+.inv-context-slider-thumb {border-image-source:url('assets/ui/red_button_9slice.png') !important;}
+input[type="range"]::-webkit-slider-thumb {background:#a82a23 url('assets/ui/red_button_9slice.png') center/100% 100% !important;border-radius:0;}
+input[type="range"]::-moz-range-thumb {background:#a82a23 url('assets/ui/red_button_9slice.png') center/100% 100% !important;border-radius:0;}
+/* Deploy only highlights on hover; its normal state has no glow. */
+#raid-deploy::after,#raid-deploy-confirm::after {display:block !important;opacity:0;}
+#raid-deploy:not(:disabled):hover::after,#raid-deploy-confirm:not(:disabled):hover::after {opacity:1;}
+.raid-shop-price,.raid-base-balance,.raid-sale-total > div {display:flex;align-items:center;gap:7px;}
+
+/* Grid tracks must reserve the outline gutters inside both inventory grids. */
+#raid-base .raid-loadout-layout {
+  --raid-load-cell: min(96px, calc((100cqh - 20px - 4 * var(--raid-slot-gap)) / 5), calc((100cqw - 40px - 5.25 * var(--raid-slot-gap)) / 6.25));
+}
+#raid-deploy-dialog .raid-loadout-layout {
+  --raid-load-cell: min(96px, calc((100cqh - 26px - 4 * var(--raid-slot-gap)) / 5), calc((100cqw - 46px - 5.25 * var(--raid-slot-gap)) / 6.25));
+}
+
+/* Full-size stash loadout; compact deploy review retains its own size limit. */
+#raid-base .raid-base-workspace .raid-loadout-layout {
+  --raid-load-cell: min(128px, calc((100cqh - 20px - 4 * var(--raid-slot-gap)) / 5), calc((100cqw - 40px - 5.25 * var(--raid-slot-gap)) / 6.25));
+}
+#overlay #raid-base .raid-base-top :is(nav button,#raid-settings-open).ui-slice-button {
+  border: var(--ui-btn-border) solid transparent;
+  border-image: url('assets/ui/ui_button_9slice.png') var(--ui-btn-slice) fill stretch;
+  background: transparent;
+  box-shadow: none;
+}

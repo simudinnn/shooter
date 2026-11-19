@@ -1,8 +1,13 @@
+import { drawOutlinedCanvasText } from './pixelText.js';
+import { moveStacks } from './batchInventory.js';
+import { PLACEABLE_TOOLS } from './tools.js';
+import { isContainer, isPack, isTieredItem, packTier, openContainer } from './containers.js';
+import { itemWidth, itemSize, canEquipHand, styleItemSlot, storageLayout, applyStorageLayout } from './itemFootprint.js';
 import { normalizeThrowableItem } from './throwables.js';
 import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, EQUIPMENT_SLOT_COUNT, HAND_SLOT_COUNT } from './player.js';
 import { weaponItemSpritePath } from './sprites.js';
 import { CHEST_SLOT_COUNT, getItemDisplayName, getItemDescription, getItemIconSrc } from './loot.js';
-import { mergeMaterialStacks, MATERIAL_STACK_MAX, materialItemsMatch } from './materials.js';
+import { mergeMaterialStacks, MATERIAL_STACK_MAX, materialStackMax, materialItemsMatch } from './materials.js';
 import {
   AMMO_STACK_MAX,
   BANDAGE_STACK_MAX,
@@ -148,8 +153,60 @@ export class InventoryUI {
       this.game.modifiers.shift = e.shiftKey;
       this.game.modifiers.ctrl = e.ctrlKey;
     };
+    document.addEventListener('keydown', (e) => {
+      if (!this.open || e.code !== 'KeyR' || e.repeat || !this.drag?.moved) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const item=this.drag.stashedItem;
+      if(itemWidth(item)<=1)return;
+      item.rotated=!item.rotated;
+      this.drag.ghost?.remove();this._createDragGhost();
+      this.drag.ghost.style.left=this.drag.lastX+'px';this.drag.ghost.style.top=this.drag.lastY+'px';
+    }, true);
+    this._initBatchSelection();
     this.root?.addEventListener('keydown', syncMods);
     this.root?.addEventListener('keyup', syncMods);
+  }
+
+  _initBatchSelection(){
+    this.batchSelection=new Map();
+    this.root.addEventListener('pointerdown',e=>{
+      if(e.ctrlKey||e.metaKey||!this.batchSelection.size||e.target.closest('.inventory-batch-actions,dialog'))return;
+      const slot=e.target.closest('.inv-item-slot,.inv-chest-slot');
+      const selected=slot?.classList.contains('item-multi-selected');
+      const clear=()=>{this.batchSelection.clear();this._syncBatchSelection();};
+      if(!selected){clear();return;}
+      const x=e.clientX,y=e.clientY;
+      document.addEventListener('pointerup',up=>{if(Math.hypot(up.clientX-x,up.clientY-y)<5)clear();},{once:true,capture:true});
+    },true);
+    document.addEventListener('pointerdown',e=>{if(!e.ctrlKey&&!e.metaKey&&this.batchSelection.size&&!this.root.contains(e.target)){this.batchSelection.clear();this._syncBatchSelection();}},true);
+
+    this.root?.addEventListener('pointerdown',e=>{
+      if(!(e.ctrlKey||e.metaKey)||e.button!==0)return;
+      const slot=e.target.closest('.inv-item-slot:not(.inv-locked),.inv-chest-slot');if(!slot)return;
+      const container=slot.classList.contains('inv-chest-slot')?'chest':'item',index=Number(slot.dataset.slotIndex);
+      if(!this._itemForContainer(container,index,this.game.player))return;
+      e.preventDefault();e.stopImmediatePropagation();
+      const token=container+':'+index;if(this.batchSelection.has(token))this.batchSelection.delete(token);else this.batchSelection.set(token,{container,index});
+      this._hideContextMenu();this._syncBatchSelection();
+    },true);
+    this.root?.addEventListener('click',e=>{if((e.ctrlKey||e.metaKey)&&e.target.closest('.inv-item-slot,.inv-chest-slot')){e.preventDefault();e.stopImmediatePropagation();}},true);
+  }
+  _syncBatchSelection(){
+    if(!this.batchSelection)return;
+    for(const [token,p] of this.batchSelection)if(!this._itemForContainer(p.container,p.index,this.game.player))this.batchSelection.delete(token);
+    for(const slot of this.root.querySelectorAll('.inv-item-slot,.inv-chest-slot')){const container=slot.classList.contains('inv-chest-slot')?'chest':'item';slot.classList.toggle('item-multi-selected',this.batchSelection.has(container+':'+slot.dataset.slotIndex));}
+  }
+  _finishBatchDrag(e){
+    const {player,dropTarget}=this.drag;
+    this._restoreDragItem();
+    const container=dropTarget?.classList.contains('inv-item-slot')?'item':dropTarget?.classList.contains('inv-chest-slot')?'chest':null;
+    const ground=!dropTarget&&!this._isPointerOverInventoryPanels(e.clientX,e.clientY);
+    if(container||ground){
+      const result=moveStacks({item:player.itemSlots,chest:this.chest?.slots??[],ground:Array(this.batchSelection.size).fill(null)},[...this.batchSelection.values()],{container:ground?'ground':container,index:ground?0:Number(dropTarget.dataset.slotIndex)},{item:player.inventoryCapacity,chest:this.chest?.slots.length??0,ground:this.batchSelection.size});
+      if(result){player.itemSlots=result.item;if(this.chest)for(let i=0;i<result.chest.length;i++)this.chest.slots[i]=result.chest[i];if(ground)for(const item of result.ground)if(item)this.tryDropOnGround(e,item);this.batchSelection.clear();this.game.audio?.inventoryPlace();}
+      else this.game.items?.setPickupMsg('Not enough room for the selected items.');
+    }
+    this._clearDragVisuals();this.drag=null;this._skipClick=true;this.render();this._syncBatchSelection();
   }
 
   _isShiftClick(e) {
@@ -181,8 +238,8 @@ export class InventoryUI {
     g.fillStyle = '#f0a030';
     g.font = 'bold 14px monospace';
     g.textAlign = 'left';
-    g.fillText('GEAR', 24, 32);
-    g.fillText('ITEMS', 236, 32);
+    drawOutlinedCanvasText(g,'GEAR', 24, 32);
+    drawOutlinedCanvasText(g,'ITEMS', 236, 32);
     return c.toDataURL('image/png');
   }
 
@@ -216,7 +273,7 @@ export class InventoryUI {
     g.fillStyle = '#c8a860';
     g.font = 'bold 14px monospace';
     g.textAlign = 'left';
-    g.fillText('CHEST', 24, 28);
+    drawOutlinedCanvasText(g,'CHEST', 24, 28);
     return c.toDataURL('image/png');
   }
 
@@ -262,6 +319,7 @@ export class InventoryUI {
     this.chestMode = true;
     this.chest = chest;
     if (!chest.isCorpse) {
+      if(!chest._challengeSearched&&this.game.player.raidStats){chest._challengeSearched=true;this.game.player.raidStats.chestsSearched=(this.game.player.raidStats.chestsSearched??0)+1;}
       chest.opened = true;
       this.game.audio?.chestOpen(this.game._soundOffset(chest, chest.z));
     }
@@ -319,6 +377,7 @@ export class InventoryUI {
     this.chest = null;
     this._setCraftOpen(false);
     this._setChestLayout(false);
+    this.batchSelection?.clear();
     this.root?.classList.remove('open');
     setTimeout(() => {
       this.root?.classList.add('hidden');
@@ -520,6 +579,7 @@ export class InventoryUI {
   _canDropOnHand(handIndex) {
     const data = this._dragItemData();
     return !!(data && (data.kind === 'weapon' || data.kind === 'melee')
+      && canEquipHand(handIndex, data)
       && (data.kind !== 'weapon' || WEAPONS[data.key])
       && (data.kind !== 'melee' || MELEE_WEAPONS[data.key]));
   }
@@ -582,7 +642,7 @@ export class InventoryUI {
 
   _appendStackCount(slot, amount) {
     if (!amount || amount <= 1) return;
-    const label = createPixelTextImg(String(amount), this.game.mobile ? PIXEL_TEXT_SCALE_SM : PIXEL_TEXT_SCALE);
+    const label = createPixelTextImg(String(amount), this.game.mobile ? PIXEL_TEXT_SCALE_SM : PIXEL_TEXT_SCALE,{outlineColor:[0,0,0]});
     label.className = 'inv-stack-count inv-pixel-text-img';
     slot.appendChild(label);
   }
@@ -599,12 +659,18 @@ export class InventoryUI {
     return this._slotIcon(weaponItemSpritePath(sprite));
   }
 
+  _appendPackTier(slot,item) {
+    if(!isTieredItem(item))return;
+    const tier=document.createElement('span');tier.className='inv-pack-tier';
+    tier.append(createPixelTextImg(['','I','II','III'][packTier(item)],PIXEL_TEXT_SCALE_SM,{fillColor:'#e5bc50',outlineColor:[220,112,24]}));slot.append(tier);
+  }
+
   _itemIcon(item) {
     return this._slotIcon(getItemIconSrc(item));
   }
 
   _lockIcon() {
-    return this._slotIcon(INV_LOCK_SRC);
+    const icon=this._slotIcon(INV_LOCK_SRC);icon.classList.add('inv-slot-lock');return icon;
   }
 
   _bindTooltip(slot, text) {
@@ -710,6 +776,7 @@ export class InventoryUI {
   }
 
   _onContextMenuPointerLeave(e) {
+    if(this._contextPinned)return;
     if (this.game.mobile || this._sliderPointerId != null
       || document.activeElement?.matches('.inv-context-amount-slider')) return;
     if (!this._contextSlot || this._contextMenuEl?.classList.contains('hidden')) return;
@@ -719,6 +786,7 @@ export class InventoryUI {
   }
 
   _onContextSlotPointerLeave(e) {
+    if(this._contextPinned)return;
     if (this.game.mobile || this._sliderPointerId != null) return;
     if (!this._contextSlot || this._contextAnchorEl !== e.currentTarget) return;
     const next = e.relatedTarget;
@@ -778,6 +846,7 @@ export class InventoryUI {
   }
 
   _hideContextMenu() {
+    this._contextPinned=false;
     this._sliderGesture?.abort();
     this._sliderGesture = null;
     this._sliderPointerId = null;
@@ -845,6 +914,29 @@ export class InventoryUI {
     setElementWrappedPixelText(title, getItemDisplayName(item), maxTextW, PIXEL_TEXT_SCALE);
     setElementWrappedPixelText(desc, this._contextDetailText(item), maxTextW, PIXEL_TEXT_SCALE_SM);
     actions.innerHTML = '';
+    if((container==='item'||container==='chest')&&isContainer(item)){
+      const btn=document.createElement('button');btn.type='button';btn.className='inv-context-btn';this._setBtnLabel(btn,'Open');
+      this._bindContextAction(btn,()=>{
+        let storage=player;
+        if(container==='chest'){
+          storage=Object.create(player);storage.itemSlots=this.chest.slots;storage.storageCapacity=this.chest.slots.length;storage.storageColumns=storage.storageCapacity===5?5:4;storage.isItemSlotUnlocked=i=>i>=0&&i<storage.storageCapacity;
+        }
+        if(!openContainer(storage,index))this.game.items?.setPickupMsg('Not enough room to open this container.');
+        if(container==='chest')this.chest.slots=storage.itemSlots;
+        this.game.audio?.inventoryPlace();
+        this._renderAfterContextAction();
+      });actions.appendChild(btn);
+    }
+    if(itemWidth(item)>1 && (container==='item'||container==='chest')) {
+      const rotate=document.createElement('button');rotate.type='button';rotate.className='inv-context-btn';this._setBtnLabel(rotate,'Rotate');
+      this._bindContextAction(rotate,()=>{
+        const slots=container==='item'?player.itemSlots:this.chest?.slots;if(!slots)return;
+        const previous=item.rotated;item.rotated=!item.rotated;
+        const cap=container==='item'?player.inventoryCapacity:slots.length, cols=container==='item'?5:slots.length===5?5:4;
+        if(storageLayout(slots,cap,cols).overflow)item.rotated=previous;
+        this.render();
+      });actions.appendChild(rotate);
+    }
 
     if (item.kind === 'weapon' && WEAPONS[item.key]) {
       if (container === 'item') {
@@ -930,11 +1022,12 @@ export class InventoryUI {
         (count) => this._tryRecycleItem(index, container, count));
     }
 
-    if ((normalizeConsumableItem(item) || normalizeThrowableItem(item)) && container === 'item') {
+    if ((normalizeConsumableItem(item) || normalizeThrowableItem(item) || (item.kind==='material'&&PLACEABLE_TOOLS.includes(item.key))) && container === 'item') {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'inv-context-btn';
       this._setBtnLabel(btn, 'Use');
+      btn.classList.add('ui-action-red');
       this._bindContextAction(btn, () => {
         this._useConsumable(this.game.player, index);
         this._renderAfterContextAction();
@@ -1016,13 +1109,13 @@ export class InventoryUI {
     const stackMax = focus.kind === 'bandage'
       ? BANDAGE_STACK_MAX
       : focus.kind === 'material'
-        ? MATERIAL_STACK_MAX
+        ? materialStackMax(focus)
         : AMMO_STACK_MAX;
     const inFocus = Math.min(stackMax, total);
     if (focus.kind === 'bandage') {
       slots[focusIndex] = { kind: 'bandage', amount: inFocus };
     } else if (focus.kind === 'material') {
-      slots[focusIndex] = { kind: 'material', key: focus.key, amount: inFocus };
+      slots[focusIndex] = { ...focus, amount: inFocus };
     } else {
       slots[focusIndex] = { kind: 'ammo', ammoType: focus.ammoType, amount: inFocus };
     }
@@ -1035,7 +1128,7 @@ export class InventoryUI {
       if (focus.kind === 'bandage') {
         slots[empty] = { kind: 'bandage', amount: add };
       } else if (focus.kind === 'material') {
-        slots[empty] = { kind: 'material', key: focus.key, amount: add };
+        slots[empty] = { ...focus, amount: add };
       } else {
         slots[empty] = { kind: 'ammo', ammoType: focus.ammoType, amount: add };
       }
@@ -1053,7 +1146,7 @@ export class InventoryUI {
   }
 
   _canSplitStack(item) {
-    return this._isStackableItem(item) && this._stackAmountForSplit(item) > 1;
+    return (this._isStackableItem(item) || !!normalizeConsumableItem(item)) && this._stackAmountForSplit(item) > 1;
   }
 
   _findEmptySlot(slots, container, skipIndex) {
@@ -1087,6 +1180,9 @@ export class InventoryUI {
     } else if (item.kind === 'bandage') {
       slots[index] = { kind: 'bandage', amount: keep };
       slots[emptyIdx] = { kind: 'bandage', amount: splitOff };
+    } else if (item.kind === 'consumable') {
+      slots[index] = { ...item, amount: keep };
+      slots[emptyIdx] = { ...item, amount: splitOff };
     } else if (item.kind === 'material') {
       slots[index] = { kind: 'material', key: item.key, amount: keep };
       slots[emptyIdx] = { kind: 'material', key: item.key, amount: splitOff };
@@ -1185,22 +1281,19 @@ export class InventoryUI {
       this._showContextMenu(e, container, index, slot);
     });
     slot.addEventListener('pointerleave', (e) => this._onContextSlotPointerLeave(e));
-    if (this.game.mobile) {
-      slot.addEventListener('click', (e) => {
-        if (slot.disabled || this._skipClick || this.drag) return;
-        const player = this.game.player;
-        const item = this._itemForContainer(container, index, player);
-        if (!item) return;
-        e.preventDefault();
-        e.stopPropagation();
-        this._showContextMenu(e, container, index, slot);
-      });
-    }
+    slot.addEventListener('click',e=>{
+      if(slot.disabled||e.ctrlKey||e.metaKey||this._isShiftClick(e))return;
+      if(this._skipClick){this._skipClick=false;e.preventDefault();e.stopImmediatePropagation();return;}
+      if(this.drag?.moved)return;
+      const item=this._itemForContainer(container,index,this.game.player);if(!item)return;
+      e.preventDefault();e.stopImmediatePropagation();this.selectedSlot=null;this.selectedChestSlot=null;
+      this._showContextMenu(e,container,index,slot);this._contextPinned=true;
+    },true);
   }
 
   _useConsumable(player, index) {
     const item = player.itemSlots[index];
-    if (normalizeThrowableItem(item)) {
+    if (normalizeThrowableItem(item) || (item?.kind==='material'&&PLACEABLE_TOOLS.includes(item.key))) {
       this.game.heldThrowable = { index, key: item.key };
       this.close();
       return true;
@@ -1214,6 +1307,7 @@ export class InventoryUI {
       return false;
     }
     if (!player.heal(heal)) return false;
+    if(player.raidStats)player.raidStats.healsUsed=(player.raidStats.healsUsed??0)+1;
     const left = (normalized.amount ?? 1) - 1;
     if (left <= 0) player.itemSlots[index] = null;
     else player.itemSlots[index] = { kind: 'consumable', key: normalized.key, amount: left };
@@ -1332,6 +1426,7 @@ export class InventoryUI {
       this.drag.stashedItem = item;
       player.itemSlots[fromIndex] = null;
     }
+    if(this.drag?.stashedItem)this.drag.originalItem=structuredClone(this.drag.stashedItem);
     this.drag?.sourceEl?.classList.add('inv-drag-source');
     this.game.audio?.inventoryMove();
   }
@@ -1339,6 +1434,7 @@ export class InventoryUI {
   _restoreDragItem() {
     const { fromType, fromIndex, player, stashedItem } = this.drag ?? {};
     if (!stashedItem) return;
+    if(this.drag.originalItem){for(const key of Object.keys(stashedItem))delete stashedItem[key];Object.assign(stashedItem,this.drag.originalItem);}
     if (fromType === 'hand0' || fromType === 'main') {
       if (!player?.getHandSlotItem(0)) player?.restoreHandSlot(0, stashedItem);
     } else if (fromType === 'hand1' || fromType === 'melee') {
@@ -1418,6 +1514,7 @@ export class InventoryUI {
 
   _handleDragMove(e) {
     if (!this.drag) return;
+    this.drag.lastX=e.clientX;this.drag.lastY=e.clientY;
     const dx = e.clientX - this.drag.startX;
     const dy = e.clientY - this.drag.startY;
     if (!this.drag.moved) {
@@ -1443,9 +1540,14 @@ export class InventoryUI {
     const data = this._dragItemData();
     const ghost = document.createElement('div');
     ghost.className = 'inv-drag-ghost';
+    const {width,height}=itemSize(data);
+    ghost.style.width=width*80+'px';ghost.style.height=height*80+'px';
+    ghost.classList.toggle('inventory-rotated-item',!!data?.rotated&&itemWidth(data)>1);
+    ghost.style.setProperty('--item-width',width);ghost.style.setProperty('--item-height',height);
     const iconSrc = getItemIconSrc(data);
     if (iconSrc) ghost.appendChild(this._slotIcon(iconSrc));
     else ghost.textContent = '—';
+    if(this.batchSelection?.size>1){const count=document.createElement('span');count.className='batch-drag-count';count.textContent=String(this.batchSelection.size);ghost.append(count);}
     document.body.appendChild(ghost);
     this.drag.ghost = ghost;
   }
@@ -1563,6 +1665,7 @@ export class InventoryUI {
     if (container === 'chest') {
       if (!this.chest) return null;
       const displaced = this.chest.slots[index];
+      if(displaced)delete displaced.storageCell;
       if (item?.kind === 'ammo' && displaced && ammoItemsMatch(item, displaced)) {
         const merged = mergeAmmoStacks(item, displaced);
         if (merged && !merged.overflow) {
@@ -1602,6 +1705,7 @@ export class InventoryUI {
     const player = this.drag.player;
     if (!player?.isItemSlotUnlocked(index)) return null;
     const displaced = player.itemSlots[index];
+    if(displaced)delete displaced.storageCell;
     if (item?.kind === 'weapon') return this._mergeItemIntoSlot(player, index, player._normalizeWeaponItem(item), displaced);
     return this._mergeItemIntoSlot(player, index, item, displaced);
   }
@@ -1639,9 +1743,11 @@ export class InventoryUI {
 
   _storeItemInChest(item) {
     if (!this.chest || !item) return false;
-    const emptyIdx = this.chest.slots.findIndex((s) => s == null);
+    const incoming={...item};delete incoming.storageCell;
+    const slots=this.chest.slots,cols=slots.length===5?5:4;
+    const emptyIdx=slots.findIndex((entry,index)=>{if(entry)return false;const test=slots.slice();test[index]=incoming;return !storageLayout(test,slots.length,cols).overflow;});
     if (emptyIdx < 0) return false;
-    this.chest.slots[emptyIdx] = item;
+    this.chest.slots[emptyIdx] = incoming;
     return true;
   }
 
@@ -1752,6 +1858,7 @@ export class InventoryUI {
     }
     if (targetHand >= 0) {
       const displaced = player.getHandSlotItem(targetHand);
+      if(!canEquipHand(targetHand,item)||!canEquipHand(handIndex,displaced))return false;
       player.restoreHandSlot(targetHand, item);
       if (displaced) player.restoreHandSlot(handIndex, displaced);
       return true;
@@ -1760,7 +1867,7 @@ export class InventoryUI {
       const toIndex = Number(dropTarget.dataset.slotIndex);
       if (!player.isItemSlotUnlocked(toIndex)) return false;
       const displaced = player.itemSlots[toIndex];
-      if (displaced && !player._normalizeHandItem(displaced)) return false;
+      if (displaced && (!player._normalizeHandItem(displaced)||!canEquipHand(handIndex,displaced))) return false;
       player.itemSlots[toIndex] = item.kind === 'weapon' ? player._normalizeWeaponItem(item) : item;
       if (displaced) player.restoreHandSlot(handIndex, displaced);
       else player.handSlots[handIndex] = null;
@@ -1769,7 +1876,7 @@ export class InventoryUI {
     if (dropTarget.classList.contains('inv-chest-slot') && this.chest) {
       const toIndex = Number(dropTarget.dataset.slotIndex);
       const target = this.chest.slots[toIndex];
-      if (target && !player._normalizeHandItem(target)) return false;
+      if (target && (!player._normalizeHandItem(target)||!canEquipHand(handIndex,target))) return false;
       const displaced = this._placeInSlot('chest', toIndex, item.kind === 'weapon' ? player._normalizeWeaponItem(item) : item);
       if (displaced) player.restoreHandSlot(handIndex, displaced);
       else player.handSlots[handIndex] = null;
@@ -1829,10 +1936,21 @@ export class InventoryUI {
       return;
     }
 
+    if(moved&&e.type==='pointerup'&&this.batchSelection.size>1&&this.batchSelection.has((fromType==='chest'?'chest':'item')+':'+fromIndex)){
+      this._finishBatchDrag(e);return;
+    }
     const { player, dropTarget, stashedItem } = this.drag;
     this._clearDragVisuals();
     let placed = false;
+    const beforeDrop = {
+      items: structuredClone(player.itemSlots),
+      hands: structuredClone(player.handSlots),
+      equipment: structuredClone(player.equipmentSlots),
+      chest: this.chest ? structuredClone(this.chest.slots) : null,
+    };
 
+    const dropCell=dropTarget?.dataset.storageCell;
+    if(stashedItem && dropCell!=null) stashedItem.storageCell=Number(dropCell);
     if (moved && dropTarget && stashedItem) {
       const fromHand = this._handIndexFromZone(fromType);
       if (fromHand >= 0) {
@@ -1848,9 +1966,8 @@ export class InventoryUI {
           placed = player.equipIntoHandSlot(handIndex, stashedItem, fromIndex);
         } else if (fromType === 'chest' && fromIndex != null && this.chest) {
           const outgoing = player.getHandSlotItem(handIndex);
-          player.equipIntoHandSlot(handIndex, stashedItem);
-          this.chest.slots[fromIndex] = outgoing;
-          placed = true;
+          placed = player.equipIntoHandSlot(handIndex, stashedItem);
+          if (placed) this.chest.slots[fromIndex] = outgoing;
         }
         if (placed) {
           this.selectedSlot = null;
@@ -1910,6 +2027,17 @@ export class InventoryUI {
       }
     }
 
+    if (placed && (storageLayout(player.itemSlots, player.inventoryCapacity, 5).overflow
+      || (this.chest && !this.chest.isGround && beforeDrop.chest
+        && storageLayout(this.chest.slots, this.chest.slots.length, this.chest.slots.length === 5 ? 5 : 4).overflow
+          > storageLayout(beforeDrop.chest, beforeDrop.chest.length, beforeDrop.chest.length === 5 ? 5 : 4).overflow))) {
+      player.itemSlots = beforeDrop.items;
+      player.handSlots = beforeDrop.hands;
+      player.equipmentSlots = beforeDrop.equipment;
+      player._applyActiveHand();
+      if (this.chest && beforeDrop.chest) this.chest.slots = beforeDrop.chest;
+      placed = false;
+    }
     if (moved && stashedItem && !placed) {
       if (this.game._tryDropFromInventoryDrag(e, stashedItem)) {
         placed = true;
@@ -1957,6 +2085,8 @@ export class InventoryUI {
 
   _bindPlayerItemSlot(slot, index, player, data) {
     slot.appendChild(this._itemIcon(data));
+    this._appendPackTier(slot,data);
+
     this._appendDurability(slot, data);
     this._appendStackCount(slot, this._stackAmount(data));
     this._bindTooltip(slot, getItemDisplayName({ ...data, amount: 1 }));
@@ -2037,6 +2167,7 @@ export class InventoryUI {
       const data = this.chest.slots[i];
       if (data) {
         slot.appendChild(this._itemIcon(data));
+    this._appendPackTier(slot,data);
         this._appendDurability(slot, data);
         this._appendStackCount(slot, this._stackAmount(data));
         this._bindTooltip(slot, getItemDisplayName({ ...data, amount: 1 }));
@@ -2063,6 +2194,7 @@ export class InventoryUI {
       }
       this._patchSlot(this.chestEl, i + offset, slot, signature, this.game.player);
     }
+    if (!isGround) applyStorageLayout(this.chestEl, this.chest.slots, slotCount, slotCount === 5 ? 5 : 4);
     while (this.chestEl.childElementCount > slotCount + offset) this.chestEl.lastElementChild.remove();
   }
 
@@ -2188,6 +2320,7 @@ export class InventoryUI {
     if (this.drag?.moved) return;
 
     this.game._spillLockedInventory();
+    this.game._refreshRadar?.();
     const keepContextMenu = !!options.keepContextMenu;
     if (!keepContextMenu) this._hideContextMenu();
     this._hoverTooltipText = null;
@@ -2206,6 +2339,7 @@ export class InventoryUI {
         const label = EQUIPMENT_LABELS[i] ?? 'Gear';
         if (data) {
           slot.appendChild(this._itemIcon(data));
+    this._appendPackTier(slot,data);
           this._appendDurability(slot, data);
           this._bindTooltip(slot, `${getItemDisplayName({ ...data, amount: 1 })}`);
           this._bindEquipmentSlotDrag(slot, i, player);
@@ -2227,14 +2361,16 @@ export class InventoryUI {
       if (this._slotMatches(this.weaponsEl, h, signature, player)) continue;
       const slot = this._makeSlot('inv-weapon-slot');
       slot.dataset.dropZone = zone;
+      styleItemSlot(slot, null, h === 0 ? 3 : 2);
+      slot.dataset.handWidth = '1';
       if (h === player.activeHandSlot) slot.classList.add('inv-hand-active');
       const handItem = player.getHandSlotItem(h);
       if (handItem) {
         this._appendDurability(slot, handItem);
         if (handItem.kind === 'weapon') {
-          slot.appendChild(this._weaponIcon(WEAPONS[handItem.key]?.sprite ?? handItem.key));
+          slot.appendChild(this._slotIcon(getItemIconSrc(handItem)));
         } else {
-          slot.appendChild(this._weaponIcon(MELEE_WEAPONS[handItem.key]?.sprite ?? handItem.key));
+          slot.appendChild(this._slotIcon(getItemIconSrc(handItem)));
         }
         this._bindTooltip(slot, `${getItemDisplayName({ ...handItem, amount: 1 })}`);
         this._bindHandSlotDrag(slot, h, player);
@@ -2279,7 +2415,7 @@ export class InventoryUI {
         slot.disabled = true;
         slot.appendChild(this._lockIcon());
       } else if (data) {
-        if (this.selectedSlot === i) slot.classList.add('inv-selected');
+
         this._bindPlayerItemSlot(slot, i, player, data);
       } else {
         slot.classList.add('inv-empty-slot');
@@ -2292,6 +2428,7 @@ export class InventoryUI {
       this._patchSlot(this.itemsEl, i, slot, signature, player);
     }
 
+    applyStorageLayout(this.itemsEl, player.itemSlots, ITEM_STORAGE_SIZE, 5, player.inventoryCapacity);
     this.root.classList.remove('ground-loot-open');
     this.chestEl?.classList.remove('ground-loot-list');
     if (this.chestMode && !this.chest?.isGround) this._renderChestSlots();
@@ -2300,5 +2437,6 @@ export class InventoryUI {
       if (this.chestEl) this.chestEl.scrollTop = lootScroll;
     }
     if (keepContextMenu) this._reopenContextMenu();
+    this._syncBatchSelection();
   }
 }

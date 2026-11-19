@@ -1,3 +1,6 @@
+import { loadStructures, generateStructureMap } from './structures.js';
+import { PLACEABLE_TOOLS, nearestPackChest, segmentDistance } from './tools.js';
+import { cashTotal, changeCash } from './cash.js';
 import { normalizeThrowableItem } from './throwables.js';
 import { RaidBase, raidLevel, challengeProgress, newRaidProfile, deployProfile, extractProfile, loseRaidProfile, normalizeRaidProfile, EXTRACT_RADIUS, EXTRACT_SECONDS } from './raidBase.js';
 import { collectWallOccluders, collectPropOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
@@ -23,6 +26,7 @@ import {
   BuildingManager,
   drawBuildingFloors,
   drawBuildingWall,
+  drawWallImage,
   drawBuildingDoor,
   drawBuildingDecor,
   drawDecorPiece,
@@ -260,7 +264,7 @@ class Game {
     const challenges = document.getElementById('raid-pause-challenges');
     challenges.replaceChildren();
     if (this.raidProfile) {
-      for (const challenge of challengeProgress(this.raidProfile, this.kills).filter((entry) => !entry.claimed)) {
+      for (const challenge of challengeProgress(this.raidProfile, this.kills,this.player?.raidStats).filter((entry) => !entry.claimed)) {
         const row = document.createElement('p');
         const label = `${challenge.title} / ${challenge.progress}/${challenge.goal}`;
         row.setAttribute('aria-label', label);
@@ -278,6 +282,8 @@ class Game {
   }
 
   _hidePauseMenu() {
+    this._clearKeyboardInput();this.mouseDown=false;this.prevMouseDown=false;
+    this.lastTime=performance.now();
     this.paused = false;
     this.el.pauseMenu?.classList.add('hidden');
     this._disableMenuCursor();
@@ -350,7 +356,7 @@ class Game {
       this._gameCursorEl.dataset.sprite = sprite;
       this._gameCursorEl.src = path;
     }
-    const size = sprite === 'inv_cursor' ? 56 : (this.mobile ? 36 : 54);
+    const size = sprite === 'inv_cursor' ? 112 : (this.mobile ? 36 : 54);
     this._gameCursorEl.style.width = `${size}px`;
     this._gameCursorEl.style.height = `${size}px`;
     if (this.mobile) {
@@ -520,17 +526,15 @@ class Game {
   }
 
   _togglePause() {
-    if (!this.running || !this.player?.alive) return;
-    if (this._panelOpen()) return;
-    if (this.el.confirmDialog && !this.el.confirmDialog.classList.contains('hidden')) return;
-    if (this.paused) {
-      this._hidePauseMenu();
-    } else {
-      this._showPauseMenu();
-    }
+    if(!this.running||!this.player?.alive)return;
+    if(this.el.confirmDialog&&!this.el.confirmDialog.classList.contains('hidden'))return;
+    if(this.paused){this.inventoryUI?.forceClose();this._hidePauseMenu();return;}
+    if(this._panelOpen())return;
+    this._showPauseMenu();
   }
 
   _writeRaidProfile(profile) {
+    profile.cash=cashTotal(profile);
     if (!writeSave({ profile })) return false;
     this.raidProfile = profile;
     return true;
@@ -538,6 +542,8 @@ class Game {
 
   _showRaidBase(profile, message = '') {
     this.running = false;
+    this._refreshRadar();
+    for(const item of [...(profile.stash??[]),...(profile.kit?.itemSlots??[])])if(item?.key==='radar')item.radarOn=false;
     this.paused = false;
     this.inventoryUI.forceClose();
     this._clearKeyboardInput();
@@ -724,6 +730,7 @@ class Game {
   _finishRaid(extracted, abandoned = false) {
     if (!this.running) return;
     this.running = false;
+    this._refreshRadar();
     this.inventoryUI.forceClose();
     this._clearKeyboardInput();
     const { raidCheckpoint: _checkpoint, ...previous } = this.raidProfile;
@@ -748,6 +755,7 @@ class Game {
 
   _showRaidResult({ previous, next, carried, extracted = false, abandoned = false,
     saved = true, seconds, kills, raiderKills, onContinue }) {
+    for(const item of carried?.itemSlots??[])if(item?.key==='radar')item.radarOn=false;
     const summary = document.getElementById('raid-results');
     summary.dataset.outcome = extracted ? 'success' : 'loss';
     const setLabel = (selector, text) => {
@@ -853,7 +861,8 @@ class Game {
     if (e.code === 'F7') {
       e.preventDefault();
       if (!e.repeat && this.raidProfile && !this._deploying) {
-        const profile = { ...this.raidProfile, cash: this.raidProfile.cash + 1000 };
+        const profile = structuredClone(this.raidProfile);
+        changeCash(profile,1000);
         if (this._writeRaidProfile(profile) && !this.raidBase.root.classList.contains('hidden')) {
           this.raidBase.profile = profile;
           this.raidBase.render();
@@ -883,6 +892,7 @@ class Game {
     }
     if (e.code === 'Escape') {
       e.preventDefault();
+      if(e.repeat)return;
       if (this.el.confirmDialog && !this.el.confirmDialog.classList.contains('hidden')) {
         if (this._confirmNo) this._confirmNo();
         return;
@@ -1361,6 +1371,12 @@ class Game {
       rollWorldSeed();
     }
 
+    if(!raidMap&&!saveData){
+      await this._paintLoadingProgress(0.4,'Assembling structures…');
+      const structures=await loadStructures();
+      raidMap=parseRaidMap(generateStructureMap(structures,{seed:getWorldSeed()}));
+      raidMap.generatedFromStructures=true;
+    }
     this.world = raidMap ? new AuthoredRaidWorld(raidMap, { bakeShadows: BAKED_SHADOWS }) : new World();
     this.world.setSpriteBank(this.sprites);
     await this.world.build();
@@ -1385,11 +1401,14 @@ class Game {
     this.particles = [];
     this.heldThrowable = null;
     this.thrownItems = [];
+    this.placedTools = [];
+    this._toolPositions = new WeakMap();
+    this._radarNextUpdate=0;
     this.dayNight = new DayNightCycle();
 
     if (raidMap) {
       for (const chest of this.world.mapChests) {
-        this.chests.restoreInBuilding({ ...chest, slots: rollChestLoot() }, {}, chest);
+        this.chests.restoreInBuilding({ ...chest, slots: rollChestLoot() }, {}, {...chest,authored:true});
       }
       for (const { x, y, item } of raidMap.layers.loot) {
         this.groundDrops.dropAt((x + 0.5) * TILE, (y + 0.5) * TILE, item, null, { preserve: true, exact: true });
@@ -1423,6 +1442,7 @@ class Game {
     };
     this._nextTerrainWarmup = 0;
     await this._paintLoadingProgress(0.82, 'Locating extraction hatches…');
+    this.player.raidStats={};
     this.hatches = raidKit ? (raidMap ? this.world.mapHatches : this._placeHatches()) : [];
     await this._paintLoadingProgress(1, 'Entering the Ruins…');
     this.nearestHatch = null;
@@ -1750,7 +1770,7 @@ class Game {
     this.items.update(dt);
     this.chunkEntities.update(this.player, time);
     this._syncCamPixels();
-    this.bullets.update(dt, this.world, (b) => this._onBulletHit(b), this.player);
+    this.bullets.update(dt, this.world, (b) => this._onBulletHit(b,dt), this.player);
     const navStart = performance.now();
 
     const simView = this.getViewBoundsWorld();
@@ -1888,6 +1908,7 @@ class Game {
     const breathTarget = getPlayerIdleBreathY(this.player, time);
     this._weaponBreathY += (breathTarget - this._weaponBreathY) * Math.min(1, dt * 18);
     this._updateThrownItems(dt, time);
+    this._updatePlacedTools(dt,time);
     updateParticles(this.particles, dt, this.world, {
       onCasingLand: (casing) => this.audio.casingLand(this._soundOffset(casing, casing.z)),
     });
@@ -1933,10 +1954,25 @@ class Game {
   }
 
   _spawnRaiders(time) {
-    if (this.world.raidMap || time < this.nextRaiderSpawnCheck) return;
+    if (time < this.nextRaiderSpawnCheck) return;
     this.nextRaiderSpawnCheck = time + 11;
     if (this.robots.filter((enemy) => enemy.type === 'raider' && enemy.alive
       && Math.hypot(enemy.x - this.player.x, enemy.z - this.player.z) < 100).length >= 3) return;
+    if(this.world.raidMap){
+      const anchors=this.chests.chests.length?this.chests.chests:[{x:this.player.x+36,z:this.player.z,slots:[],spawnOnly:true}];
+      for(const chest of anchors){
+        const site='map:'+chest.x+','+chest.z;
+        if(this.raiderSpawnSites.has(site))continue;
+        for(let attempt=0;attempt<24;attempt++){
+          const angle=Math.random()*Math.PI*2,distance=TILE*(2+Math.random()*4);
+          const x=chest.x+Math.sin(angle)*distance,z=chest.z+Math.cos(angle)*distance;
+          const fromPlayer=Math.hypot(x-this.player.x,z-this.player.z);
+          if(fromPlayer<24||fromPlayer>90||this.world.checkCollision(x,z,1.65)||this.robots.some(npc=>npc.alive&&Math.hypot(npc.x-x,npc.z-z)<4))continue;
+          this.raiderSpawnSites.add(site);this.robots.push(new Raider(x,z,chest.spawnOnly?null:chest));return;
+        }
+      }
+      return;
+    }
     for (const chest of this.chests.chests) {
       const building = chest.homeBuilding;
       if (!building || !chest.slots.some(Boolean)) continue;
@@ -1957,9 +1993,73 @@ class Game {
     this.player?.setActiveHandSlot(index);
   }
 
+  _placeHeldTool(index,key) {
+    const item=this.player.itemSlots[index];if(item?.kind!=='material'||item.key!==key)return;
+    const target=this._screenToWorld(this.mouse.sx,this.mouse.sy),z=entityFeetZ(this.player);
+    if(Math.hypot(target.x-this.player.x,target.z-z)>TILE*2||this.world.checkCollision(target.x,target.z,0.5)
+      ||this.world.segmentBlocked(this.player.x,z,target.x,target.z,0.1,false,null,{solidTrace:true})){
+      this.items?.setPickupMsg('Choose clear ground within two tiles.');return;
+    }
+    this.player.itemSlots[index]=(item.amount??1)>1?{...item,amount:item.amount-1}:null;
+    this.placedTools.push({key,x:target.x,z:target.z,cooldowns:new WeakMap()});
+    if(key==='barbed_wire')this.player.raidStats.trapsPlaced=(this.player.raidStats.trapsPlaced??0)+1;
+    this.audio?.inventoryPlace();
+  }
+
+  _explodeGasBottle(tool,time) {
+    if(tool.done)return;tool.done=true;
+    const blocked=(x,z,nx,nz)=>this.world.segmentBlocked(x,z,nx,nz,0.1,false,null,{solidTrace:true});
+    this.audio.explosion(this._soundOffset(tool,tool.z));
+    this.particles.push(...createExplosion(tool.x,tool.z),...createExplosion(tool.x,tool.z),...createRobotSmoke(tool.x,tool.z,1.5));
+    this._damagePlayerFromThrowable(tool,TILE*2,85,time,blocked);
+    for(const npc of this.robots)if(npc.alive&&Math.hypot(npc.x-tool.x,npcCollisionZ(npc)-tool.z)<TILE*2&&!blocked(tool.x,tool.z,npc.x,npcCollisionZ(npc)))this._damageRobot(npc,85,tool.x,tool.z);
+    for(const other of this.placedTools)if(!other.done&&other.key==='gas_bottle'&&Math.hypot(other.x-tool.x,other.z-tool.z)<TILE*2&&!blocked(tool.x,tool.z,other.x,other.z))this._explodeGasBottle(other,time);
+  }
+
+  _updatePlacedTools(dt,time) {
+    const actors=this.placedTools.some(tool=>tool.key==='barbed_wire'&&!tool.done)?[this.player,...this.robots]:[];
+    for(const actor of actors){
+      if(!actor.alive)continue;
+      const previous=this._toolPositions.get(actor),z=npcCollisionZ(actor);
+      if(previous&&Math.hypot(actor.x-previous.x,z-previous.z)<TILE*3){
+        const wire=this.placedTools.find(tool=>tool.key==='barbed_wire'&&!tool.done&&segmentDistance(tool.x,tool.z,previous.x,previous.z,actor.x,z)<TILE*0.45&&!this.world.segmentBlocked(tool.x,tool.z,actor.x,z,0.1,false,null,{solidTrace:true}));
+        if(wire&&Math.hypot(actor.x-previous.x,z-previous.z)>0.015){
+          const x=previous.x+(actor.x-previous.x)*0.35,nz=previous.z+(z-previous.z)*0.35;
+          if(!this.world.checkCollision(x,nz,actor.radius??0.4)){actor.x=x;actor.z+=nz-z;}
+          if(time>=(wire.cooldowns.get(actor)??0)){
+            wire.cooldowns.set(actor,time+0.4);
+            if(actor===this.player)this._damagePlayerFromThrowable(wire,TILE,4,time,()=>false);
+            else this._damageRobot(actor,4,wire.x,wire.z);
+          }
+        }
+      }
+      this._toolPositions.set(actor,{x:actor.x,z:npcCollisionZ(actor)});
+    }
+    this.placedTools=this.placedTools.filter(tool=>!tool.done);
+    if(time<this._radarNextUpdate)return;this._radarNextUpdate=time+0.2;
+    this._refreshRadar();
+  }
+
+  _refreshRadar() {
+    let radar=document.getElementById('pack-radar');
+    if(!radar){radar=document.createElement('div');radar.id='pack-radar';const icon=document.createElement('img');icon.alt='Radar';const label=document.createElement('span');radar.append(icon,label);document.getElementById('hud-bottom-left').prepend(radar);}
+    const active=!!(this.running&&this.player?.alive);
+    const carried=active&&this.player.itemSlots.some((item,i)=>this.player.isItemSlotUnlocked(i)&&item?.kind==='material'&&item.key==='radar');
+    radar.hidden=!carried;
+    if(!active)radar.classList.remove('lit');
+    const signal=carried?nearestPackChest(this.chests?.chests??[],this.player.x,entityFeetZ(this.player)):null;
+    for(const item of this.player?.itemSlots??[])if(item?.key==='radar')item.radarOn=!!signal;
+    if(!carried)return;
+
+    radar.classList.toggle('lit',!!signal);
+    radar.querySelector('img').src=signal?'assets/items/materials/radar_on.png':'assets/items/tools/radar.png';
+    radar.querySelector('span').textContent=signal?'PACK '+Math.max(1,Math.ceil(signal.distanceMetres))+'m':'searching for packs...';
+  }
+
   _throwHeldItem() {
     const { index, key } = this.heldThrowable;
     this.heldThrowable = null;
+    if(PLACEABLE_TOOLS.includes(key)){this._placeHeldTool(index,key);return;}
     const item = normalizeThrowableItem(this.player.itemSlots[index]);
     if (!item || item.key !== key || !this.player.isItemSlotUnlocked(index)) return;
     const x = this.player.x;
@@ -2128,17 +2228,16 @@ class Game {
     if (bullet) bullet.active = false;
     if (!robot.alive) {
       if (isRaider) {
-        if (playerCredit) this.raiderKills++;
+        if (playerCredit) {this.raiderKills++;if(this.player.raidStats)this.player.raidStats.extractedRaiderKills=(this.player.raidStats.extractedRaiderKills??0)+1;}
         const weapon = WEAPONS[robot.weaponKey];
         const loot = [
-          ...robot.loot,
-          ...(Math.random() < 0.35 ? [{
+          ...robot.loot.filter(item=>item&&Math.random()<0.15),
+          ...(Math.random() < 0.05 ? [{
             kind: weapon ? 'weapon' : 'melee', key: robot.weaponKey, durability: 45 + Math.floor(Math.random() * 31),
             ...(weapon && { ammo: robot.ammo }),
           }] : []),
-          ...(robot.bandages > 0 ? [{ kind: 'consumable', key: 'bandage', amount: robot.bandages }] : []),
-          weapon ? { kind: 'ammo', ammoType: getWeaponAmmoType(robot.weaponKey), amount: weapon.magSize }
-            : { kind: 'material', key: 'cash', amount: 15 },
+          ...(robot.bandages>0&&Math.random()<0.08?[{kind:'consumable',key:'bandage',amount:1}]:[]),
+          ...(weapon&&Math.random()<0.08?[{kind:'ammo',ammoType:getWeaponAmmoType(robot.weaponKey),amount:Math.min(4,robot.ammo??0)}].filter(item=>item.amount>0):[]),
         ];
         for (const item of loot) this.groundDrops.dropAt(robot.x, robot.z, item, null, { preserve: true });
         const index = this.robots.indexOf(robot);
@@ -2579,8 +2678,14 @@ class Game {
     if (hitAny && this.player.isMeleeActive()) this.player.wearActiveHand(1);
   }
 
-  _onBulletHit(bullet) {
+  _onBulletHit(bullet,dt=1/60) {
     const time = performance.now() / 1000;
+    for(const tool of this.placedTools??[]){
+      if(tool.done||tool.key!=='gas_bottle')continue;
+      if(segmentDistance(tool.x,tool.z,bullet.x,bullet.z,bullet.x+bullet.vx*dt,bullet.z+bullet.vz*dt)>0.65)continue;
+      if(this.world.segmentBlocked(bullet.x,bullet.z,tool.x,tool.z,0.06,false,null,{solidTrace:true}))continue;
+      bullet.active=false;this._explodeGasBottle(tool,time);return;
+    }
     const origin = bullet.playerShotOrigin
       ?? (bullet.enemyOwner?.type === 'raider' ? bullet.raiderShotOrigin : null);
     const blocked = (target) => origin && this.world.segmentBlocked(
@@ -2846,8 +2951,8 @@ class Game {
 
   _drawParticle(ctx, p) {
     const s = this._worldToScreen(p.x, p.z);
-    const groundY = Math.round(p.groundDrop ?? 0);
-    const airY = Math.round(this._particleAirY(p));
+    const groundY = p.groundDrop ?? 0;
+    const airY = this._particleAirY(p);
     const halfPlayerPx = CHAR_NATIVE_PX * SPRITE_PLAYER * PARTICLE_SIZE_UNIT;
     const lifeFade = 0.55 + Math.min(1, p.life * 1.4) * 0.45;
     const sz = Math.round(this._particleDrawSize(p, halfPlayerPx, lifeFade));
@@ -2869,7 +2974,7 @@ class Game {
         ctx,
         sprite,
         s.x,
-        Math.round(s.y + airY),
+        s.y + airY,
         SPRITE_CASING,
         p.spin || 0,
         false,
@@ -2881,7 +2986,7 @@ class Game {
     } else if (p.kind === 'blood') {
       ctx.fillRect(s.x - sz / 2, s.y - sz / 2 + airY, sz, sz * 0.85);
     } else if (p.kind === 'spark' || p.kind === 'smoke' || p.kind === 'fire') {
-      this._drawFxParticleSprite(ctx, p, s.x, Math.round(s.y + airY), alpha, sz);
+      this._drawFxParticleSprite(ctx, p, s.x, s.y + airY, alpha, sz);
     } else if (p.kind === 'scrape' && p.grounded && p.splatW) {
       ctx.fillRect(s.x - splatW, s.y + groundY - splatH * 0.5, splatW * 2, splatH);
     } else if (p.kind === 'scrape') {
@@ -2952,7 +3057,7 @@ class Game {
       const extracting = hatch === this.nearestHatch && this._extractElapsed > 0;
       if (hatch.state === 'calling' || extracting) {
         const seconds = extracting ? EXTRACT_SECONDS - this._extractElapsed : hatch.remaining;
-        drawPixelText(ctx, `${Math.max(1, Math.ceil(seconds))}s`, point.x, point.y - tilePx - 8, 1, 'center');
+        drawPixelText(ctx, `${Math.max(1, Math.ceil(seconds))}s`, point.x, point.y - tilePx - 20, 2, 'center', {outlineColor:[0,0,0]});
       }
       if (extracting) {
         ctx.beginPath();
@@ -3054,8 +3159,8 @@ class Game {
       const p = worldToScreen(prop.x, prop.z);
       const nativeScale = tilePx / 16;
       const scale = prop.wall ? tilePx / Math.max(prop.image.width, prop.image.height) : nativeScale;
-      const width = prop.layout ? prop.layout.width * nativeScale : Math.round(prop.image.width * scale);
-      const height = prop.layout ? prop.layout.height * nativeScale : Math.round(prop.image.height * scale);
+      const width = prop.layout ? prop.layout.width * nativeScale : prop.image.width * scale;
+      const height = prop.layout ? prop.layout.height * nativeScale : prop.image.height * scale;
       const left = prop.layout ? p.x - tilePx / 2 + prop.layout.x * nativeScale : p.x - width / 2;
       const top = prop.layout ? p.y - tilePx / 2 + prop.layout.y * nativeScale : p.y + tilePx / 2 - height;
       const z = prop.ySort === false ? -Infinity : prop.z + TILE / 2;
@@ -3069,7 +3174,9 @@ class Game {
         shadowSplit: top + height / 2,
         shadowBounds: { minX: left, minY: top, maxX: left + width, maxY: top + height },
         draw: () => {
-          ctx.drawImage(this.sprites.getBakedShadeBitmap(ctx, prop.image), left, top, width, height);
+          const image = this.sprites.getBakedShadeBitmap(ctx, prop.image);
+          if (prop.wall) drawWallImage(ctx, image, left, top, width, height);
+          else ctx.drawImage(image, left, top, width, height);
           if (prop.corner) {
             const edge = prop.corner;
             ctx.drawImage(edge.image, left + edge.x * nativeScale, top,
@@ -3193,21 +3300,18 @@ class Game {
         );
       }});
     }
+    for(const tool of this.placedTools??[]){
+      if(tool.done||!inView(tool.x,tool.z,TILE)||!lit(tool.x,tool.z))continue;
+      drawList.push({z:tool.key==='barbed_wire'?-Infinity:tool.z,sortBias:SORT_ENTITY,bakedShade:bakedShade(tool.x,tool.z),draw:()=>{
+        const point=this._worldToScreen(tool.x,tool.z);this.sprites.drawGroundItem(ctx,tool.key,point.x,point.y,tool.key==='barbed_wire'?28:22);
+      }});
+    }
     const dropDrawTime = performance.now() / 1000;
     for (const drop of this.groundDrops?.drops ?? []) {
       if (!inView(drop.x, drop.z, TILE * 2) || !lit(drop.x, drop.z)) continue;
       const bob = Math.sin(dropDrawTime * 2.4 + drop.bobPhase) * 1.1;
       drawList.push({ z: drop.sortZ, sortBias: SORT_ENTITY, bakedShade: bakedShade(drop.x, drop.z), draw: () => {
         const s = this._worldToScreen(drop.x, drop.z);
-        drawPixelEllipseShadow(
-          ctx,
-          Math.round(s.x),
-          Math.round(s.y),
-          GROUND_DROP_DISPLAY_PX * 0.45,
-          GROUND_DROP_DISPLAY_PX * 0.15,
-          tilePx,
-          shadowGridOrigin,
-        );
         this.sprites.drawGroundItem(
           ctx,
           drop.sprite,
@@ -3286,9 +3390,9 @@ class Game {
           isScout ? 2.2 : 1.8,
         );
         const walkBouncePx = walkBounce;
-        const jumpBob = robot.jump?.active ? Math.round(-(robot.bob || 0) * 16) : 0;
-        const chargeBob = robot.jump?.charging ? Math.round((robot.bob || 0) * 14) : 0;
-        const emergeBob = robot.emerging ? Math.round((robot.bob || 0) * 3) : 0;
+        const jumpBob = robot.jump?.active ? -(robot.bob || 0) * 16 : 0;
+        const chargeBob = robot.jump?.charging ? (robot.bob || 0) * 14 : 0;
+        const emergeBob = robot.emerging ? (robot.bob || 0) * 3 : 0;
         const anchorY = s.y - bury + shake.y + emergeBob + jumpBob + chargeBob;
         const drawY = anchorY + walkBouncePx;
         if (robot.emerging) {
@@ -3499,7 +3603,7 @@ class Game {
         for (let j = first; j <= i; j++) drawList[j].draw();
         ctx.globalCompositeOperation = 'source-atop';
         if (entry.shadowLift) {
-          const split = Math.max(y, Math.min(y + height, Math.round(entry.shadowSplit)));
+          const split = Math.max(y, Math.min(y + height, entry.shadowSplit));
           ctx.save();
           ctx.beginPath();
           ctx.rect(x, y, width, split - y);
@@ -3902,21 +4006,14 @@ class Game {
 
 const raidMapSelect = document.getElementById('raid-map-select');
 const raidMapStatus = document.getElementById('raid-map-status');
-raidMapSelect.disabled = true;
-fetch('./maps/catalog.json', { cache: 'no-store' })
-  .then((response) => {
-    if (!response.ok) throw new Error('Map list unavailable.');
-    return response.json();
-  })
-  .then((maps) => {
-    for (const name of maps) {
-      const title = name.replace(/\.json$/i, '').replace(/[-_]+/g, ' ');
-      raidMapSelect.append(new Option(title.charAt(0).toUpperCase() + title.slice(1), name));
-    }
-    if (maps.length) raidMapSelect.value = maps[0];
-  })
-  .catch(() => { raidMapStatus.textContent = 'Map list unavailable. Procedural map is available.'; })
-  .finally(() => { raidMapSelect.disabled = false; });
+const raidMapOptions=[{value:'',label:'Procedural map'}];let raidMapIndex=0;
+const showRaidMap=()=>{const option=raidMapOptions[raidMapIndex];raidMapSelect.value=option.value;setElementPixelText(raidMapSelect,option.label,PIXEL_TEXT_SCALE_SM);raidMapSelect.setAttribute('aria-label','Raid map: '+option.label);};
+raidMapSelect.addEventListener('click',()=>{raidMapIndex=(raidMapIndex+1)%raidMapOptions.length;showRaidMap();});
+showRaidMap();raidMapSelect.disabled=true;
+fetch('./maps/catalog.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw Error('Map list unavailable.');return response.json();}).then(maps=>{
+ for(const name of maps){const title=name.replace(/\.json$/i,'').replace(/[-_]+/g,' ');raidMapOptions.push({value:name,label:title.charAt(0).toUpperCase()+title.slice(1)});}
+ showRaidMap();
+}).catch(()=>{raidMapStatus.textContent='Map list unavailable. Procedural map is available.';}).finally(()=>{raidMapSelect.disabled=false;});
 
 try {
   window.game = new Game();

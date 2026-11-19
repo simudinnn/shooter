@@ -65,7 +65,7 @@ export class ChestManager {
         opened: false,
         homeCx: chunk.cx,
         homeCz: chunk.cz,
-        homeBuilding: building,
+        homeBuilding: Number.isFinite(building.w)&&Number.isFinite(building.h)&&building.cells?building:null,
         obstacle: null,
       };
       building.chestTiles.push({ tx: pos.tx, tz: pos.tz });
@@ -153,7 +153,7 @@ export class ChestManager {
   }
 
   /** Restore chest loot/state when loading a save. */
-  restoreInBuilding(saved, building, { collision = true, ySort, plane, spriteWidth, spriteHeight } = {}) {
+  restoreInBuilding(saved, building, { collision = true, ySort, plane, spriteWidth, spriteHeight, authored = false } = {}) {
     const chest = {
       x: saved.x,
       z: saved.z,
@@ -162,9 +162,10 @@ export class ChestManager {
       opened: !!saved.opened,
       homeCx: building.homeCx,
       homeCz: building.homeCz,
-      homeBuilding: building,
+      homeBuilding: Number.isFinite(building.w)&&Number.isFinite(building.h)&&building.cells?building:null,
       obstacle: null,
       ySort,
+      authored,
       spriteWidth,
       spriteHeight,
       plane,
@@ -183,7 +184,7 @@ export class ChestManager {
     let bestD = maxDist + player.radius;
     for (const chest of this.chests) {
       const d = Math.hypot(player.x - chest.x, player.z - chest.z);
-      if (d < bestD) {
+      if (d < bestD && this.canInteract(player,chest)) {
         bestD = d;
         best = chest;
       }
@@ -191,8 +192,15 @@ export class ChestManager {
     return best;
   }
 
+  canInteract(player,chest) {
+    if(!player||!chest)return false;
+    const z=player.z+(player.getMoveCollider?.().zOff??0);
+    const target=chest.obstacle??chest;
+    return !this.world.segmentBlocked(player.x,z,target.x,target.z,0.08,false,null,{solidTrace:true,ignoreObstacle:chest.obstacle});
+  }
+
   isInInteractRange(player, chest) {
-    return Math.hypot(player.x - chest.x, player.z - chest.z) <= CHEST_INTERACT_DIST + player.radius;
+    return !!chest && Math.hypot(player.x - chest.x, player.z - chest.z) <= CHEST_INTERACT_DIST + player.radius && this.canInteract(player,chest);
   }
 
   isEmpty(chest) {

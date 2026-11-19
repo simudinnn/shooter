@@ -1,9 +1,10 @@
-import { getDoorWorldPos } from './buildingGen.js';
+import { getDoorWorldPos, entityFeetZ } from './buildingGen.js';
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, didDisplace, MOTION_IDLE_EPS, entityPushRadius } from './collision.js';
 import { customEnemies } from './customContent.js';
 import { RAIDER_SPRITE_VARIANTS } from './sprites.js';
 import {
   updateChaseNav,
+  getDoorPursuitGoal,
   canMeleeTarget,
   hasCombatSight,
   ensureNavState,
@@ -70,6 +71,7 @@ export class Robot {
     this.chasing = false;
     this.aggroByHit = false;
     this.spotTimer = 0;
+    this.reactionDelay = 0.3 + Math.random() * 1.7;
     this.lostSightTimer = 0;
     this.moving = false;
     this.moveSpeed = 0;
@@ -317,7 +319,8 @@ export class Robot {
   _chaseMove(dt, player, world, robots, buildings, time) {
     const prevX = this.x;
     const prevZ = this.z;
-    const nav = updateChaseNav(this, player, world, buildings, time, dt);
+    const doorGoal=this.type==='spider'?this._doorGoal:this.type==='raider'&&world.raidMap?getDoorPursuitGoal(this,{x:player.x,z:entityFeetZ(player)},world,buildings,time,1):null;
+    const nav = updateChaseNav(this, player, world, buildings, time, dt,doorGoal);
     if (nav.forget) {
       resetNavPlan(ensureNavState(this));
       return false;
@@ -563,6 +566,10 @@ export class Robot {
     updateEnemySpotTimer(this, canSee, dt);
     updateEnemyLastKnown(this, player, canSee);
 
+    this._doorNow=time;
+    if(canSee){this._doorMemoryUntil=time+14;this._doorTarget={x:player.x,z:entityFeetZ(player)};}
+    this._doorGoal=(this.chasing||this.aggroByHit||canSee)&&time<(this._doorMemoryUntil??0)
+      ?getDoorPursuitGoal(this,this._doorTarget,world,buildings,time):null;
     const search = advanceEnemySearchPhase(this, canSee, dt, player, buildings);
     if (search.forget) {
       clearEnemyCombatState(this);
@@ -587,7 +594,7 @@ export class Robot {
           return;
         }
       }
-      if (this.zombieRunSpeed && canSee) {
+      if (this.zombieRunSpeed && (canSee||this._doorGoal)) {
         this.zombieRunning = true;
         this.speed = this.zombieRunSpeed;
       }
@@ -908,6 +915,12 @@ export class Raider extends Robot {
       range = distance;
       target = candidate;
     }
+    if (target !== this.reactionTarget) {
+      this.reactionTarget = target;
+      this.reactionLeft = target ? 0.3 + Math.random() * 1.7 : 0;
+    }
+    this.reactionLeft = Math.max(0, (this.reactionLeft ?? 0) - dt);
+    const attackReady = this.reactionLeft === 0;
     this.chasing = Boolean(target);
     this.combatTarget = target;
     this.searchPhase = null;
@@ -974,7 +987,7 @@ export class Raider extends Robot {
       const weapon = melee;
       this.angle = Math.atan2(target.x - this.x, target.z - this.z);
       if (range > weapon.range) this._runToward(dt, target, world, robots, buildings, time);
-      else if (this.fireCooldown === 0) this.fireCooldown = attack(this, this.angle, target);
+      else if (attackReady && this.fireCooldown === 0) this.fireCooldown = attack(this, this.angle, target);
     } else if (target) {
       this.speed = this.baseSpeed * 1.5;
       this.angle = Math.atan2(target.x - this.x, target.z - this.z);
@@ -991,7 +1004,7 @@ export class Raider extends Robot {
       this._move(dt, world, player, robots,
         dodge?.x ?? (sin * forward + cos * this.strafeSide),
         dodge?.z ?? (cos * forward - sin * this.strafeSide), dodge ? 0.95 : 0.75, { buildings });
-      if (this.ammo > 0 && this.fireCooldown === 0) {
+      if (attackReady && this.ammo > 0 && this.fireCooldown === 0) {
         this.fireCooldown = attack(this, this.angle, target);
         this.ammo--;
         if (this.ammo === 0) this.reloadLeft = WEAPONS[this.weaponKey].reloadTime;
@@ -1043,7 +1056,7 @@ export class Raider extends Robot {
       }
       else {
         this.speed = this.baseSpeed;
-        const building = chest.homeBuilding;
+        const building = chest.homeBuilding?.cells&&Number.isFinite(chest.homeBuilding.w)?chest.homeBuilding:null;
         if (Math.hypot(chest.x - this.x, chest.z - this.z) < TILE * 1.1
           && (building ? inside === building : world.hasLineOfSight(this.x, this.z, chest.x, chest.z))) {
           const index = chest.slots?.findIndex(Boolean) ?? -1;

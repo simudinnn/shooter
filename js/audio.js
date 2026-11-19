@@ -46,6 +46,11 @@ export class SoundManager {
     if (this.muted || this.volume <= 0) return;
     const audio = this.uiSounds.get(name);
     if (!audio) return;
+    this.resume();
+    if (this.buffers[`ui_${name}`]?.length && this.ctx?.state === 'running') {
+      this.play(`ui_${name}`);
+      return;
+    }
     audio.volume = this.volume;
     audio.currentTime = 0;
     audio.play().catch(() => {});
@@ -53,6 +58,7 @@ export class SoundManager {
 
   async loadSounds() {
     const sounds = {
+      ...Object.fromEntries([...this.uiSounds.keys()].map(name => [`ui_${name}`, [`sounds/ui/${name}.ogg`]])),
       m16: ['sounds/guns/m16.ogg'],
       glock: ['sounds/guns/glock.ogg'],
       m870: ['sounds/guns/m870.ogg'],

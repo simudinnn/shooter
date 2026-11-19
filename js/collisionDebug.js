@@ -1,3 +1,4 @@
+import { drawOutlinedCanvasText } from './pixelText.js';
 /** Draw collision AABBs for debugging (F3). */
 import { TILE, CHUNK_WORLD } from './worldGen.js';
 import { CELL_DOOR, CELL_FLOOR, getBuildingCellAtWorld, isNavBlockedBuildingCell } from './buildingGen.js';
@@ -225,7 +226,7 @@ export function drawFlowFieldDebug(ctx, worldToScreen, minX, maxX, minZ, maxZ, g
     ctx.save();
     ctx.font = '8px monospace';
     ctx.fillStyle = 'rgba(255, 180, 80, 0.95)';
-    ctx.fillText('Flow field: inactive (no nearby aggro)', 6, 12);
+    drawOutlinedCanvasText(ctx,'Flow field: inactive (no nearby aggro)', 6, 12);
     ctx.restore();
     return;
   }
@@ -339,12 +340,12 @@ export function drawFlowFieldDebug(ctx, worldToScreen, minX, maxX, minZ, maxZ, g
   ctx.save();
   ctx.font = '8px monospace';
   ctx.fillStyle = 'rgba(220, 240, 255, 0.95)';
-  ctx.fillText(
+  drawOutlinedCanvasText(ctx,
     `Flow ${splitMode ? 'split (ext→door, int→player)' : 'unified'}  reachable ${reachCount}  blocked ${blockCount}  age ${age}s`,
     6,
     12,
   );
   ctx.fillStyle = 'rgba(180, 220, 255, 0.85)';
-  ctx.fillText('Yellow = goals for that region  Arrows = path in that region', 6, 22);
+  drawOutlinedCanvasText(ctx,'Yellow = goals for that region  Arrows = path in that region', 6, 22);
   ctx.restore();
 }

@@ -1,7 +1,9 @@
 import { customItems } from './customContent.js';
 export const MATERIAL_STACK_MAX = 50;
+export const materialStackMax = item => item?.key === 'cash' ? Number.MAX_SAFE_INTEGER : item?.key?.endsWith('_pack') ? 5 : MATERIAL_STACK_MAX;
 
 export const MATERIAL_KEYS = [
+  "keycard", "key", "laptop", "phone", "barbed_wire", "gas_bottle", "generator", "matches", "radar",
   "blueprint",
   "blueprint_old",
   "fuel",
@@ -24,6 +26,7 @@ export const MATERIAL_KEYS = [
 ];
 
 const DISPLAY_NAMES = {
+  keycard:'Keycard',key:'Key',laptop:'Laptop',phone:'Phone',barbed_wire:'Barbed Wire',gas_bottle:'Gas Bottle',generator:'Generator',matches:'Matches',radar:'Pack Radar',
   equipment_pack: 'Equipment Pack',
   military_pack: 'Military Pack',
   archive_pack: 'Archive Pack',
@@ -71,6 +74,7 @@ const DISPLAY_NAMES = {
 };
 
 export function materialSpritePath(key) {
+  if (['barbed_wire','gas_bottle','generator','matches','radar'].includes(key)) return 'assets/items/tools/'+key+'.png';
   if (key === 'cash') return 'assets/items/misc/cash.png';
   if (key.endsWith('_box')) return 'assets/items/weapons/' + key + '.png';
   return customItems[key]?.icon ?? `assets/items/materials/${key}.png`;
@@ -84,27 +88,30 @@ export function getMaterialDisplayName(key, amount = 1) {
 export function normalizeMaterialItem(item) {
   if (!item || item.kind !== 'material') return item;
   return {
+    ...item,
     kind: 'material',
     key: item.key,
+    ...((item.key.endsWith('_pack')||item.key==='keycard') ? {tier: Math.max(1,Math.min(3,Math.floor(item.tier??1)))} : {}),
     amount: Math.max(1, Math.floor(item.amount ?? 1)),
   };
 }
 
 export function materialItemsMatch(a, b) {
-  return a?.kind === 'material' && b?.kind === 'material' && a.key === b.key;
+  return a?.kind === 'material' && b?.kind === 'material' && a.key === b.key && (!(a.key.endsWith('_pack')||a.key==='keycard') || (a.tier??1)===(b.tier??1));
 }
 
 export function mergeMaterialStacks(a, b) {
   const left = normalizeMaterialItem(a);
   const right = normalizeMaterialItem(b);
-  if (!left || !right || left.key !== right.key) return null;
+  if (!left || !right || !materialItemsMatch(left,right)) return null;
+  const limit=materialStackMax(left);
   const total = (left.amount ?? 1) + (right.amount ?? 1);
-  if (total <= MATERIAL_STACK_MAX) {
-    return { kind: 'material', key: left.key, amount: total };
+  if (total <= limit) {
+    return { ...left, amount: total };
   }
   return {
-    merged: { kind: 'material', key: left.key, amount: MATERIAL_STACK_MAX },
-    overflow: { kind: 'material', key: left.key, amount: total - MATERIAL_STACK_MAX },
+    merged: { kind: 'material', key: left.key, amount: limit },
+    overflow: { kind: 'material', key: left.key, amount: total - limit },
   };
 }
 

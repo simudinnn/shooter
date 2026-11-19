@@ -3505,12 +3505,6 @@
         "plane": 0
       },
       {
-        "x": 26,
-        "y": 19,
-        "asset": "assets/buildings/floor/wood_alt.png",
-        "plane": 0
-      },
-      {
         "x": 27,
         "y": 19,
         "asset": "assets/buildings/floor/wood.png",
@@ -3874,6 +3868,12 @@
         "x": 25,
         "y": 19,
         "asset": "assets/buildings/floor/wood.png",
+        "plane": 0
+      },
+      {
+        "x": 26,
+        "y": 19,
+        "asset": "assets/buildings/floor/wood_alt.png",
         "plane": 0
       }
     ],
@@ -7550,19 +7550,6 @@
         "offsetY": -6
       }
     ],
-    "loot": [
-      {
-        "x": 26,
-        "y": 19,
-        "asset": "assets/items/weapons/fal.png",
-        "quantity": 1
-      },
-      {
-        "x": 25,
-        "y": 19,
-        "asset": "assets/items/weapons/rifle_ammo.png",
-        "quantity": 100
-      }
-    ]
+    "loot": []
   }
 }

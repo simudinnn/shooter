@@ -1126,8 +1126,14 @@ export function canEnemySeePlayer(robot, player, world, buildings, detectRange) 
 }
 
 export function hasCombatSight(world, from, to) {
-  return !world.segmentBlocked(from.x, entityFeetZ(from), to.x, entityFeetZ(to),
-    0.12, false, null, { sightTrace: true });
+  // Trace between collision centers, not the south edge of the feet. The latter
+  // can touch a wall even while the actor's entire collision circle is clear.
+  const sightZ = (entity) => {
+    const shape = entity.getMoveCollider?.();
+    return shape ? entity.z + (shape.zOff ?? 0) : entityFeetZ(entity);
+  };
+  return !world.segmentBlocked(from.x, sightZ(from), to.x, sightZ(to),
+    0, false, null, { sightTrace: true });
 }
 
 export function updateEnemySpotTimer(robot, canSee, dt) {
@@ -1136,7 +1142,7 @@ export function updateEnemySpotTimer(robot, canSee, dt) {
 }
 
 export function isEnemySpotted(robot) {
-  return robot.aggroByHit || (robot.spotTimer ?? 0) >= ENEMY_SPOT_DELAY;
+  return robot.aggroByHit || (robot.spotTimer ?? 0) >= (robot.reactionDelay ?? ENEMY_SPOT_DELAY);
 }
 
 export function shouldEnemyChase(robot, dist, chaseRange, canSee) {
@@ -1232,6 +1238,7 @@ export function clearEnemyCombatState(robot) {
 }
 
 export function advanceEnemySearchPhase(robot, canSee, dt, player, buildings) {
+  if(robot.type==='spider'&&robot._doorGoal&&robot._doorMemoryUntil>robot._doorNow){robot.searchPhase='chase';return {forget:false};}
   if (!robot.chasing && !robot.aggroByHit) {
     robot.searchPhase = null;
     robot.searchTimer = 0;
@@ -1316,9 +1323,50 @@ export function updateEnemyLastKnown(robot, player, canSee) {
   robot.hasLastKnown = true;
 }
 
-export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 60) {
+/** Route an already alerted enemy to an actual opening rather than the wall below its target. */
+export function getDoorPursuitGoal(robot,target,world,buildings,time,chance=0.05,occupants=[robot]) {
+  if(!target)return null;
+  const map=!!world.raidMap;
+  const doors=map?(world.mapDoors??[]):(buildings?.buildings??[]).flatMap(buildingDoors);
+  const position=door=>map?{x:door.x,z:door.z+TILE*0.375}:getDoorWorldPos(door);
+  const rz=entityFeetZ(robot),tz=target.z;
+  let door=robot._pursuitDoor;
+  if(door){const p=position(door);if((rz-p.z)*(tz-p.z)>=0){robot._pursuitDoor=null;door=null;}}
+  if(!door){
+    if(time<(robot._nextDoorScan??0))return null;
+    robot._nextDoorScan=time+0.5;
+    if(!world.segmentBlocked(robot.x,rz,target.x,tz,0.12,false,null,{solidTrace:true}))return null;
+    let best=Infinity;
+    for(const candidate of doors){
+      const p=position(candidate);
+      if((rz-p.z)*(tz-p.z)>=0)continue;
+      const score=Math.hypot(p.x-robot.x,p.z-rz)+Math.hypot(target.x-p.x,tz-p.z);
+      if(score>Math.hypot(target.x-robot.x,tz-rz)*2.5+TILE*2||score>=best)continue;
+      const side=Math.sign(rz-p.z)||1;
+      const stageZ=p.z+side*TILE*0.85-(robot.getMoveCollider?.().zOff??0);
+      if(world.checkCollisionShape(p.x,stageZ,robot.getMoveCollider(),false,{buildings}))continue;
+      best=score;door=candidate;
+    }
+    robot._pursuitDoor=door;
+  }
+  if(!door)return null;
+  const p=position(door),side=Math.sign(rz-p.z)||1;
+  if(!door.doorOpen&&Math.hypot(robot.x-p.x,rz-p.z)<TILE*1.3){
+    if(robot._nextDoorAttempt==null)robot._nextDoorAttempt=time+1;
+    if(time>=robot._nextDoorAttempt){
+      robot._nextDoorAttempt=time+3;
+      if(Math.random()<chance){
+        const opened=map?world.toggleMapDoor(door,occupants):buildings.toggleDoor(door,null,occupants);
+        if(opened&&map)buildings?.onDoorChange?.(true,p);
+      }
+    }
+  }
+  return {x:p.x,z:p.z+(door.doorOpen?-side:side)*TILE*(door.doorOpen?1.2:0.85)-(robot.getMoveCollider?.().zOff??0),kind:door.doorOpen?'door-cross':'door-closed'};
+}
+
+export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 60, goalOverride = null) {
   const nav = ensureNavState(robot);
-  const goal = getMindGoal(robot, player, buildings, world);
+  const goal = goalOverride ?? getMindGoal(robot, player, buildings, world);
   const shape = robot.getMoveCollider();
   const dx = goal.x - robot.x;
   const dz = goal.z - robot.z;
