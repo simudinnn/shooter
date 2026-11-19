@@ -1329,9 +1329,10 @@ export function getDoorPursuitGoal(robot,target,world,buildings,time,chance=0.05
   const map=!!world.raidMap;
   const doors=map?(world.mapDoors??[]):(buildings?.buildings??[]).flatMap(buildingDoors);
   const position=door=>map?{x:door.x,z:door.z+TILE*0.375}:getDoorWorldPos(door);
-  const rz=entityFeetZ(robot),tz=target.z;
+  const shape=robot.getMoveCollider();
+  const rz=robot.z+(shape.zOff??0),tz=target.z;
   let door=robot._pursuitDoor;
-  if(door){const p=position(door);if((rz-p.z)*(tz-p.z)>=0){robot._pursuitDoor=null;door=null;}}
+  if(door){const p=position(door);if((rz-p.z)*(robot._pursuitEntrySide??1)<-TILE*0.75){robot._pursuitDoor=null;robot._nextDoorScan=0;door=null;}}
   if(!door){
     if(time<(robot._nextDoorScan??0))return null;
     robot._nextDoorScan=time+0.5;
@@ -1348,9 +1349,10 @@ export function getDoorPursuitGoal(robot,target,world,buildings,time,chance=0.05
       best=score;door=candidate;
     }
     robot._pursuitDoor=door;
+    if(door)robot._pursuitEntrySide=Math.sign(rz-position(door).z)||1;
   }
   if(!door)return null;
-  const p=position(door),side=Math.sign(rz-p.z)||1;
+  const p=position(door),side=robot._pursuitEntrySide??(Math.sign(rz-p.z)||1);
   if(!door.doorOpen&&Math.hypot(robot.x-p.x,rz-p.z)<TILE*1.3){
     if(robot._nextDoorAttempt==null)robot._nextDoorAttempt=time+1;
     if(time>=robot._nextDoorAttempt){
@@ -1361,7 +1363,9 @@ export function getDoorPursuitGoal(robot,target,world,buildings,time,chance=0.05
       }
     }
   }
-  return {x:p.x,z:p.z+(door.doorOpen?-side:side)*TILE*(door.doorOpen?1.2:0.85)-(robot.getMoveCollider?.().zOff??0),kind:door.doorOpen?'door-cross':'door-closed'};
+  const aligned=Math.abs(robot.x-p.x)<TILE*0.22 || (rz-p.z)*side<TILE*0.4;
+  const crossing=door.doorOpen&&aligned;
+  return {x:p.x,z:p.z+(crossing?-side:side)*TILE*(crossing?1.2:0.85)-(robot.getMoveCollider?.().zOff??0),kind:crossing?'door-cross':'door-closed'};
 }
 
 export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 60, goalOverride = null) {
@@ -1391,7 +1395,7 @@ export function updateChaseNav(robot, player, world, buildings, time, dt = 1 / 6
     forget: false, goalX: goal.x, goalZ: goal.z,
   });
   const escaping = (nav.idleTime ?? 0) > 0.25;
-  if (!escaping && clear(heading, reach)) {
+  if ((!escaping || nearOpening) && clear(heading, reach)) {
     nav.detourSide = 0;
     return result(heading);
   }

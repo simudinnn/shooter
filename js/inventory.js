@@ -95,6 +95,11 @@ export class InventoryUI {
     this.chestPanelRoot = document.getElementById('chest-panel');
     this.chestBgImg = document.getElementById('chest-panel-bg');
     this.chestEl = document.getElementById('inv-chest-grid');
+    const takeAll = document.getElementById('inv-take-all');
+    if (takeAll) {
+      this._setBtnLabel(takeAll, 'Take all');
+      takeAll.addEventListener('click', () => this._takeAllLoot());
+    }
 
     if (this.bgImg) {
       this.bgImg.addEventListener('error', () => {
@@ -1211,19 +1216,7 @@ export class InventoryUI {
       group(e);
     });
 
-    if (this.game.mobile) {
-      const tapKey = `${container}:${index}`;
-      slot.addEventListener('click', (e) => {
-        if (slot.disabled || this._skipClick || this.drag) return;
-        const now = performance.now();
-        if (this._stackTapKey === tapKey && now - this._stackTapAt < 400) {
-          group(e);
-          return;
-        }
-        this._stackTapKey = tapKey;
-        this._stackTapAt = now;
-      }, true);
-    }
+
   }
 
   _contextEquipWeapon(index, container) {
@@ -1286,6 +1279,21 @@ export class InventoryUI {
       if(this._skipClick){this._skipClick=false;e.preventDefault();e.stopImmediatePropagation();return;}
       if(this.drag?.moved)return;
       const item=this._itemForContainer(container,index,this.game.player);if(!item)return;
+      if (this.game.mobile) {
+        const tapKey = container + ':' + index, now = performance.now();
+        const doubleTap = this._quickTap?.key === tapKey && now - this._quickTap.time < 400;
+        this._quickTap = doubleTap ? null : { key: tapKey, time: now };
+        if (doubleTap) {
+          e.preventDefault(); e.stopImmediatePropagation(); this._hideContextMenu();
+          if (container === 'chest') {
+            const result = this.game.player.tryLootItem(item);
+            if (result.ok) { this.chest.slots[index] = result.remainder; this.game.audio?.pickup(); }
+            this.render();
+          } else if (container === 'item' && this.chestMode && this.chest) this._shiftInventorySlotToChest(index);
+          else if (container === 'item') { this._useConsumable(this.game.player,index); this.render(); }
+          return;
+        }
+      }
       e.preventDefault();e.stopImmediatePropagation();this.selectedSlot=null;this.selectedChestSlot=null;
       this._showContextMenu(e,container,index,slot);this._contextPinned=true;
     },true);
@@ -2128,6 +2136,20 @@ export class InventoryUI {
         if (this._useConsumable(player, index)) this.render();
       });
     }
+  }
+
+  _takeAllLoot() {
+    if (!this.chest?.slots) return;
+    let moved = false;
+    for (let i = 0; i < this.chest.slots.length; i++) {
+      const item = this.chest.slots[i];
+      if (!item) continue;
+      const result = this.game.player.tryLootItem(item);
+      if (result.ok) { this.chest.slots[i] = result.remainder; moved = true; }
+    }
+    if (moved) this.game.audio?.pickup();
+    if (this.chest.slots.some(Boolean)) this.game.items?.setPickupMsg('Inventory full', { error: true });
+    this.render();
   }
 
   _renderChestSlots() {

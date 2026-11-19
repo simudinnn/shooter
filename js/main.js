@@ -981,7 +981,19 @@ class Game {
       this._clearKeyboardInput();
     });
 
+    this.canvas.addEventListener('pointerdown', e => {
+      if (this.mobile && this.heldThrowable && this.running && !this.paused && !this._panelOpen())
+        this._worldTap = { id:e.pointerId, x:e.clientX, y:e.clientY, time:performance.now() };
+    });
+    this.canvas.addEventListener('pointercancel', () => { this._worldTap = null; });
+    this.canvas.addEventListener('pointerup', e => {
+      const tap = this._worldTap; this._worldTap = null;
+      if (!tap || tap.id !== e.pointerId || !this.heldThrowable || !this.running || this.paused || this._panelOpen()
+        || performance.now()-tap.time>500 || Math.hypot(e.clientX-tap.x,e.clientY-tap.y)>12) return;
+      e.preventDefault(); this._onMouseMove(e); this._throwHeldItem(); this.mouseDown=false;
+    });
     this.canvas.addEventListener('mousedown', (e) => {
+      if (this.mobile) return;
       if (e.button === 0) {
         this.canvas.focus();
       this.audio.resume();
@@ -1088,6 +1100,7 @@ class Game {
     );
 
     bindHold('mb-fire', () => {
+      if (this.heldThrowable) return;
       this.audio.resume();
       this.mouseDown = true;
     }, () => { this.mouseDown = false; });
@@ -1163,9 +1176,9 @@ class Game {
     if (!this.running || !this.player) return;
     if (this.mobile) {
       const { x, z } = this.touchAim;
-      if (Math.hypot(x, z) > MOBILE_STICK_DEADZONE) {
-        this.player.angle = Math.atan2(x, z);
-      }
+      if (Math.hypot(x, z) > MOBILE_STICK_DEADZONE) this._mobileAimAngle = Math.atan2(x, z);
+      const rawAngle = this._mobileAimAngle ?? this.player.angle;
+      this.player.angle = this._mobileAssistedAngle(rawAngle);
       this._setAimCursorFromAngle(this.player.angle);
       this._syncPlayerFlip();
       return;
@@ -1176,6 +1189,27 @@ class Game {
     this.mouse.wz = target.z;
     this.player.angle = this._resolveAimAngle(this.mouse.sx, this.mouse.sy);
     this._syncPlayerFlip();
+  }
+
+  _mobileAssistedAngle(rawAngle) {
+    if (this.heldThrowable || this.player.usesMeleeCombat()) { this._aimAssistTarget=null; return rawAngle; }
+    const valid = (enemy, cone) => enemy?.alive && !enemy.emerging
+      && Math.hypot(enemy.x-this.player.x,enemy.z-this.player.z)<30
+      && this.isWorldPointOnScreen(enemy.x,enemy.z)
+      && Math.abs(this._angleDelta(rawAngle,Math.atan2(enemy.x-this.player.x,enemy.z-this.player.z)))<cone
+      && hasCombatSight(this.world,this.player,enemy);
+    if (!valid(this._aimAssistTarget,Math.PI/7.5)) this._aimAssistTarget=null;
+    if (!this._aimAssistTarget) {
+      let best=Infinity;
+      for (const enemy of this.robots) {
+        if (!valid(enemy,Math.PI/15)) continue;
+        const angle=Math.atan2(enemy.x-this.player.x,enemy.z-this.player.z);
+        const score=Math.abs(this._angleDelta(rawAngle,angle));
+        if(score<best){best=score;this._aimAssistTarget=enemy;}
+      }
+    }
+    const target=this._aimAssistTarget;
+    return target?Math.atan2(target.x-this.player.x,target.z-this.player.z):rawAngle;
   }
 
   _syncPlayerFlip() {
@@ -1720,7 +1754,7 @@ class Game {
         : fireEdge;
 
       if (this.heldThrowable) {
-        if (fireEdge) this._throwHeldItem();
+        if (fireEdge && !this.mobile) this._throwHeldItem();
       } else if (this.player.usesMeleeCombat()) {
         const melee = this.player.getActiveMelee();
         if (melee?.noCharge) {
@@ -1990,6 +2024,7 @@ class Game {
 
   _selectRaidHand(index) {
     this.heldThrowable = null;
+    this._aimAssistTarget = null;
     this.player?.setActiveHandSlot(index);
   }
 
@@ -1998,7 +2033,7 @@ class Game {
     const target=this._screenToWorld(this.mouse.sx,this.mouse.sy),z=entityFeetZ(this.player);
     if(Math.hypot(target.x-this.player.x,target.z-z)>TILE*2||this.world.checkCollision(target.x,target.z,0.5)
       ||this.world.segmentBlocked(this.player.x,z,target.x,target.z,0.1,false,null,{solidTrace:true})){
-      this.items?.setPickupMsg('Choose clear ground within two tiles.');return;
+      this.heldThrowable={index,key};this.items?.setPickupMsg('Choose clear ground within two tiles.');return;
     }
     this.player.itemSlots[index]=(item.amount??1)>1?{...item,amount:item.amount-1}:null;
     this.placedTools.push({key,x:target.x,z:target.z,cooldowns:new WeakMap()});

@@ -362,7 +362,13 @@ export class RaidBase {
       saveToggle('raid-sound-effects', this.soundEnabled);
     });
     const settingsButton = root.querySelector('#raid-settings-open');
-    settingsButton.addEventListener('click', () => settings.showModal());
+    settingsButton.addEventListener('click', () => {
+      settings.showModal();
+      const title=settings.querySelector('h2');
+      title.tabIndex=-1; title.focus({preventScroll:true});
+      settings.scrollTop=0;
+      requestAnimationFrame(()=>{settings.scrollTop=0;});
+    });
     settings.addEventListener('close', () => settingsButton.focus({ preventScroll: true }));
     for (const label of root.querySelectorAll('nav button, #raid-settings-open, .raid-base-overview h2, .raid-base-mission p, .raid-transfer-hint, .raid-station-description, [data-base-panel="craft"] > h2, [data-base-panel="shop"] > h2, #raid-settings :is(h2, legend, label span)')) {
       this.pixelLabel(label, label.textContent.trim(), label.matches('p') ? 320 : undefined);
@@ -752,6 +758,13 @@ export class RaidBase {
 
   bindTransfer(slot, source, key, index) {
     const transfer = () => this.transferItem(source, key, index);
+    slot.addEventListener('click', event => {
+      if (!document.body.classList.contains('mobile-ui') || this._suppressSlotClick === slot) return;
+      const tapKey = source + ':' + key + ':' + index, now = performance.now();
+      const doubleTap = this._quickTap?.key === tapKey && now - this._quickTap.time < 400;
+      this._quickTap = doubleTap ? null : { key: tapKey, time: now };
+      if (doubleTap) { event.preventDefault(); event.stopImmediatePropagation(); this.closeSelection(); transfer(); }
+    }, true);
     slot.classList.add('raid-transfer-slot');
     let drag = null;
     const target = this.root.querySelector(source === 'stash' ? '#raid-kit' : '#raid-stash').closest('.raid-base-section');

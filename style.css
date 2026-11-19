@@ -4374,3 +4374,31 @@ body.mobile-ui #raid-base .raid-base-workspace .raid-loadout-layout {min-height:
  body.mobile-ui #raid-base .raid-base-top nav {grid-row:2;grid-column:1 / -1;}
  body.mobile-ui #raid-base .raid-base-workspace .raid-loadout-layout {height:280px;flex:none;}
 }
+
+/* Keep bulk pickup in its own row above the loot slots. */
+#inventory #chest-panel {position:relative;}
+#inventory #inv-take-all {position:absolute;top:7px;right:10px;z-index:2;pointer-events:auto;--ui-btn-border:5px;padding:3px 8px;min-height:28px;}
+#inventory #inv-take-all .inv-pixel-text-img {height:13px;width:auto;}
+#inventory #chest-panel-layout {top:34px;height:calc(100% - 34px);}
+#inventory #chest-panel {height:calc(var(--chest-slot-size) * var(--loot-rows,2) + (var(--loot-rows,2) - 1) * 6px + 54px + 2 * (var(--chest-inner-pad) + var(--ui-panel-border)));}
+body.mobile-ui #raid-base .raid-base-header-actions {flex-direction:row;}
+body.mobile-ui #raid-base #raid-settings {
+  box-sizing:border-box;width:min(480px,calc(100dvw - var(--mobile-safe-left) - var(--mobile-safe-right)));
+  max-width:none;max-height:calc(100dvh - var(--mobile-safe-top) - var(--mobile-safe-bottom));
+  padding:12px;margin:auto;overflow:auto;scroll-behavior:auto;
+}
+body.mobile-ui #raid-settings > h2 {margin:0 0 10px;outline:none;}
+body.mobile-ui #raid-settings > h2 .inv-pixel-text-img {height:18px;width:auto;}
+body.mobile-ui #raid-settings form {grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px;}
+body.mobile-ui #raid-settings fieldset {min-width:0;padding:6px;margin:0;}
+body.mobile-ui #raid-settings fieldset :is(label,div) {margin:5px 0;gap:6px;}
+body.mobile-ui #raid-settings :is(legend,label,fieldset div) .inv-pixel-text-img {height:12px;width:auto;max-width:100%;object-fit:contain;}
+body.mobile-ui #raid-settings .raid-smooth-slider {width:85px;flex:0 0 85px;}
+body.mobile-ui #overlay #raid-base #raid-settings form > button {--ui-btn-border:5px;min-height:32px;padding:4px 8px;margin:0;}
+body.mobile-ui #raid-settings form > button .inv-pixel-text-img {height:14px;width:auto;max-width:100%;}
+@media (orientation:portrait) {
+ body.mobile-ui #raid-settings form {grid-template-columns:1fr;}
+}
+
+body.mobile-ui #raid-settings fieldset {gap:4px;}
+body.mobile-ui #raid-settings fieldset :is(label,div) {margin:2px 0;}

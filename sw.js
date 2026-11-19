@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v550';
+const CACHE = 'robot-ruins-v551';
 
 function buildingKitSprites() {
   return [
