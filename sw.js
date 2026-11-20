@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v560';
+const CACHE = 'robot-ruins-v561';
 
 function buildingKitSprites() {
   return [
@@ -194,6 +194,7 @@ const SHELL = [
 ];
 
 const ASSETS = [
+  './js/touchSelection.js',
   './js/doorAccess.js',
   './assets/buildings/misc/cardboard_box.png',
   './assets/buildings/misc/couch.png',

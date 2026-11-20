@@ -1,3 +1,4 @@
+import { bindTouchSelection } from './touchSelection.js';
 import { isAccessItem } from './doorAccess.js';
 import { drawOutlinedCanvasText } from './pixelText.js';
 import { moveStacks } from './batchInventory.js';
@@ -175,8 +176,19 @@ export class InventoryUI {
 
   _initBatchSelection(){
     this.batchSelection=new Map();
+    bindTouchSelection(this.root,{
+      enabled:()=>this.game.mobile&&this.open,
+      resolve:target=>{
+        const slot=target.closest('.inv-item-slot:not(.inv-locked),.inv-chest-slot');if(!slot)return null;
+        const container=slot.classList.contains('inv-chest-slot')?'chest':'item',index=Number(slot.dataset.slotIndex);
+        return this._itemForContainer(container,index,this.game.player)?{slot,container,index}:null;
+      },
+      clear:()=>{this.batchSelection.clear();this._syncBatchSelection();},
+      cancelDrag:()=>{this._cancelDrag();this._skipClick=false;},
+      toggle:({container,index})=>{const token=container+':'+index;if(this.batchSelection.has(token))this.batchSelection.delete(token);else this.batchSelection.set(token,{container,index});this._quickTap=null;this._hideContextMenu();this._syncBatchSelection();}
+    });
     this.root.addEventListener('pointerdown',e=>{
-      if(e.ctrlKey||e.metaKey||!this.batchSelection.size||e.target.closest('.inventory-batch-actions,dialog'))return;
+      if(e.touchMultiSelection||e.ctrlKey||e.metaKey||!this.batchSelection.size||e.target.closest('.inventory-batch-actions,dialog'))return;
       const slot=e.target.closest('.inv-item-slot,.inv-chest-slot');
       const selected=slot?.classList.contains('item-multi-selected');
       const clear=()=>{this.batchSelection.clear();this._syncBatchSelection();};
@@ -748,10 +760,11 @@ export class InventoryUI {
     this._tooltipEl.style.top = '0';
     const tip = this._tooltipEl.getBoundingClientRect();
     let left = clientX - tip.width / 2;
-    let top = clientY - tip.height - 16;
+    let top = this.game.mobile?clientY+22:clientY - tip.height - 16;
     if (top < 8) top = clientY + 20;
     left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8));
     this._tooltipEl.style.left = `${left}px`;
+    top=Math.max(12,Math.min(top,(window.visualViewport?.height??window.innerHeight)-tip.height-12));
     this._tooltipEl.style.top = `${top}px`;
     this._tooltipEl.style.visibility = 'visible';
   }
@@ -862,11 +875,15 @@ export class InventoryUI {
     const overlap = 6;
     const slotRect = anchorEl.getBoundingClientRect();
     this._contextMenuEl.style.visibility = 'hidden';
+    if(this.game.mobile)this._contextMenuEl.style.maxHeight=Math.max(80,(window.visualViewport?.height??window.innerHeight)-56)+'px';
     this._contextMenuEl.classList.remove('hidden');
     const menuRect = this._contextMenuEl.getBoundingClientRect();
 
     let left = slotRect.right - overlap;
-    let top = slotRect.top + (slotRect.height - menuRect.height) * 0.5;
+    const viewport=window.visualViewport;
+    const minY=this.game.mobile?(viewport?.offsetTop??0)+40:8;
+    const maxY=(viewport?.offsetTop??0)+(viewport?.height??window.innerHeight)-12;
+    let top = this.game.mobile?slotRect.top+16:slotRect.top + (slotRect.height - menuRect.height) * 0.5;
 
     if (left + menuRect.width > window.innerWidth - 8) {
       left = slotRect.left - menuRect.width + overlap;
@@ -874,7 +891,7 @@ export class InventoryUI {
     if (top + menuRect.height > window.innerHeight - 8) {
       top = window.innerHeight - menuRect.height - 8;
     }
-    if (top < 8) top = 8;
+    top=Math.max(minY,Math.min(top,maxY-menuRect.height));
     left = Math.max(8, left);
 
     this._contextMenuEl.style.left = `${left}px`;

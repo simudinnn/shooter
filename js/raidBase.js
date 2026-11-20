@@ -1,3 +1,4 @@
+import { bindTouchSelection } from './touchSelection.js';
 import { REMOVED_MATERIAL_KEYS } from './materials.js';
 import { moveStacks } from './batchInventory.js';
 import { isContainer, isPack, isTieredItem, packTier, openContainer } from './containers.js';
@@ -635,8 +636,15 @@ export class RaidBase {
 
   _initBatchSelection(){
     if(this.batchSelection)return;this.batchSelection=new Map();
+    bindTouchSelection(this.root,{
+      enabled:()=>document.body.classList.contains('mobile-ui')&&!this.root.classList.contains('hidden'),
+      resolve:target=>{const slot=target.closest('.raid-base-slot'),p=this.slotPositions.get(slot);if(!p||(p.key&&p.key!=='itemSlots'))return null;const container=p.source==='stash'?'stash':'kit';const item=container==='stash'?this.profile.stash[p.index]:this.profile.kit.itemSlots[p.index];return item?{slot,container,index:p.index}:null;},
+      clear:()=>{this.batchSelection.clear();this._syncBatchSelection();},
+      cancelDrag:id=>window.dispatchEvent(new PointerEvent('pointercancel',{pointerId:id})),
+      toggle:({container,index})=>{const token=container+':'+index;if(this.batchSelection.has(token))this.batchSelection.delete(token);else this.batchSelection.set(token,{container,index});this._quickTap=null;this.closeSelection();this._syncBatchSelection();}
+    });
     this.root.addEventListener('pointerdown',e=>{
-      if(e.ctrlKey||e.metaKey||!this.batchSelection.size||e.target.closest('.inventory-batch-actions,dialog'))return;
+      if(e.touchMultiSelection||e.ctrlKey||e.metaKey||!this.batchSelection.size||e.target.closest('.inventory-batch-actions,dialog'))return;
       const slot=e.target.closest('.raid-base-slot');
       const selected=slot?.classList.contains('item-multi-selected');
       const clear=()=>{this.batchSelection.clear();this._syncBatchSelection();};
@@ -1354,7 +1362,7 @@ export class RaidBase {
     if (touch) {
       const bounds = (this.deployDialog.open ? this.deployDialog : this.root.querySelector('.raid-base-frame')).getBoundingClientRect();
       const leftEdge = Math.max(bounds.left, viewport?.offsetLeft ?? 0) + 8;
-      const topEdge = Math.max(bounds.top, viewport?.offsetTop ?? 0) + 8;
+      const topEdge = Math.max(bounds.top, viewport?.offsetTop ?? 0) + 32;
       const rightEdge = Math.min(bounds.right, (viewport?.offsetLeft ?? 0) + maxX) - 8;
       const bottomEdge = Math.min(bounds.bottom, (viewport?.offsetTop ?? 0) + maxY) - 8;
       this.selection.style.maxWidth = `${rightEdge - leftEdge}px`;
@@ -1362,7 +1370,7 @@ export class RaidBase {
       const box = this.selection.getBoundingClientRect();
       const x = rect.right + box.width + 5 <= rightEdge ? rect.right + 5 : rect.left - box.width - 5;
       this.selection.style.left = `${Math.max(leftEdge, Math.min(x, rightEdge - box.width))}px`;
-      this.selection.style.top = `${Math.max(topEdge, Math.min(rect.top + (rect.height - box.height) / 2, bottomEdge - box.height))}px`;
+      this.selection.style.top = `${Math.max(topEdge, Math.min(rect.top + 16, bottomEdge - box.height))}px`;
       return;
     }
     this.selection.style.maxWidth = `${maxX - 16}px`;

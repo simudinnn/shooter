@@ -1173,14 +1173,16 @@ class Game {
     }
   }
 
-  _syncAim() {
+  _syncAim(dt=1/60) {
     if (!this.running || !this.player) return;
     if (this.mobile) {
       const { x, z } = this.touchAim;
       this._aimInputActive=Math.hypot(x,z)>MOBILE_STICK_DEADZONE;
       if (this._aimInputActive) this._mobileAimAngle = Math.atan2(x, z);
       const rawAngle = this._mobileAimAngle ?? this.player.angle;
-      this.player.angle = this._mobileAssistedAngle(rawAngle);
+      const assisted=this._mobileAssistedAngle(rawAngle);
+      const ease=1-Math.exp(-14*Math.min(0.05,Math.max(0,dt)));
+      this.player.angle=this._aimAssistTarget?this.player.angle+this._angleDelta(this.player.angle,assisted)*ease:assisted;
       this._setAimCursorFromAngle(this.player.angle);
       this._syncPlayerFlip();
       return;
@@ -1747,7 +1749,7 @@ class Game {
 
       this._updateCameraFollow(dt);
       if (!this._isSpawnRevealActive()) {
-        this._syncAim();
+        this._syncAim(dt);
       }
 
       if (!this._isSpawnRevealActive()) {
@@ -3794,7 +3796,8 @@ class Game {
     const scaleY = rect.height / INTERNAL_H;
     const clientX = rect.left + ps.x * scaleX;
     const feetLift = (spriteFeetOffset(CHAR_NATIVE_PX, SPRITE_PLAYER) + CHAR_NATIVE_PX * SPRITE_PLAYER) * scaleY;
-    const clientY = rect.top + ps.y * scaleY - feetLift;
+    const desiredY=rect.top+ps.y*scaleY-(this.mobile?feetLift*0.35:feetLift);
+    const clientY=this.mobile?Math.max(64,Math.min(desiredY,(window.visualViewport?.height??innerHeight)-16)):desiredY;
     this.el.interactPrompt.style.left = `${clientX}px`;
     this.el.interactPrompt.style.top = `${clientY}px`;
     this.el.interactPrompt.style.bottom = 'auto';
