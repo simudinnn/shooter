@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="hr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zombie Ruins · Ekonomija</title>
+<style>
+  :root { color-scheme: dark; font: 16px system-ui; background: #17201d; color: #f1f2ef; }
+  body { max-width: 960px; margin: 32px auto; padding: 0 16px; }
+  a { color: #c4e7cf; }
+  textarea { display: block; width: 100%; box-sizing: border-box; margin: 12px 0; min-height: 55vh; padding: 12px; font: 14px monospace; }
+  select, button, textarea { background: #263630; color: inherit; border: 1px solid #708279; border-radius: 5px; }
+  select, button { font: inherit; padding: 8px; }
+  .error { color: #ffb3a5; }
+</style>
+<a href="./content-editor.html">Uređivač sadržaja</a>
+<h1>Ekonomija igre</h1>
+<label>Podaci
+  <select id="section">
+    <option value="shop">Shop</option>
+    <option value="sellPrices">Prodajne cijene</option>
+    <option value="crafting">Crafting u bazi i inventaru</option>
+    <option value="recycling">Recycling</option>
+    <option value="recycleLevels">Leveli za recycling</option>
+    <option value="economy">Cash i količina municije za recycling</option>
+  </select>
+</label>
+<p id="help"></p>
+<textarea id="data" aria-label="Podaci odabranog odjeljka" spellcheck="false"></textarea>
+<button id="export">Preuzmi economy-data.js</button>
+<p>Zamijeni <code>js/economy-data.js</code> preuzetom datotekom i osvježi igru.</p>
+<p id="status" role="status"></p>
+<script type="module" src="./economy-editor.js"></script>
+</html>

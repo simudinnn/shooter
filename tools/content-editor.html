@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="hr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zombie Ruins · Uređivač sadržaja</title>
+<style>
+  :root { color-scheme: dark; font: 16px system-ui; background: #17201d; color: #f1f2ef; }
+  body { max-width: 940px; margin: 32px auto; padding: 0 16px; }
+  h1 { margin-bottom: 0.25em; }
+  p { line-height: 1.5; }
+  .bar, .fields { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); margin: 16px 0; }
+  label { display: grid; gap: 5px; }
+  input, select, button { font: inherit; padding: 8px; border: 1px solid #708279; border-radius: 5px; background: #263630; color: inherit; }
+  button { cursor: pointer; }
+  #save, #apply { background: #345d48; }
+  #status { min-height: 1.5em; white-space: pre-wrap; }
+  .error { color: #ffb3a5; }
+  code { color: #c4e7cf; }
+</style>
+<h1>Zombie Ruins</h1>
+<p>Uređivač sadržaja za lokalni razvoj</p>
+<p><a href="./economy-editor.html">Uredi cijene, recepte i levele</a></p>
+<div class="bar">
+  <label>Vrsta <select id="group">
+    <option value="enemies">Neprijatelji i NPC-evi</option>
+    <option value="items">Predmeti / materijali</option>
+    <option value="weapons">Vatreno oružje</option>
+    <option value="loot">Loot u škrinjama</option>
+  </select></label>
+  <label>Zapis <select id="entry"></select></label>
+</div>
+<form id="editor">
+  <div class="fields" id="fields"></div>
+  <div class="bar">
+    <button id="apply">Spremi zapis u radnu verziju</button>
+    <button type="button" id="remove">Izbriši zapis</button>
+  </div>
+</form>
+<hr>
+<div class="bar">
+  <button id="save">Izvezi katalog za igru</button>
+  <label>Učitaj prethodni izvoz <input id="import" type="file" accept=".js,.json"></label>
+</div>
+<p id="status" role="status" aria-live="polite"></p>
+<p>PNG datoteke stavi u <code>assets/</code> i upiši putanju iz korijena projekta. Za novu pušku ili predmet dodaj i loot zapis kako bi se pojavljivali u škrinjama. Težina 0 isključuje pojavljivanje.</p>
+<p>Izvezeni katalog spremi preko <code>js/custom-content-data.js</code>, zatim osvježi igru.</p>
+<script type="module" src="./content-editor.js"></script>
+</html>

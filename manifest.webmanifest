@@ -1,7 +1,7 @@
 {
-  "name": "Robot Ruins",
-  "short_name": "Robot Ruins",
-  "description": "2.5D top-down robot shooter",
+  "name": "Zombie Ruins",
+  "short_name": "Zombie Ruins",
+  "description": "2.5D top-down zombie shooter",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

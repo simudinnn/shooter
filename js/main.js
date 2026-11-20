@@ -1,3 +1,4 @@
+import { doorAccessError, isAccessItem } from './doorAccess.js';
 import { loadStructures, generateStructureMap } from './structures.js';
 import { PLACEABLE_TOOLS, nearestPackChest, segmentDistance } from './tools.js';
 import { cashTotal, changeCash } from './cash.js';
@@ -1176,7 +1177,8 @@ class Game {
     if (!this.running || !this.player) return;
     if (this.mobile) {
       const { x, z } = this.touchAim;
-      if (Math.hypot(x, z) > MOBILE_STICK_DEADZONE) this._mobileAimAngle = Math.atan2(x, z);
+      this._aimInputActive=Math.hypot(x,z)>MOBILE_STICK_DEADZONE;
+      if (this._aimInputActive) this._mobileAimAngle = Math.atan2(x, z);
       const rawAngle = this._mobileAimAngle ?? this.player.angle;
       this.player.angle = this._mobileAssistedAngle(rawAngle);
       this._setAimCursorFromAngle(this.player.angle);
@@ -1194,17 +1196,17 @@ class Game {
   _mobileAssistedAngle(rawAngle) {
     if (this.heldThrowable) { this._aimAssistTarget=null; return rawAngle; }
     const melee=this.player.usesMeleeCombat();
-    const assistRange=melee ? (this.player.getActiveMelee()?.range ?? 1.9)+3 : 30;
-    const valid = (enemy, cone) => enemy?.alive && !enemy.emerging
+    const assistRange=melee ? (this.player.getActiveMelee()?.range ?? 1.9)+5 : 30;
+    const valid = (enemy, cone=Infinity) => enemy?.alive && !enemy.emerging
       && Math.hypot(enemy.x-this.player.x,enemy.z-this.player.z)<assistRange
       && this.isWorldPointOnScreen(enemy.x,enemy.z)
       && Math.abs(this._angleDelta(rawAngle,Math.atan2(enemy.x-this.player.x,enemy.z-this.player.z)))<cone
       && hasCombatSight(this.world,this.player,enemy);
-    if (!valid(this._aimAssistTarget,melee?Math.PI/4:Math.PI/7.5)) this._aimAssistTarget=null;
+    if (!valid(this._aimAssistTarget,this._aimInputActive?(melee?Math.PI/2.2:Math.PI/3.6):Infinity)) this._aimAssistTarget=null;
     if (!this._aimAssistTarget) {
       let best=Infinity;
       for (const enemy of this.robots) {
-        if (!valid(enemy,melee?Math.PI/6:Math.PI/15)) continue;
+        if (!valid(enemy,melee?Math.PI/3:Math.PI/6)) continue;
         const angle=Math.atan2(enemy.x-this.player.x,enemy.z-this.player.z);
         const score=Math.abs(this._angleDelta(rawAngle,angle));
         if(score<best){best=score;this._aimAssistTarget=enemy;}
@@ -1444,7 +1446,7 @@ class Game {
 
     if (raidMap) {
       for (const chest of this.world.mapChests) {
-        this.chests.restoreInBuilding({ ...chest, slots: rollChestLoot() }, {}, {...chest,authored:true});
+        this.chests.restoreInBuilding({ ...chest, slots: rollChestLoot(chest.variant) }, {}, {...chest,authored:true});
       }
       for (const { x, y, item } of raidMap.layers.loot) {
         this.groundDrops.dropAt((x + 0.5) * TILE, (y + 0.5) * TILE, item, null, { preserve: true, exact: true });
@@ -1978,11 +1980,14 @@ class Game {
       || shelter.walls.some((wall) => wall.window
         && Math.hypot(this.player.x - wall.x, entityFeetZ(this.player) - wall.z) < TILE * 1.35)
     );
+    const tileZones=this.world.raidMap&&this.world.isIndoorAt;
+    const zoneMismatch=tileZones?this.world.isIndoorAt(this.player.x,entityFeetZ(this.player))!==this.world.isIndoorAt(entity.x,sourceZ):false;
+    const mapOpening=tileZones&&this.world.mapDoors.some(door=>door.doorOpen&&Math.hypot(this.player.x-door.x,entityFeetZ(this.player)-door.z)<TILE*1.35);
     return {
       x: entity.x - this.player.x,
       z: entity.z - this.player.z,
-      outside: Boolean(shelter && !nearOpening && this.buildings.getEntityBuildingAt(entity) !== shelter),
-      nearOpening: Boolean(nearOpening),
+      outside: tileZones ? zoneMismatch&&!mapOpening : Boolean(shelter && !nearOpening && this.buildings.getEntityBuildingAt(entity) !== shelter),
+      nearOpening: Boolean(nearOpening||mapOpening),
       occluded: !nearOpening && Math.hypot(entity.x - this.player.x, entity.z - this.player.z) >= TILE * 3
         && this.world.segmentBlocked(this.player.x, entityFeetZ(this.player), entity.x, sourceZ,
           0, false, null, { soundTrace: true }),
@@ -2093,9 +2098,19 @@ class Game {
     radar.querySelector('span').textContent=signal?'PACK '+Math.max(1,Math.ceil(signal.distanceMetres))+'m':'searching for packs...';
   }
 
+  _useAccessItem(index,key) {
+    const target=this._screenToWorld(this.mouse.sx,this.mouse.sy);
+    const door=this.world.mapDoors?.find(d=>Math.abs(target.x-d.x)<=TILE/2&&Math.abs(target.z-d.z)<=TILE/2&&Math.hypot(d.x-this.player.x,d.z-this.player.z)<=TILE*1.5);
+    if(!door?.lockType||door.unlocked){this.heldThrowable={index,key};this.items.setPickupMsg('Click a nearby locked door.');return;}
+    this.player._doorCredentialIndex=index;
+    try{this._tryToggleNearbyDoor(door);}finally{delete this.player._doorCredentialIndex;}
+    if(!door.permanentOpen)this.heldThrowable={index,key};
+  }
+
   _throwHeldItem() {
     const { index, key } = this.heldThrowable;
     this.heldThrowable = null;
+    if(['key','keycard'].includes(key)){this._useAccessItem(index,key);return;}
     if(PLACEABLE_TOOLS.includes(key)){this._placeHeldTool(index,key);return;}
     const item = normalizeThrowableItem(this.player.itemSlots[index]);
     if (!item || item.key !== key || !this.player.isItemSlotUnlocked(index)) return;
@@ -2415,6 +2430,7 @@ class Game {
       let nearest = null;
       let nearestDistance = TILE * 1.2;
       for (const door of this.world.mapDoors) {
+        if(door.permanentOpen)continue;
         const distance = Math.hypot(door.x - this.player.x, door.z - this.player.z);
         if (distance > nearestDistance) continue;
         if (!this.mobile) {
@@ -2434,13 +2450,16 @@ class Game {
     return hovered;
   }
 
-  _tryToggleNearbyDoor() {
+  _tryToggleNearbyDoor(doorOverride = null) {
     if (!this.running || this._panelOpen()) return false;
-    const building = this._getInteractDoor();
+    const building = doorOverride??this._getInteractDoor();
     if (!building) return false;
+    if(building.permanentOpen)return false;
+    const accessError=doorAccessError(building,this.player);
+    if(accessError){this.items.setPickupMsg(accessError,{error:true,duration:2});return true;}
     const occupants = [this.player, ...this.robots.filter((robot) => robot.alive)];
     const toggled = this.world.raidMap
-      ? this.world.toggleMapDoor(building, occupants)
+      ? this.world.toggleMapDoor(building, occupants, this.player)
       : this.buildings.toggleDoor(building, this.player, occupants);
     if (toggled && this.world.raidMap) this.audio.doorToggle(building.doorOpen, this._soundOffset(building));
     if (!toggled) {
@@ -3507,9 +3526,10 @@ class Game {
     const gunClip = insideBuilding ? buildingGunClipBounds(insideBuilding)
       : this.world.getGunClipBounds?.(playerX, playerSortZ, playerSortZ + Math.cos(this.player.angle) * TILE);
     drawList.push({ z: playerSortZ + 0.02, sortBias: SORT_GUN, bakedShade: playerShade, draw: () => {
-      if (this.heldThrowable) {
+      const accessItem=this.player.getHandSlotItem(this.player.activeHandSlot);
+      if (this.heldThrowable || isAccessItem(accessItem)) {
         const point = this._entityToScreen(this.player.x, this.player.z);
-        this.sprites.drawGroundItem(ctx, this.heldThrowable.key, point.x + Math.sin(this.player.angle) * 12, point.y + 8, 18);
+        this.sprites.drawGroundItem(ctx, this.heldThrowable?.key??accessItem.key, point.x + Math.sin(this.player.angle) * 12, point.y + 8, 18);
       } else {
         this._drawWeaponSprite(ctx, this._getGunScreenPose(drawTime), gunClip);
       }
@@ -3853,7 +3873,8 @@ class Game {
       String(Math.ceil(this.player.health)) + (this.player.shield > 0 ? ` (+${Math.ceil(this.player.shield)})` : ''),
       PIXEL_TEXT_SCALE,
     );
-    this._setPixelText(this.el.weaponName, w?.name ?? 'Hand', PIXEL_TEXT_SCALE);
+    const accessItem=this.player.getHandSlotItem(this.player.activeHandSlot);
+    this._setPixelText(this.el.weaponName, isAccessItem(accessItem)?getItemDisplayName({...accessItem,amount:1}):w?.name ?? 'Hand', PIXEL_TEXT_SCALE);
     if (this.player.isMeleeActive() || this.player.isUnarmed()) {
       this._setPixelText(this.el.ammoCurrent, '-', PIXEL_TEXT_SCALE);
       this._setPixelText(this.el.ammoReserve, '-', PIXEL_TEXT_SCALE);
@@ -3941,9 +3962,11 @@ class Game {
     this.el.interactPrompt.classList.toggle('hidden', !showPrompt);
     if (showPrompt) {
       const doorVerb = interactDoor?.doorOpen ? 'close' : 'open';
+      const lockedLabel=interactDoor?.lockType&&!interactDoor.unlocked
+        ?(interactDoor.lockType==='key'?'Locked (Key)':'Locked (Keycard '+(['','I','II','III'][interactDoor.lockTier??1])+')'):null;
       if (this.mobile) {
         const mobileText = canCallHatch ? 'E Call Extract' : canToggleDoor
-          ? `E to ${doorVerb} door`
+          ? (lockedLabel??`E to ${doorVerb} door`)
           : (canOpenCorpse ? 'E to loot' : (pickupDrop ? `E ${pickupDrop.label}` : 'E to open'));
         setElementPixelText(this.el.interactPrompt, mobileText, PIXEL_TEXT_SCALE);
         this._positionInteractPromptAbovePlayer();
@@ -3951,7 +3974,7 @@ class Game {
         const mx = this.mouse.clientX;
         const my = this.mouse.clientY;
         const desktopText = canCallHatch ? 'RMB to call extract' : canToggleDoor
-          ? `RMB to ${doorVerb} door`
+          ? (lockedLabel??`RMB to ${doorVerb} door`)
           : (canOpenCorpse ? 'RMB to loot' : (pickupDrop ? `RMB ${pickupDrop.label}` : 'RMB to open'));
         setElementPixelText(this.el.interactPrompt, desktopText, PIXEL_TEXT_SCALE);
         this.el.interactPrompt.style.left = `${mx}px`;

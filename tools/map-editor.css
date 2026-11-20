@@ -1,0 +1,42 @@
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { min-height: 100dvh; display: flex; flex-direction: column; margin: 0; background: #181c19; color: #eee8d8; font: 15px system-ui, sans-serif; }
+header, .toolbar, form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+header { padding: 14px 20px; background: #262920; border-bottom: 1px solid #716044; }
+h1 { font-size: 20px; margin: 0 12px 0 0; }
+main { flex: 1; display: grid; grid-template-columns: minmax(185px, 260px) minmax(0, 1fr); gap: 16px; padding: 16px; }
+aside { display: flex; flex-direction: column; gap: 10px; }
+label { display: inline-flex; align-items: center; gap: 6px; }
+input, select, button { color: inherit; background: #30342b; border: 1px solid #78654a; border-radius: 3px; padding: 5px 8px; font: inherit; }
+input[type=number] { width: 72px; }
+input[type=search] { width: 100%; min-width: 0; }
+button { cursor: pointer; }
+button[aria-pressed=true] { background: #87362a; border-color: #edac72; }
+#selection { min-height: 20px; margin: 0; color: #e9bd88; }
+#palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 5px; max-height: 62vh; overflow: auto; }
+#palette button { min-height: 44px; padding: 4px; }
+#palette img { width: 32px; height: 32px; object-fit: contain; image-rendering: pixelated; }
+main > section { display: flex; flex-direction: column; min-width: 0; }
+#viewport { overflow: auto; flex: 1; height: 0; min-height: 50dvh; border: 1px solid #716044; background: #101310; }
+canvas { display: block; image-rendering: pixelated; touch-action: none; }
+.toolbar { margin-bottom: 8px; }
+.hint { margin: 6px 0 0; color: #c3b9a5; }
+@media (max-width: 620px) {
+  main { grid-template-columns: 1fr; }
+  #palette { max-height: 140px; }
+  #viewport { min-height: 50dvh; }
+}
+
+#palette small {
+  display: block;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 621px) {
+  body { height: 100dvh; overflow: hidden; }
+  main, main > section { min-height: 0; }
+  aside { min-height: 0; overflow: auto; }
+  #viewport { min-height: 0; }
+}
+#viewport.is-panning, #viewport.is-panning canvas { cursor: grabbing; }

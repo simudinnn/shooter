@@ -11,7 +11,7 @@ import {
 } from './ammo.js';
 import {
   MATERIAL_KEYS,
-  CRAFTING_MATERIAL_KEYS,
+  BASIC_MATERIAL_KEYS,
   getMaterialDisplayName,
   materialSpritePath,
   normalizeMaterialItem,
@@ -36,7 +36,7 @@ import {
   throwableSpritePath,
 } from './throwables.js';
 
-export const CHEST_SLOT_COUNT = 8;
+export const CHEST_SLOT_COUNT = 4;
 export const CHEST_COLS = 4;
 export const CHEST_ROWS = 2;
 
@@ -58,21 +58,14 @@ const RARITY_WEIGHT = {
   epic: 1,
 };
 
+const materialLootWeight=entry=>(RARITY_WEIGHT[entry.rarity]??1)*(BASIC_MATERIAL_KEYS.includes(entry.key)?0.45:1);
+
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
-  { key: 'adhesive', rarity: 'uncommon', min: 1, max: 3 },
   { key: 'battery', rarity: 'uncommon', min: 1, max: 1 },
   { key: 'book', rarity: 'common', min: 1, max: 1 },
-  { key: 'chemicals', rarity: 'uncommon', min: 1, max: 3 },
-  { key: 'cloth', rarity: 'common', min: 1, max: 3 },
-  { key: 'fabric', rarity: 'common', min: 1, max: 3 },
-  { key: 'glass_bottle', rarity: 'common', min: 1, max: 3 },
-  { key: 'metal_scrap', rarity: 'common', min: 1, max: 3 },
-  { key: 'metal_sheet', rarity: 'uncommon', min: 1, max: 1 },
   { key: 'nails', rarity: 'common', min: 1, max: 3 },
   { key: 'plank', rarity: 'common', min: 1, max: 3 },
-  { key: 'plastic', rarity: 'common', min: 1, max: 3 },
-  { key: 'rope', rarity: 'common', min: 1, max: 3 },
   { key: 'spring', rarity: 'uncommon', min: 1, max: 3 },
   { key: 'tape', rarity: 'common', min: 1, max: 3 },
   { key: 'wires', rarity: 'common', min: 1, max: 3 },
@@ -253,7 +246,7 @@ function buildChestLootOptions() {
     const entry = LOOT_ENTRY_BY_KEY[key];
     if (!entry) continue;
     options.push({
-      weight: RARITY_WEIGHT[entry.rarity],
+      weight: materialLootWeight(entry),
       roll: () => ({ kind: 'material', key: entry.key, amount: rollMaterialAmount(entry), ...((entry.key.endsWith('_pack')||entry.key==='keycard')?{tier:rollPackTier()}:{}) }),
     });
   }
@@ -313,7 +306,7 @@ export function rollWeightedLootSlot(allowedKeys) {
 
   let total = LOOT_EMPTY_WEIGHT;
   for (const entry of pool) {
-    total += RARITY_WEIGHT[entry.rarity] ?? 1;
+    total += materialLootWeight(entry);
   }
 
   let roll = Math.random() * total;
@@ -321,7 +314,7 @@ export function rollWeightedLootSlot(allowedKeys) {
   if (roll <= 0) return null;
 
   for (const entry of pool) {
-    roll -= RARITY_WEIGHT[entry.rarity] ?? 1;
+    roll -= materialLootWeight(entry);
     if (roll <= 0) {
       return { kind: 'material', key: entry.key, amount: rollMaterialAmount(entry) };
     }
@@ -341,10 +334,21 @@ export function rollChestVariant() {
 }
 
 /** Roll loot for one chest — uses Math.random so each deploy differs. */
-export function rollChestLoot() {
+export function rollChestLoot(variant = 'chest_wood') {
   const slots = Array(CHEST_SLOT_COUNT).fill(null);
   for (let i = 0; i < CHEST_SLOT_COUNT; i++) {
     slots[i] = rollChestLootSlot();
+  }
+  if (variant==='chest_crate') {
+    const valuable=()=>({kind:'material',key:['repair_kit','sewing_kit','electrical_comp','fuel','industrial_pack'][Math.floor(Math.random()*5)],amount:1});
+    slots[0]=valuable();slots[1]=rollChestBandageItem();slots[2]=Math.random()<0.5?rollChestAmmoItem():valuable();
+  }
+  if (['chest_military','chest_millitary'].includes(variant)) {
+    const key=['m16','famas','fal','m24'][Math.floor(Math.random()*4)];
+    slots[0]={kind:'weapon',key,ammo:WEAPONS[key].magSize,durability:90+Math.floor(Math.random()*11)};
+    slots[1]={kind:'ammo',ammoType:WEAPONS[key].ammoType??(key==='m24'?'sniper':'rifle'),amount:30};
+    slots[2]={kind:'material',key:'military_pack',tier:Math.random()<0.3?3:2,amount:1};
+    slots[3]=Math.random()<0.5?{kind:'consumable',key:'medkit',amount:1}:{kind:'material',key:'military_comp',amount:1};
   }
   return slots;
 }
@@ -420,7 +424,7 @@ export function getItemDescription(item) {
     return getThrowableDescription(normalized.key);
   }
   if (item.kind === 'material') {
-    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',matches:'Matches. Their purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Access functionality is not assigned yet.',key:'A key. Lock functionality is not assigned yet.',laptop:'Valuable laptop. Sell to the trader.',phone:'Valuable phone. Sell to the trader.'};
+    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',matches:'Matches. Their purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Use, then click a locked door of this tier or lower. Consumed on unlocking.',key:'Use, then click a locked wooden door. Consumed on unlocking.',laptop:'Valuable laptop. Sell to the trader.',phone:'Valuable phone. Sell to the trader.'};
     if(tools[item.key])return tools[item.key];
     if (isPack(item)) return 'Tier '+packTier(item)+' sealed pack. Open for random loot or sell. Rare weapons and blueprints are not guaranteed.';
     if (item.key.endsWith('_box')) return 'Sealed ammunition box. Open for ammunition.';
@@ -428,7 +432,6 @@ export function getItemDescription(item) {
     if (item.key === 'blueprint_old') return 'Already studied blueprint. Valuable to traders.';
     if (item.key.endsWith('_kit')) return 'Repair kit. No additional materials required.';
     if (item.key === 'fuel') return 'Fuel for machinery. Can also be sold.';
-    if (CRAFTING_MATERIAL_KEYS.includes(item.key)) return 'Crafting material. Use in the safe-zone crafting station or sell.';
     return 'Valuable. Sell in the safe zone.';
   }
   if (item.kind === 'throwable') {
@@ -495,6 +498,6 @@ export function getItemSpriteName(item) {
 }
 
 export function chestSpriteName(variant) {
-  return CHEST_VARIANTS.includes(variant) ? variant : CHEST_VARIANTS[0];
+  return [...CHEST_VARIANTS,'chest_crate','chest_military','chest_millitary'].includes(variant) ? variant : CHEST_VARIANTS[0];
 }
 

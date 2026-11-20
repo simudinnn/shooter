@@ -1,11 +1,26 @@
 import { customItems } from './customContent.js';
-export const CRAFTING_MATERIAL_KEYS = ["adhesive","battery","chemicals","cloth","fabric","glass_bottle","metal_scrap","metal_sheet","nails","plank","plastic","rope","spring","tape","wires"];
+export const BASIC_MATERIAL_KEYS = ['battery','nails','plank','spring','tape','wires'];
+export const REMOVED_MATERIAL_KEYS = ["plastic","metal_scrap","fabric","cloth","glass_bottle","adhesive","chemicals","metal_sheet","rope"];
 export const MATERIAL_STACK_MAX = 50;
 export const materialStackMax = item => item?.key === 'cash' ? Number.MAX_SAFE_INTEGER : item?.key?.endsWith('_pack') ? 5 : MATERIAL_STACK_MAX;
 
 export const MATERIAL_KEYS = [
-  "adhesive", "battery", "book", "chemicals", "cloth", "fabric", "glass_bottle", "metal_scrap", "metal_sheet", "nails", "plank", "plastic", "rope", "spring", "tape", "wires",
-  "keycard", "key", "laptop", "phone", "barbed_wire", "gas_bottle", "generator", "matches", "radar",
+  "battery",
+  "book",
+  "nails",
+  "plank",
+  "spring",
+  "tape",
+  "wires",
+  "keycard",
+  "key",
+  "laptop",
+  "phone",
+  "barbed_wire",
+  "gas_bottle",
+  "generator",
+  "matches",
+  "radar",
   "blueprint",
   "blueprint_old",
   "fuel",

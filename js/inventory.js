@@ -1,3 +1,4 @@
+import { isAccessItem } from './doorAccess.js';
 import { drawOutlinedCanvasText } from './pixelText.js';
 import { moveStacks } from './batchInventory.js';
 import { PLACEABLE_TOOLS } from './tools.js';
@@ -578,7 +579,7 @@ export class InventoryUI {
 
   _canDropOnHand(handIndex) {
     const data = this._dragItemData();
-    return !!(data && (data.kind === 'weapon' || data.kind === 'melee')
+    return !!(data && (data.kind === 'weapon' || data.kind === 'melee' || isAccessItem(data))
       && canEquipHand(handIndex, data)
       && (data.kind !== 'weapon' || WEAPONS[data.key])
       && (data.kind !== 'melee' || MELEE_WEAPONS[data.key]));
@@ -1022,7 +1023,7 @@ export class InventoryUI {
         (count) => this._tryRecycleItem(index, container, count));
     }
 
-    if ((normalizeConsumableItem(item) || normalizeThrowableItem(item) || (item.kind==='material'&&PLACEABLE_TOOLS.includes(item.key))) && container === 'item') {
+    if ((isAccessItem(item) || normalizeConsumableItem(item) || normalizeThrowableItem(item) || (item.kind==='material'&&PLACEABLE_TOOLS.includes(item.key))) && container === 'item') {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'inv-context-btn';
@@ -1296,7 +1297,7 @@ export class InventoryUI {
 
   _useConsumable(player, index) {
     const item = player.itemSlots[index];
-    if (normalizeThrowableItem(item) || (item?.kind==='material'&&PLACEABLE_TOOLS.includes(item.key))) {
+    if (isAccessItem(item) || normalizeThrowableItem(item) || (item?.kind==='material'&&PLACEABLE_TOOLS.includes(item.key))) {
       this.game.heldThrowable = { index, key: item.key };
       this.close();
       return true;
@@ -1963,7 +1964,7 @@ export class InventoryUI {
         placed = this._placeDragFromEquipment(fromIndex, dropTarget, stashedItem, player);
         if (placed) this._skipClick = true;
       } else if (this._handIndexFromZone(dropTarget.dataset.dropZone) >= 0
-        && (stashedItem.kind === 'weapon' || stashedItem.kind === 'melee')) {
+        && (stashedItem.kind === 'weapon' || stashedItem.kind === 'melee' || isAccessItem(stashedItem))) {
         const handIndex = this._handIndexFromZone(dropTarget.dataset.dropZone);
         if (fromType === 'item' && fromIndex != null) {
           placed = player.equipIntoHandSlot(handIndex, stashedItem, fromIndex);
@@ -2152,7 +2153,7 @@ export class InventoryUI {
     const slotCount = this.chest.slots?.length ?? CHEST_SLOT_COUNT;
     const isGround = this.chest.isGround;
     this.root.querySelector('#chest-panel')?.style.setProperty('--loot-columns', !isGround && slotCount === 5 ? '5' : '4');
-    this.root.querySelector('#chest-panel')?.style.setProperty('--loot-rows', !isGround && slotCount === 5 ? '1' : '2');
+    this.root.querySelector('#chest-panel')?.style.setProperty('--loot-rows', !isGround ? String(Math.ceil(slotCount/(slotCount===5?5:4))) : '2');
     if (isGround) {
       this.chestEl.style.gridTemplateColumns = '';
       this.chestEl.style.gridTemplateRows = '';
@@ -2163,7 +2164,7 @@ export class InventoryUI {
       this.chestEl.style.width = 'calc(var(--chest-slot-size) * 5 + 44px)';
     } else {
       this.chestEl.style.gridTemplateColumns = 'repeat(4, var(--chest-slot-size))';
-      this.chestEl.style.gridTemplateRows = 'repeat(2, var(--chest-slot-size))';
+      this.chestEl.style.gridTemplateRows = 'repeat('+Math.ceil(slotCount/4)+', var(--chest-slot-size))';
       this.chestEl.style.width = 'calc(var(--chest-slot-size) * 4 + 38px)';
     }
     if (this._renderedChest !== (isGround ? this.game.groundDrops : this.chest)) {

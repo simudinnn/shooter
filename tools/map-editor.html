@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="hr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zombie Ruins · Editor mapa</title>
+<link rel="stylesheet" href="map-editor.css">
+<header>
+  <h1>Editor mapa</h1>
+  <label>Način <select id="document-mode"><option value="map">Mapa</option><option value="structure">Građevina</option></select></label>
+  <label id="structure-name-row" hidden>Naziv <input id="structure-name" value="nova-gradjevina" pattern="[a-zA-Z0-9_-]+" maxlength="60"></label>
+  <label id="structure-weight-row" hidden>Učestalost <input id="structure-weight" type="number" min="0.1" max="20" step="0.1" value="1"></label>
+  <form id="new-map">
+    <label>Širina <input id="width" type="number" min="1" max="256" value="125" required></label>
+    <label>Visina <input id="height" type="number" min="1" max="256" value="125" required></label>
+    <button>Nova mapa</button>
+    <button type="button" id="resize-map">Promijeni veličinu</button>
+  </form>
+  <button id="open">Otvori JSON</button><input id="file" type="file" accept=".json,application/json" hidden>
+  <button id="save">Spremi JSON</button>
+</header>
+<main>
+  <aside>
+    <label>Sloj <select id="layer"><option value="tiles">Tileovi</option><option value="props">Rekviziti</option><option value="loot">Loot</option><option value="indoor">Indoor oznake</option></select></label>
+    <div><button id="undo" type="button" disabled>Undo</button> <button id="redo" type="button" disabled>Redo</button></div>
+    <label>Širina brusha <input id="brush-size" type="number" min="1" max="15" value="1"></label>
+    <label><input id="random-brush" type="checkbox"> Nasumične varijante</label>
+    <label>Seed <input id="brush-seed" type="number" step="1" value="1"></label>
+    <label id="quantity-row" hidden>Količina <input id="quantity" type="number" min="1" max="999" value="1"></label>
+    <label>Pretraži <input id="search" type="search" placeholder="Naziv spritea"></label>
+    <button id="erase" aria-pressed="false">Gumica</button>
+    <p id="selection"></p>
+    <div id="palette"></div>
+  </aside>
+  <section>
+    <div class="toolbar">
+      <label>Zoom <select id="zoom"><option value="0.5">50%</option><option value="1" selected>100%</option><option value="2">200%</option><option value="3">300%</option></select></label>
+      <label><input id="grid" type="checkbox" checked> Mreža</label>
+      <label><input id="fog" type="checkbox" checked> Rub magle</label>
+      <span id="position"></span>
+      <span id="status" role="status"></span>
+    </div>
+    <div id="viewport"><canvas id="map" aria-label="Mapa"></canvas></div>
+    <p class="hint">Povuci postojeći rekvizit za premještanje. Shift poravnava na mrežu, Alt + povlačenje označava sve elemente u pravokutniku. Povuci oznaku za zajedničko premještanje. Indoor sloj služi samo za zvukove: oboji unutarnje tileove, gumicom ih vrati u outdoor. Zaključana vrata odaberi u paleti (locked ili tier). U F3 prikazu desni klik na koliziju briše koliziju rekvizita.</p>
+  </section>
+</main>
+<script type="module" src="map-editor.js"></script>
+</html>

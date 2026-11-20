@@ -4421,3 +4421,5 @@ body.mobile-ui #raid-settings fieldset :is(label,div) {margin:2px 0;}
  }
  body.mobile-ui #raid-base .raid-base-overview #raid-challenges {min-height:0;flex:0 0 auto;}
 }
+
+body:has(#pause-menu:not(.hidden)) .menu-cursor-follow {width:40px;height:40px;}

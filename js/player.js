@@ -1,3 +1,5 @@
+import { REMOVED_MATERIAL_KEYS } from './materials.js';
+import { isAccessItem } from './doorAccess.js';
 import { storageLayout, canEquipHand } from './itemFootprint.js';
 import { customWeapons } from './customContent.js';
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
@@ -356,7 +358,7 @@ export class Player {
     this.maxHealth = data.maxHealth ?? 100;
     this.shield = data.shield ?? 0;
     this.alive = data.alive !== false;
-    this.itemSlots = data.itemSlots.map((s) => (s ? { ...s } : null));
+    this.itemSlots = data.itemSlots.map((s) => (s && !(s.kind==='material'&&REMOVED_MATERIAL_KEYS.includes(s.key)) ? { ...s } : null));
     this.equipmentSlots = Array(EQUIPMENT_SLOT_COUNT).fill(null);
     for (const saved of data.equipmentSlots ?? []) {
       if (!saved) continue;
@@ -457,6 +459,7 @@ export class Player {
 
   _normalizeHandItem(item) {
     if (!item) return null;
+    if (isAccessItem(item))return {...item};
     if (item.kind === 'weapon') return this._normalizeWeaponItem(item);
     if (item.kind === 'melee' && MELEE_WEAPONS[item.key]) return { ...item, durability: itemDurability(item) };
     return null;
@@ -469,7 +472,7 @@ export class Player {
     } else if (this.weaponSlot === 'melee' && this.meleeKey) {
       this.handSlots[i] = { ...this.handSlots[i], kind: 'melee', key: this.meleeKey };
     } else {
-      this.handSlots[i] = null;
+      if(!isAccessItem(this.handSlots[i]))this.handSlots[i] = null;
     }
   }
 
@@ -494,12 +497,13 @@ export class Player {
       this.melee.charging = false;
       return;
     }
-    this.handSlots[this.activeHandSlot] = null;
+    if(!isAccessItem(item))this.handSlots[this.activeHandSlot] = null;
     this.weaponSlot = 'gun';
   }
 
   getHandSlotItem(index) {
     const item = this.handSlots[index];
+    if(isAccessItem(item))return {...item};
     if (!item) return null;
     if (item.kind === 'weapon') {
       return { ...item, ammo: index === this.activeHandSlot ? (this.weapon?.ammo ?? item.ammo ?? 0) : (item.ammo ?? 0) };
@@ -723,6 +727,7 @@ export class Player {
 
   wearActiveHand(amount) {
     const item = this.handSlots[this.activeHandSlot];
+    if(isAccessItem(item))return;
     if (!item) return;
     item.durability = Math.max(0, itemDurability(item) - amount);
     if (item.durability <= 1e-8) {
@@ -990,7 +995,7 @@ export class Player {
       this.restoreEquipmentSlot(equipmentIndex, item);
       return { ok: true, remainder: null };
     }
-    const handIndex = this.handSlots.findIndex((entry, index) => !entry && canEquipHand(index, item));
+    const handIndex = isAccessItem(item)?-1:this.handSlots.findIndex((entry, index) => !entry && canEquipHand(index, item));
     if (handIndex >= 0 && this.equipIntoHandSlot(handIndex, item)) {
       return { ok: true, remainder: null };
     }

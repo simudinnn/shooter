@@ -277,242 +277,7 @@ export default {
       }
     }
   ],
-  "crafting": [
-    {
-      "id": "bandage",
-      "level": 1,
-      "costs": {
-        "cloth": 2,
-        "adhesive": 1
-      },
-      "output": {
-        "kind": "consumable",
-        "key": "bandage",
-        "amount": 2
-      }
-    },
-    {
-      "id": "medkit",
-      "level": 4,
-      "costs": {
-        "cloth": 3,
-        "chemicals": 2,
-        "plastic": 2
-      },
-      "output": {
-        "kind": "consumable",
-        "key": "medkit",
-        "amount": 1
-      }
-    },
-    {
-      "id": "bat",
-      "level": 1,
-      "costs": {
-        "plank": 3,
-        "tape": 1
-      },
-      "output": {
-        "kind": "melee",
-        "key": "wooden_bat"
-      }
-    },
-    {
-      "id": "pistol_ammo",
-      "level": 2,
-      "costs": {
-        "metal_scrap": 2,
-        "chemicals": 1
-      },
-      "output": {
-        "kind": "ammo",
-        "ammoType": "pistol",
-        "amount": 20
-      }
-    },
-    {
-      "id": "shotgun_ammo",
-      "level": 4,
-      "costs": {
-        "metal_scrap": 2,
-        "chemicals": 2,
-        "plastic": 1
-      },
-      "output": {
-        "kind": "ammo",
-        "ammoType": "shotgun",
-        "amount": 8
-      }
-    },
-    {
-      "id": "rifle_ammo",
-      "level": 6,
-      "costs": {
-        "metal_sheet": 1,
-        "chemicals": 2
-      },
-      "output": {
-        "kind": "ammo",
-        "ammoType": "rifle",
-        "amount": 20
-      }
-    },
-    {
-      "id": "sniper_ammo",
-      "level": 10,
-      "costs": {
-        "metal_sheet": 1,
-        "chemicals": 2
-      },
-      "output": {
-        "kind": "ammo",
-        "ammoType": "sniper",
-        "amount": 5
-      }
-    },
-    {
-      "id": "backpack",
-      "level": 2,
-      "costs": {
-        "cloth": 4,
-        "fabric": 2,
-        "rope": 2
-      },
-      "output": {
-        "kind": "equipment",
-        "key": "backpack_1",
-        "durability": 100
-      }
-    },
-    {
-      "id": "vest",
-      "level": 5,
-      "costs": {
-        "fabric": 4,
-        "metal_sheet": 2,
-        "tape": 2
-      },
-      "output": {
-        "kind": "equipment",
-        "key": "vest",
-        "durability": 100
-      }
-    },
-    {
-      "id": "repair_kit",
-      "level": 3,
-      "costs": {
-        "metal_scrap": 3,
-        "spring": 1,
-        "tape": 2
-      },
-      "output": {
-        "kind": "material",
-        "key": "repair_kit",
-        "amount": 1
-      }
-    },
-    {
-      "id": "sewing_kit",
-      "level": 2,
-      "costs": {
-        "cloth": 2,
-        "rope": 1,
-        "nails": 1
-      },
-      "output": {
-        "kind": "material",
-        "key": "sewing_kit",
-        "amount": 1
-      }
-    },
-    {
-      "id": "upgrade_kit",
-      "level": 8,
-      "costs": {
-        "metal_sheet": 2,
-        "military_comp": 1,
-        "adhesive": 2,
-        "electrical_comp": 1
-      },
-      "output": {
-        "kind": "material",
-        "key": "upgrade_kit",
-        "amount": 1
-      }
-    },
-    {
-      "id": "molotov",
-      "level": 3,
-      "costs": {
-        "glass_bottle": 1,
-        "fuel": 1,
-        "cloth": 1
-      },
-      "output": {
-        "kind": "throwable",
-        "key": "molotov",
-        "amount": 1
-      }
-    },
-    {
-      "id": "barbed_wire",
-      "level": 3,
-      "costs": {
-        "metal_scrap": 2,
-        "wires": 3,
-        "nails": 2
-      },
-      "output": {
-        "kind": "material",
-        "key": "barbed_wire",
-        "amount": 1
-      }
-    },
-    {
-      "id": "radar",
-      "level": 8,
-      "costs": {
-        "electrical_comp": 2,
-        "battery": 1,
-        "wires": 2,
-        "plastic": 2
-      },
-      "output": {
-        "kind": "material",
-        "key": "radar",
-        "amount": 1
-      }
-    },
-    {
-      "id": "generator",
-      "level": 12,
-      "costs": {
-        "electrical_trans": 1,
-        "metal_sheet": 3,
-        "wires": 3,
-        "fuel": 1
-      },
-      "output": {
-        "kind": "material",
-        "key": "generator",
-        "amount": 1
-      }
-    },
-    {
-      "id": "matches",
-      "level": 1,
-      "costs": {
-        "plank": 1,
-        "chemicals": 1
-      },
-      "output": {
-        "kind": "material",
-        "key": "matches",
-        "amount": 1
-      }
-    }
-  ],
+  "crafting": [],
   "recycling": {
     "items": {
       "equipment.backpack_1": [
@@ -836,59 +601,50 @@ export default {
   },
   "sellPrices": {
     "material": {
-      "cloth": 2,
       "metal": 2,
-      "plank": 2,
-      "tape": 2,
-      "rope": 2,
-      "wires": 2,
+      "plank": 3,
+      "tape": 3,
+      "wires": 3,
       "glass": 2,
-      "fabric": 3,
-      "fuel": 10,
-      "chemicals": 2,
-      "battery": 4,
-      "spring": 3,
+      "fuel": 12,
+      "battery": 5,
+      "spring": 4,
       "rubber": 2,
-      "metal_sheet": 30,
       "metal_pipe": 50,
       "copper_coil": 40,
       "microchip": 4,
       "gun_parts": 20,
       "mechanical_comp": 25,
-      "electrical_comp": 16,
-      "electrical_trans": 90,
-      "repair_kit": 8,
-      "sewing_kit": 8,
+      "electrical_comp": 20,
+      "electrical_trans": 108,
+      "repair_kit": 10,
+      "sewing_kit": 10,
       "splint_kit": 5,
-      "military_comp": 130,
-      "blueprint_old": 110,
-      "blueprint": 150,
-      "upgrade_kit": 24,
-      "equipment_pack": 90,
-      "military_pack": 140,
-      "archive_pack": 160,
-      "industrial_pack": 75,
-      "pistol_box": 20,
-      "rifle_box": 35,
-      "shotgun_box": 30,
-      "sniper_box": 45,
-      "jewlery": 120,
+      "military_comp": 156,
+      "blueprint_old": 132,
+      "blueprint": 180,
+      "upgrade_kit": 29,
+      "equipment_pack": 108,
+      "military_pack": 168,
+      "archive_pack": 192,
+      "industrial_pack": 90,
+      "pistol_box": 24,
+      "rifle_box": 42,
+      "shotgun_box": 36,
+      "sniper_box": 54,
+      "jewlery": 144,
       "cash": 1,
-      "keycard": 60,
-      "key": 25,
-      "laptop": 150,
-      "phone": 45,
-      "barbed_wire": 12,
-      "gas_bottle": 20,
-      "generator": 100,
-      "matches": 3,
-      "radar": 120,
-      "metal_scrap": 2,
-      "nails": 2,
-      "adhesive": 3,
-      "plastic": 2,
-      "book": 12,
-      "glass_bottle": 2
+      "keycard": 72,
+      "key": 30,
+      "laptop": 180,
+      "phone": 54,
+      "barbed_wire": 15,
+      "gas_bottle": 24,
+      "generator": 120,
+      "matches": 4,
+      "radar": 144,
+      "nails": 3,
+      "book": 15
     },
     "equipment": {
       "backpack_1": 14,

@@ -1,3 +1,4 @@
+import { REMOVED_MATERIAL_KEYS } from './materials.js';
 import { moveStacks } from './batchInventory.js';
 import { isContainer, isPack, isTieredItem, packTier, openContainer } from './containers.js';
 import { cashTotal, changeCash, migrateCash } from './cash.js';
@@ -125,6 +126,9 @@ export function normalizeRaidProfile(profile) {
     }
     normalized.stashStackVersion = 1;
   }
+  const retained=item=>item?.kind==='material'&&REMOVED_MATERIAL_KEYS.includes(item.key)?null:item;
+  normalized.stash=(normalized.stash??[]).map(retained);
+  if(normalized.kit){normalized.kit={...normalized.kit};for(const key of ['itemSlots','handSlots'])if(normalized.kit[key])normalized.kit[key]=normalized.kit[key].map(retained);}
   return migrateCash(normalized);
 }
 

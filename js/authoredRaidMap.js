@@ -1,3 +1,4 @@
+import { doorAccessError } from './doorAccess.js';
 import { moveColliderOverlapsRect } from './buildingGen.js';
 import { World, TILE } from './world.js';
 import { CHUNK_TILES, generateChunk } from './worldGen.js';
@@ -33,7 +34,7 @@ for (const [kind, keys] of [
 }
 
 export function mapPropYSort(entry) {
-  return !/fol+iage.*(?:pebble|grass(?![^/]*tall))/i.test(entry.asset);
+  return !/fol+iage.*(?:pebble|grass(?![^/]*tall))|\/doors\/mat_/i.test(entry.asset);
 }
 
 export function isRaidLootAsset(asset) { return lootByAsset.has(asset); }
@@ -41,6 +42,8 @@ export function isRaidLootAsset(asset) { return lootByAsset.has(asset); }
 export function mapAssetPath(asset) { return asset.split('#')[0]; }
 
 export function mapBrushes(asset) {
+  if (/\/doors\/closed_wood\.png$/i.test(asset)) return [asset,asset+'#locked'];
+  if (/\/doors\/(?:closed|open)_keycard\.png$/i.test(asset)) return [asset,asset+'#tier1',asset+'#tier2',asset+'#tier3'];
   if (/\/walls\/wall_ew\.png$/i.test(asset)) return [asset + '#west', asset + '#east'];
   return [asset];
 }
@@ -75,6 +78,7 @@ export function mapCornerLayout(asset) {
 }
 
 export function isMapLayerAsset(layer, asset) {
+  if(layer==='indoor')return ['marker:indoor','marker:indoor-passive','marker:indoor-detection'].includes(asset);
   if (asset === PLAYER_SPAWN_ASSET) return layer === 'props';
   if (typeof asset !== 'string') return false;
   const [path, brush, extra] = asset.split('#');
@@ -94,8 +98,8 @@ export function parseRaidMap(data) {
   if (!isMapLayerAsset('tiles', defaultGround)) throw new Error('Invalid default ground.');
   const warnings = new Set();
   const layers = {};
-  for (const layer of ['tiles', 'props', 'loot']) {
-    const entries = data.layers?.[layer];
+  for (const layer of ['tiles', 'props', 'loot', 'indoor']) {
+    const entries = data.layers?.[layer] ?? (layer==='indoor'?[]:undefined);
     if (!Array.isArray(entries) || entries.length > data.width * data.height * MAP_PLANES) throw new Error('Invalid map layer: ' + layer);
     const cells = new Set();
     layers[layer] = [];
@@ -115,7 +119,8 @@ export function parseRaidMap(data) {
           throw new Error('Invalid prop settings: ' + asset);
         }
         layers.props.push({ x, y, asset, plane, offsetX, offsetY, collision, ySort });
-      } else if (layer === 'tiles') layers.tiles.push({ x, y, asset, plane });
+      } else if (layer === 'indoor') layers.indoor.push({x,y,asset:'marker:indoor',plane:0});
+      else if (layer === 'tiles') layers.tiles.push({ x, y, asset, plane });
       else if (!isRaidLootAsset(asset)) warnings.add('unsupported loot ' + asset.split('/').at(-1));
       else {
         if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) throw new Error('Invalid loot quantity.');
@@ -143,6 +148,8 @@ export class AuthoredRaidWorld extends World {
   constructor(map, { bakeShadows = false } = {}) {
     super();
     this.raidMap = map;
+    const indoorEntries=map.layers.indoor instanceof Map?[...map.layers.indoor.values()]:(map.layers.indoor??[]);
+    this.indoorCells=new Set(indoorEntries.map(e=>e.y*map.width+e.x));
     this.bakeShadows = bakeShadows;
     this.bounds = { minX: 0, minZ: 0, maxX: map.width * TILE, maxZ: map.height * TILE };
     this.mapProps = [];
@@ -373,7 +380,14 @@ export class AuthoredRaidWorld extends World {
       && chunk.shadowPixels[py * chunk.canvas.width + px] > 0;
   }
 
-  toggleMapDoor(door, occupants) {
+  isIndoorAt(x,z) {
+    const tx=Math.floor(x/TILE),ty=Math.floor(z/TILE);
+    return tx>=0&&ty>=0&&tx<this.raidMap.width&&ty<this.raidMap.height&&this.indoorCells.has(ty*this.raidMap.width+tx);
+  }
+
+  toggleMapDoor(door, occupants = [], actor = null) {
+    if(door.permanentOpen)return false;
+    if(doorAccessError(door,actor))return false;
     const mat = { minX: door.x - TILE / 2, maxX: door.x + TILE / 2,
       minZ: door.z + TILE / 4, maxZ: door.z + TILE / 2 };
     if (occupants.some((entity) => moveColliderOverlapsRect(entity, mat))) return false;
@@ -381,6 +395,13 @@ export class AuthoredRaidWorld extends World {
       if (door.doorOpen) this.addDynamicObstacle(door.obstacle);
       else this.removeDynamicObstacle(door.obstacle);
     }
+    if(door.lockType&&!door.unlocked){
+      const index=actor?._doorCredentialIndex,item=actor?.itemSlots?.[index];
+      if(!item)return false;
+      actor.itemSlots[index]=(item.amount??1)>1?{...item,amount:item.amount-1}:null;
+      door.permanentOpen=true;
+    }
+    door.unlocked=true;
     door.doorOpen = !door.doorOpen;
     this.mapLightRevision++;
     const art = door.doorOpen ? door.openArt : door.closedArt;
@@ -406,7 +427,7 @@ export class AuthoredRaidWorld extends World {
     if (!image) return;
     if (path.includes('/chests/')) {
       const variant = 'chest_' + path.split('/').at(-1).slice(0, -4);
-      if (['chest_wood', 'chest_metal', 'chest_rust', 'chest_moss'].includes(variant)) {
+      if (['chest_wood', 'chest_metal', 'chest_rust', 'chest_moss','chest_crate','chest_millitary','chest_military'].includes(variant)) {
         this.mapChests.push({ ...position, image, variant, spriteWidth: image.width, spriteHeight: image.height, collision: entry.collision, ySort: mapPropYSort(entry), plane: entry.plane });
         return;
       }
@@ -464,7 +485,11 @@ export class AuthoredRaidWorld extends World {
       }
     }
     if (door) {
+      prop.lockType=/keycard/i.test(path)?'keycard':asset.endsWith('#locked')?'key':null;
+      prop.lockTier=Number(asset.match(/#tier([123])$/)?.[1]??1);
+      prop.unlocked=false;
       prop.doorOpen = door[2].toLowerCase() === 'open';
+      if(prop.doorOpen)prop.unlocked=true;
       prop.obstacle = obstacle;
       const art = (state) => {
         const pathForState = door[1] + state + '_' + door[3];

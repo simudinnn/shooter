@@ -24,12 +24,12 @@ export const ENTITY_CHUNK_RADIUS = 4;
 export const ENTITY_DESPAWN_DIST = ENTITY_CHUNK_RADIUS * CHUNK_WORLD + 40;
 
 /** Soft caps within despawn range — keeps the world from flooding. */
-export const MAX_NEARBY_SPIDERS = 32;
+export const MAX_NEARBY_SPIDERS = 44;
 export const MAX_NEARBY_CHESTS = 10;
 /** Wilderness per-chunk spawn chance (away from towns). */
-export const SPIDER_CHUNK_CHANCE = 0.28;
+export const SPIDER_CHUNK_CHANCE = 0.42;
 /** Per-chunk spawn chance in the town outskirts ring. */
-export const SPIDER_TOWN_RING_CHANCE = 0.90;
+export const SPIDER_TOWN_RING_CHANCE = 0.98;
 /** World units — prefer robot spawns in this annulus around a town anchor. */
 export const TOWN_ROBOT_RING_MIN = TILE * 14;
 export const TOWN_ROBOT_RING_MAX = TILE * 44;

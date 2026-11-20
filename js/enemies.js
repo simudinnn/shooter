@@ -46,7 +46,7 @@ export class Robot {
     this.spawnWave = wave;
     this.angle = Math.random() * Math.PI * 2;
     const waveScale = 1 + (wave - 1) * 0.1;
-    this.health = Math.floor(75 * waveScale);
+    this.health = Math.floor(60 * waveScale);
     this.maxHealth = this.health;
     this.alive = true;
     this.baseSpeed = (10 + Math.random() * 2.2) * (1 + (wave - 1) * 0.05);

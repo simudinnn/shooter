@@ -75,6 +75,9 @@ const WORLD_ASSET_PATHS = Object.fromEntries([
 ]);
 
 const BUILDING_ASSET_PATHS = Object.fromEntries([
+  ['chest_crate', 'assets/buildings/chests/crate.png'],
+  ['chest_millitary', 'assets/buildings/chests/millitary.png'],
+  ['chest_military', 'assets/buildings/chests/millitary.png'],
   ['chest_wood', 'assets/buildings/chests/wood.png'],
   ['chest_metal', 'assets/buildings/chests/metal.png'],
   ['chest_rust', 'assets/buildings/chests/rust.png'],

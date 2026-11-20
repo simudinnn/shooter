@@ -1,10 +1,12 @@
+import { serveStructures } from './structures.mjs';
+import { scanMapAssets } from './map-assets.mjs';
 /**
  * Run: npm start
  */
 import { createServer } from 'http';
 import { spawn } from 'child_process';
 import { createReadStream } from 'fs';
-import { stat } from 'fs/promises';
+import { readdir, stat } from 'fs/promises';
 import { join, extname, normalize } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -34,6 +36,21 @@ const MIME = {
 
 async function serveFile(req, res) {
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
+  if(await serveStructures(req,res,ROOT,urlPath))return;
+  if (urlPath === '/maps/catalog.json') {
+    const entries = await readdir(join(ROOT, 'maps'), { withFileTypes: true });
+    const maps = entries.filter((entry) => entry.isFile() && /\.json$/i.test(entry.name)
+      && entry.name.toLowerCase() !== 'catalog.json').map((entry) => entry.name).sort();
+    res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(maps));
+    return;
+  }
+  if (urlPath === '/tools/map-editor-assets.json') {
+    const catalog = await scanMapAssets(ROOT);
+    res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(catalog));
+    return;
+  }
   if (urlPath === '/') urlPath = '/index.html';
 
   const filePath = normalize(join(ROOT, urlPath));
@@ -51,8 +68,25 @@ async function serveFile(req, res) {
       st = await stat(target);
     }
     const ext = extname(target).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-    createReadStream(target).pipe(res);
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Accept-Ranges': 'bytes' };
+    const range = req.headers.range;
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      const start = match ? (match[1] ? Number(match[1]) : Math.max(0, st.size - Number(match[2]))) : NaN;
+      const end = match ? (match[1] && match[2] ? Math.min(Number(match[2]), st.size - 1) : st.size - 1) : NaN;
+      if (!match || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= st.size) {
+        res.writeHead(416, { ...headers, 'Content-Range': 'bytes */' + st.size });
+        res.end();
+        return;
+      }
+      res.writeHead(206, { ...headers, 'Content-Length': end - start + 1, 'Content-Range': 'bytes ' + start + '-' + end + '/' + st.size });
+      if (req.method === 'HEAD') res.end();
+      else createReadStream(target, { start, end }).pipe(res);
+      return;
+    }
+    res.writeHead(200, { ...headers, 'Content-Length': st.size });
+    if (req.method === 'HEAD') res.end();
+    else createReadStream(target).pipe(res);
   } catch {
     res.writeHead(404);
     res.end('Not found');
