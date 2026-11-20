@@ -11,6 +11,7 @@ import {
 } from './ammo.js';
 import {
   MATERIAL_KEYS,
+  CRAFTING_MATERIAL_KEYS,
   getMaterialDisplayName,
   materialSpritePath,
   normalizeMaterialItem,
@@ -59,6 +60,22 @@ const RARITY_WEIGHT = {
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
+  { key: 'adhesive', rarity: 'uncommon', min: 1, max: 3 },
+  { key: 'battery', rarity: 'uncommon', min: 1, max: 1 },
+  { key: 'book', rarity: 'common', min: 1, max: 1 },
+  { key: 'chemicals', rarity: 'uncommon', min: 1, max: 3 },
+  { key: 'cloth', rarity: 'common', min: 1, max: 3 },
+  { key: 'fabric', rarity: 'common', min: 1, max: 3 },
+  { key: 'glass_bottle', rarity: 'common', min: 1, max: 3 },
+  { key: 'metal_scrap', rarity: 'common', min: 1, max: 3 },
+  { key: 'metal_sheet', rarity: 'uncommon', min: 1, max: 1 },
+  { key: 'nails', rarity: 'common', min: 1, max: 3 },
+  { key: 'plank', rarity: 'common', min: 1, max: 3 },
+  { key: 'plastic', rarity: 'common', min: 1, max: 3 },
+  { key: 'rope', rarity: 'common', min: 1, max: 3 },
+  { key: 'spring', rarity: 'uncommon', min: 1, max: 3 },
+  { key: 'tape', rarity: 'common', min: 1, max: 3 },
+  { key: 'wires', rarity: 'common', min: 1, max: 3 },
   { key: 'keycard', rarity: 'rare', min: 1, max: 1 },
   { key: 'key', rarity: 'epic', min: 1, max: 1 },
   { key: 'laptop', rarity: 'epic', min: 1, max: 1 },
@@ -411,6 +428,7 @@ export function getItemDescription(item) {
     if (item.key === 'blueprint_old') return 'Already studied blueprint. Valuable to traders.';
     if (item.key.endsWith('_kit')) return 'Repair kit. No additional materials required.';
     if (item.key === 'fuel') return 'Fuel for machinery. Can also be sold.';
+    if (CRAFTING_MATERIAL_KEYS.includes(item.key)) return 'Crafting material. Use in the safe-zone crafting station or sell.';
     return 'Valuable. Sell in the safe zone.';
   }
   if (item.kind === 'throwable') {

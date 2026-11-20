@@ -4146,7 +4146,7 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 .batch-drag-count { position:absolute;right:0;bottom:0;padding:3px 6px;background:#252525;color:#efce78;border:1px solid #efce78;font-size:18px;line-height:1; }
 
 :is(.inv-item-slot,.inv-chest-slot) > .inv-slot-icon.inv-slot-lock,
-#raid-base .raid-base-slot[data-locked="true"] > img { width:100% !important;height:100% !important;max-width:100% !important;max-height:100% !important;filter:none;opacity:1; }
+#raid-base .raid-base-slot[data-locked="true"] > img.raid-gear-placeholder { width:100% !important;height:100% !important;max-width:100% !important;max-height:100% !important;filter:none;opacity:1; }
 .inv-context-slider-track::before { background:#292929; }
 :is(#raid-base,#inventory) .raid-quantity-dialog input::-webkit-slider-runnable-track { background:#292929; }
 :is(#raid-base,#inventory) .raid-quantity-dialog input::-moz-range-track { background:#292929; }
@@ -4306,8 +4306,8 @@ body.mobile-ui #raid-base .raid-base-workspace .raid-loadout-layout {
   overflow:visible;align-content:start;
 }
 body.mobile-ui #raid-base #raid-stash {
-  grid-template-columns:repeat(10,minmax(0,1fr));--raid-stash-gap:4px;
-  --raid-stash-cell:calc((100cqw - 48px) / 10);padding:6px;overflow:auto;
+  grid-template-columns:repeat(auto-fill,48px);--raid-stash-gap:4px;
+  --raid-stash-cell:48px;padding:6px;overflow:auto;
 }
 body.mobile-ui #raid-base #raid-stash > .raid-base-slot {grid-column:auto !important;grid-row:auto !important;}
 body.mobile-ui #raid-base .raid-catalog-active #raid-shop {grid-template-columns:repeat(auto-fill,56px);justify-content:start;gap:8px;}
@@ -4402,3 +4402,22 @@ body.mobile-ui #raid-settings form > button .inv-pixel-text-img {height:14px;wid
 
 body.mobile-ui #raid-settings fieldset {gap:4px;}
 body.mobile-ui #raid-settings fieldset :is(label,div) {margin:2px 0;}
+
+/* Stash cells track the measured loadout cells; storage still keeps stable item indices. */
+#raid-base #raid-stash > .raid-base-slot {grid-column:auto !important;grid-row:auto !important;}
+#raid-base #raid-stash {justify-content:start;grid-auto-rows:var(--raid-stash-cell);}
+/* Portrait follows the desktop vertical overview; landscape retains its two columns. */
+@media (orientation:portrait) {
+ body.mobile-ui #raid-base .raid-base-overview:not(.hidden) {
+   display:flex;flex-direction:column;align-items:stretch;gap:10px;height:100%;min-height:0;
+ }
+ body.mobile-ui #raid-base .raid-base-overview > .raid-base-mission {
+   order:0;flex:0 0 auto;align-self:stretch;width:100%;height:auto;max-height:none;
+   grid-column:auto;grid-row:auto;overflow:visible;padding:14px 12px;gap:10px;
+ }
+ body.mobile-ui #raid-base .raid-base-overview > .raid-base-section {
+   order:1;flex:1 1 0;width:100%;height:auto;min-height:0;max-height:none;
+   grid-column:auto;grid-row:auto;overflow-y:auto;
+ }
+ body.mobile-ui #raid-base .raid-base-overview #raid-challenges {min-height:0;flex:0 0 auto;}
+}

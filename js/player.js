@@ -248,7 +248,7 @@ export const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 /** Default when main hand has no gun — not storable in inventory. */
 export const HAND_MELEE = {
   name: 'Hand',
-  damage: 5,
+  damage: 12,
   range: 1.9,
   arc: Math.PI * 0.55,
   swingDuration: 0.2,

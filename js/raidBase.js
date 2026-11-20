@@ -298,6 +298,9 @@ export class RaidBase {
     }, true);
     this.stashPanel = root.querySelector('[data-base-panel="stash"]');
     this.workspace = this.stashPanel.parentElement;
+    this._stashCellObserver = new ResizeObserver(() => this._scheduleStashCellSync());
+    this._stashCellObserver.observe(root.querySelector('#raid-kit'));
+    this._stashCellObserver.observe(root.querySelector('#raid-stash'));
     const repositionSelection = (event) => {
       if (event?.target === this.selection) return;
       if (this.selectionAnchor?.isConnected && !this.selection.classList.contains('hidden')) {
@@ -852,6 +855,25 @@ export class RaidBase {
     }, true);
   }
 
+  _scheduleStashCellSync() {
+    if(this._stashCellSyncPending)return;
+    this._stashCellSyncPending=true;
+    requestAnimationFrame(()=>{this._stashCellSyncPending=false;this._syncStashCellSize();});
+  }
+
+  _syncStashCellSize() {
+    const stash=this.root.querySelector('#raid-stash');
+    const slot=this.root.querySelector('#raid-kit > .raid-base-slot');
+    if(!stash || !slot || !stash.getClientRects().length)return;
+    const measured=slot.getBoundingClientRect().width;
+    if(measured<=0)return;
+    const cell=document.body.classList.contains('mobile-ui')?Math.max(48,measured):measured;
+    if(cell<=0 || Math.abs(cell-(this._stashCellSize??0))<0.1)return;
+    this._stashCellSize=cell;
+    stash.style.setProperty('--raid-stash-cell',cell+'px');
+    stash.style.gridTemplateColumns='repeat(auto-fill, '+cell+'px)';
+  }
+
   renderStash() {
     const { kit, stash } = this.profile;
     const limit = stashLimit(this.profile);
@@ -924,6 +946,7 @@ export class RaidBase {
     applyStorageLayout(stashGrid, stash, Math.max(limit, stash.length), 10);
     applyStorageLayout(kitGrid, kit.itemSlots, kit.itemSlots.length, 5, player.inventoryCapacity);
     stashGrid.scrollTop = stashScroll;
+    this._scheduleStashCellSync();
     this._syncBatchSelection();
   }
 
@@ -1490,7 +1513,7 @@ export class RaidBase {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'ui-slice-button';
-    if (/^(buy|use)$/i.test(label)) button.classList.add('ui-action-red');
+    if (/^(buy|use|craft)$/i.test(label)) button.classList.add('ui-action-red');
     this.pixelLabel(button, label, 120);
     if (iconSrc) {
       button.setAttribute('aria-label', `${label} Cash`);

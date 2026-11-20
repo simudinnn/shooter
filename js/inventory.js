@@ -287,12 +287,7 @@ export class InventoryUI {
   isCraftOpen() { return this.craftOpen; }
 
   toggleCraftPanel() {
-    if (!this.open) return;
-    this.craftOpen = !this.craftOpen;
-    this.root?.classList.toggle('craft-open', this.craftOpen);
-    this.craftToggleBtn?.setAttribute('aria-expanded', String(this.craftOpen));
-    if (this.craftOpen) this._renderCraftPanel(this.game.player);
-    this._syncCraftPickerLayoutSoon();
+    // Crafting is provided by the safe-zone station only.
   }
 
   _setCraftOpen(open) {
@@ -2247,15 +2242,7 @@ export class InventoryUI {
   }
 
   _tryCraftRecipe(recipe) {
-    const player = this.game.player;
-    if (!player || !recipe) return;
-    if (!craftRecipe(player, recipe)) {
-      this.game.items?.setPickupMsg?.('Need materials and inventory space', { error: true });
-      return;
-    }
-    this.game.audio?.inventoryPlace();
-    this.game.items?.setPickupMsg?.(`Crafted ${getRecipeLabel(recipe)}`);
-    this.render();
+    return false;
   }
 
   _renderCraftPanel(player) {

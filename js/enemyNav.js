@@ -1324,7 +1324,7 @@ export function updateEnemyLastKnown(robot, player, canSee) {
 }
 
 /** Route an already alerted enemy to an actual opening rather than the wall below its target. */
-export function getDoorPursuitGoal(robot,target,world,buildings,time,chance=0.05,occupants=[robot]) {
+export function getDoorPursuitGoal(robot,target,world,buildings,time,chance=0.15,occupants=[robot]) {
   if(!target)return null;
   const map=!!world.raidMap;
   const doors=map?(world.mapDoors??[]):(buildings?.buildings??[]).flatMap(buildingDoors);

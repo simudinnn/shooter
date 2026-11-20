@@ -1192,17 +1192,19 @@ class Game {
   }
 
   _mobileAssistedAngle(rawAngle) {
-    if (this.heldThrowable || this.player.usesMeleeCombat()) { this._aimAssistTarget=null; return rawAngle; }
+    if (this.heldThrowable) { this._aimAssistTarget=null; return rawAngle; }
+    const melee=this.player.usesMeleeCombat();
+    const assistRange=melee ? (this.player.getActiveMelee()?.range ?? 1.9)+3 : 30;
     const valid = (enemy, cone) => enemy?.alive && !enemy.emerging
-      && Math.hypot(enemy.x-this.player.x,enemy.z-this.player.z)<30
+      && Math.hypot(enemy.x-this.player.x,enemy.z-this.player.z)<assistRange
       && this.isWorldPointOnScreen(enemy.x,enemy.z)
       && Math.abs(this._angleDelta(rawAngle,Math.atan2(enemy.x-this.player.x,enemy.z-this.player.z)))<cone
       && hasCombatSight(this.world,this.player,enemy);
-    if (!valid(this._aimAssistTarget,Math.PI/7.5)) this._aimAssistTarget=null;
+    if (!valid(this._aimAssistTarget,melee?Math.PI/4:Math.PI/7.5)) this._aimAssistTarget=null;
     if (!this._aimAssistTarget) {
       let best=Infinity;
       for (const enemy of this.robots) {
-        if (!valid(enemy,Math.PI/15)) continue;
+        if (!valid(enemy,melee?Math.PI/6:Math.PI/15)) continue;
         const angle=Math.atan2(enemy.x-this.player.x,enemy.z-this.player.z);
         const score=Math.abs(this._angleDelta(rawAngle,angle));
         if(score<best){best=score;this._aimAssistTarget=enemy;}
