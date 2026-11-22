@@ -68,10 +68,10 @@ const WORLD_FOLIAGE_SPRITES = [
 ];
 
 const WORLD_ASSET_PATHS = Object.fromEntries([
-  ['hatch_closed', 'assets/world/hatch_closed.png'],
-  ['hatch_open', 'assets/world/hatch_open.png'],
-  ...WORLD_FLOOR_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
-  ...WORLD_FOLIAGE_SPRITES.map((n) => [n, `assets/world/${n}.png`]),
+  ['hatch_closed', 'assets/buildings/misc/hatch_closed.png'],
+  ['hatch_open', 'assets/buildings/misc/hatch_open.png'],
+  ...WORLD_FLOOR_SPRITES.map((n) => [n, `assets/buildings/floor/${n==='floor_grass'?'base_grass':n.replace(/^floor_/,'')}.png`]),
+  ...WORLD_FOLIAGE_SPRITES.map((n) => [n, `assets/buildings/foliage/${n}.png`]),
 ]);
 
 const BUILDING_ASSET_PATHS = Object.fromEntries([
@@ -231,10 +231,12 @@ export const FLOOR_VARIANTS = ['floor', 'floor2', 'floor3', 'floor4'];
 export const CRATE_VARIANTS = ['crate', 'crate2', 'crate3', 'crate4'];
 export const ITEM_NATIVE_PX = 16;
 export const CASING_NATIVE_PX = 4;
-export const CHAR_NATIVE_PX = 24;
+export const CHAR_NATIVE_PX = 20;
+/** Character artwork was reduced from 24px to 20px; held art remains 24px. */
+export const CHARACTER_SIZE_RATIO = CHAR_NATIVE_PX / 24;
 export const SCOUT_NATIVE_PX = 32;
 export const ENEMY_DRAW_SCALE = {
-  spider: 1.45,
+  spider: 1.53,
   /** Match spider on-screen size: 24px art × 1.45 ≈ 32px art × this scale (slightly smaller). */
   scout: 1.6
 };
@@ -244,7 +246,7 @@ export function getEnemyNativePx(type) {
 }
 
 export function getEnemyDrawScale(type) {
-  return customEnemies[type] ? CHAR_NATIVE_PX * 1.45 / customEnemies[type].frameSize : (ENEMY_DRAW_SCALE[type] ?? 1.45);
+  return customEnemies[type] ? CHAR_NATIVE_PX * 1.53 / customEnemies[type].frameSize : (ENEMY_DRAW_SCALE[type] ?? 1.53);
 }
 export const WEAPON_NATIVE_PX = 24;
 export const PARTICLE_FX_NATIVE_PX = 15;
@@ -314,7 +316,11 @@ function getAnimSpec(name) {
     }
   }
   const raiderState = /^raider_(idle|walk|run)[1-3]$/.exec(name)?.[1];
-  return SPRITE_ANIM.sheets[raiderState ? `player_${raiderState}` : name] || {};
+  const spec = SPRITE_ANIM.sheets[raiderState ? `player_${raiderState}` : name] || {};
+  if (raiderState || /^player_(idle|walk|run)$/.test(name) || /^spider(?:_walk|_run)?$/.test(name) || /^zombie_dead[1-3]$/.test(name)) {
+    return { ...spec, frameW: CHAR_NATIVE_PX, frameH: CHAR_NATIVE_PX };
+  }
+  return spec;
 }
 
 function defaultFrameSize(name) {
@@ -989,7 +995,7 @@ export function isMovingForward(player) {
 
 /** Melee / hand sprites use a fixed horizontal draw angle; flipX handles left vs right. */
 export const ENEMY_STATUS_ICON_SCALE = 2;
-export const MELEE_SIDE_HOLD_DIST = 0.64;
+export const MELEE_SIDE_HOLD_DIST = 0.72 * CHARACTER_SIZE_RATIO;
 const MELEE_SPRITE_ANGLE = Math.PI / 2;
 
 export function getMeleeHoldPose(player, lunge = 0) {
@@ -1005,7 +1011,7 @@ export function getMeleeHoldPose(player, lunge = 0) {
 }
 
 /** Unarmed fist — fixed horizontal art; position shifts forward with body facing. */
-export const HAND_HOLD_DIST = 0.44;
+export const HAND_HOLD_DIST = 0.49 * CHARACTER_SIZE_RATIO;
 
 export function getHandHoldPose(player, punchExtend = 0) {
   const flipX = getPlayerFlipX(player);
@@ -1064,7 +1070,7 @@ export const RELOAD_AIM_ANGLE = -Math.PI / 4;
 export const RELOAD_AIM_RAISE_SEC = 0.22;
 export const RELOAD_AIM_LOWER_SEC = 0.12;
 /** Screen pixels in front of player center while reloading (follows facing). */
-export const RELOAD_HOLD_FORWARD_PX = 10;
+export const RELOAD_HOLD_FORWARD_PX = 11 * CHARACTER_SIZE_RATIO;
 
 function easeOutCubic(t) {
   const p = Math.max(0, Math.min(1, t));
@@ -1084,7 +1090,7 @@ export function gunAimTransform(worldAngle, prevFlip = false) {
 }
 
 /** Vertical aim shifts hold point — up = forward, down = back (world units). */
-export const GUN_PIVOT_TILT_SHIFT = 1;
+export const GUN_PIVOT_TILT_SHIFT = CHARACTER_SIZE_RATIO;
 
 export function gunPivotHoldOffset(aimAngle) {
   const t = aimAngle / (Math.PI / 2);
@@ -1596,7 +1602,8 @@ export class SpriteBank {
     const img = this.images[name];
     if (!img) return null;
 
-    const srcSize = img.naturalWidth || img.width || 16;
+    const imageSize=img.naturalWidth||img.width||16;
+    const srcSize=name==='floor_grass'?Math.min(16,imageSize):imageSize;
     const outPx = Math.round(px);
     const scale = Math.max(1, Math.round(outPx / srcSize));
     const bakedPx = srcSize * scale;
@@ -1610,7 +1617,8 @@ export class SpriteBank {
     native.height = srcSize;
     const nc = native.getContext('2d');
     nc.imageSmoothingEnabled = false;
-    nc.drawImage(img, 0, 0, srcSize, srcSize);
+    if(name==='floor_grass')nc.drawImage(img,(imageSize-srcSize)/2,((img.naturalHeight||img.height||16)-srcSize)/2,srcSize,srcSize,0,0,srcSize,srcSize);
+    else nc.drawImage(img, 0, 0, srcSize, srcSize);
     if (tint) {
       this._applyTintToTile(nc, img, srcSize, tint);
     }

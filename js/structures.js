@@ -1,7 +1,9 @@
-const GRASS='assets/world/floor_grass.png';
+import { canonicalAsset, canonicalGround, BASE_GRASS_ASSET } from './assetPaths.js';
+const GRASS=BASE_GRASS_ASSET;
 export function validateStructure(data){
  if(data?.version!==1||data.tileSize!==16||!Number.isInteger(data.width)||!Number.isInteger(data.height)||data.width<1||data.height<1||data.width>64||data.height>64)throw Error('Structures must be version 1, 16px tiles and at most 64×64 tiles.');
- data={...data,layers:{...data.layers,indoor:data.layers?.indoor??[]}};
+ data={...data,defaultGround:data.defaultGround?canonicalGround(data.defaultGround):undefined,layers:{...data.layers,indoor:data.layers?.indoor??[]}};
+ for(const key of Object.keys(data.layers))if(Array.isArray(data.layers[key]))data.layers[key]=data.layers[key].map(e=>e?{...e,asset:canonicalAsset(e.asset)}:e);
  for(const layer of ['tiles','props','loot','indoor']){
   if(!Array.isArray(data.layers?.[layer])||data.layers[layer].length>data.width*data.height*3)throw Error('Invalid structure layer.');
   const cells=new Set();
@@ -38,7 +40,7 @@ export function generateStructureMap(structures,{seed=1,width=125,height=125,cou
   if(placed.some(p=>x<p.x+p.w+4&&x+w+4>p.x&&y<p.y+p.h+4&&y+h+4>p.y))continue;
   placed.push({x,y,w,h,name:structure.name??'Structure'});
   for(const layer of ['tiles','props','loot','indoor'])for(const entry of structure.layers[layer]){
-   if(entry.asset==='marker:player-spawn'||entry.asset==='assets/world/hatch_closed.png')continue;
+   if(entry.asset==='marker:player-spawn'||entry.asset==='assets/buildings/misc/hatch_closed.png')continue;
    const value={...entry,x:x+entry.x,y:y+entry.y};
    if(layer==='tiles'&&!(entry.plane??0))tile(value.x,value.y,value.asset);else map.layers[layer].push(value);
   }
@@ -47,7 +49,7 @@ export function generateStructureMap(structures,{seed=1,width=125,height=125,cou
  if(!placed.length)throw Error('No structure fits this map. Use smaller structures.');
  const usedProps=new Set(map.layers.props.map(p=>p.x+','+p.y));
  const open=(x,y,pad=0)=>!placed.some(p=>x>=p.x-pad&&x<p.x+p.w+pad&&y>=p.y-pad&&y<p.y+p.h+pad)&&!reserved.some(p=>Math.abs(x-p.x)<3&&Math.abs(y-p.y)<3);
- for(let i=0;i<700;i++){const x=margin+Math.floor(random()*(width-margin*2)),y=margin+Math.floor(random()*(height-margin*2));if(!open(x,y,2)||tiles.has(x+','+y)||usedProps.has(x+','+y))continue;usedProps.add(x+','+y);map.layers.props.push({x,y,asset:random()<.12?'assets/world/foliage_tree.png':'assets/world/foliage_grass.png',plane:0});}
+ for(let i=0;i<700;i++){const x=margin+Math.floor(random()*(width-margin*2)),y=margin+Math.floor(random()*(height-margin*2));if(!open(x,y,2)||tiles.has(x+','+y)||usedProps.has(x+','+y))continue;usedProps.add(x+','+y);map.layers.props.push({x,y,asset:random()<.12?'assets/buildings/foliage/foliage_tree.png':'assets/buildings/foliage/foliage_grass.png',plane:0});}
  map.layers.props.push({x:margin+2,y:my,asset:'marker:player-spawn'},{x:width-margin-3,y:my,asset:'assets/world/hatch_closed.png'},{x:mx,y:margin+2,asset:'assets/world/hatch_closed.png'});
  map.layers.tiles=[...tiles.values()];map.placements=placed;return map;
 }

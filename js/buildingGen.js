@@ -9,7 +9,7 @@ import {
   generateBuildingCells,
 } from './buildingTypes.js';
 
-const PLAYER_SPRITE_SCALE = 1.5;
+const PLAYER_SPRITE_SCALE = 1.58;
 
 /** Native pixel art size per building tile (upscaled 2× on screen at PPU 8). */
 export const BUILDING_ART_PX = 16;

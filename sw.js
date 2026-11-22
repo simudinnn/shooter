@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v561';
+const CACHE = 'robot-ruins-v567';
 
 function buildingKitSprites() {
   return [
@@ -73,15 +73,15 @@ const PLAYER_SPRITES = playerSprites();
 const WEAPON_SPRITES = weaponSprites();
 
 function worldSprites() {
-  const floors = ['floor_grass', 'floor_dirt', 'floor_rock', 'floor_road', 'floor_path'];
+  const floors = ['base_grass','grass','dirt','road','path'];
   const foliage = [
     'foliage_grass', 'foliage_grass2', 'foliage_grass3', 'foliage_grass4',
     'foliage_grass_tall', 'foliage_grass_tall2', 'foliage_pebble', 'foliage_pebble2', 'foliage_rock',
     'foliage_bush', 'foliage_bush2', 'foliage_tree', 'foliage_tree2', 'foliage_tree3', 'foliage_stump',
   ];
   return [
-    ...floors.map((n) => `./assets/world/${n}.png`),
-    ...foliage.map((n) => `./assets/world/${n}.png`),
+    ...floors.map((n) => `./assets/buildings/floor/${n}.png`),
+    ...foliage.map((n) => `./assets/buildings/foliage/${n}.png`),
   ];
 }
 
@@ -194,6 +194,10 @@ const SHELL = [
 ];
 
 const ASSETS = [
+  './js/assetPaths.js',
+  './assets/buildings/fences/bars1.png',
+  './assets/buildings/fences/bars2.png',
+  './assets/buildings/fences/white_fence.png',
   './js/touchSelection.js',
   './js/doorAccess.js',
   './assets/buildings/misc/cardboard_box.png',
@@ -219,8 +223,8 @@ const ASSETS = [
   './sounds/ui/button1.ogg',
   './sounds/ui/buy.ogg',
   './sounds/ui/deploy.ogg',
-  './assets/world/hatch_closed.png',
-  './assets/world/hatch_open.png',
+  './assets/buildings/misc/hatch_closed.png',
+  './assets/buildings/misc/hatch_open.png',
   ...PLAYER_SPRITES,
   ...WEAPON_SPRITES,
   ...WORLD_SPRITES,

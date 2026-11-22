@@ -58,7 +58,7 @@ const RARITY_WEIGHT = {
   epic: 1,
 };
 
-const materialLootWeight=entry=>(RARITY_WEIGHT[entry.rarity]??1)*(BASIC_MATERIAL_KEYS.includes(entry.key)?0.45:1);
+const materialLootWeight=entry=>(RARITY_WEIGHT[entry.rarity]??1)*(BASIC_MATERIAL_KEYS.includes(entry.key)?0.45:1)*({phone:2,jewlery:4,laptop:6,electrical_comp:1.5,military_comp:1.5}[entry.key]??1);
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
@@ -202,7 +202,7 @@ const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 
 /** Chest gear category weights (compete with materials + empty). */
 const CHEST_GEAR_WEIGHT = {
-  ammo: 5,
+  ammo: 22,
   bandage: 22,
   melee: 2,
   weapon: 1,
@@ -219,7 +219,7 @@ function rollMaterialAmount(entry) {
 
 function rollChestAmmoItem() {
   const ammoType = AMMO_TYPE_KEYS[Math.floor(Math.random() * AMMO_TYPE_KEYS.length)];
-  const amount = 3 + Math.floor(Math.random() * 5);
+  const amount = 5 + Math.floor(Math.random() * 8);
   return normalizeAmmoItem({ kind: 'ammo', ammoType, amount });
 }
 

@@ -1,7 +1,9 @@
+import { loadMapCatalog } from './map-catalog.js';
+import { canonicalAsset, canonicalGround, BASE_GRASS_ASSET, floorTileLayout, drawFloorTile } from '../js/assetPaths.js';
 import { validateStructure } from '../js/structures.js';
 import { ChestManager } from '../js/chests.js';
 import { TILE as WORLD_TILE } from '../js/world.js';
-import { AuthoredRaidWorld, FLOOR_GRASS_ASSET, FLOOR_GRASS_OVERLAP, MAP_FOG_TILES, MAP_PLANES, PLAYER_SPAWN_ASSET, isOverlappingFloorGrass, isRaidLootAsset, isMapLayerAsset, mapAssetPath, mapBrushes, mapCornerLayout, mapPropLayout, mapPropYSort, mapWallEastEdge } from '../js/authoredRaidMap.js';
+import { AuthoredRaidWorld, MAP_FOG_TILES, MAP_PLANES, PLAYER_SPAWN_ASSET, isRaidLootAsset, isMapLayerAsset, mapAssetPath, mapBrushes, mapCornerLayout, mapPropLayout, mapPropYSort, mapWallEastEdge } from '../js/authoredRaidMap.js';
 
 const TILE = 16;
 const MAX_SIZE = 256;
@@ -29,7 +31,7 @@ const undo = [];
 const redo = [];
 
 function createMap(width, height, fillGrass = false) {
-  const next = { version: 1, width, height, tileSize: TILE, defaultGround: fillGrass ? FLOOR_GRASS_ASSET : undefined,
+  const next = { version: 1, width, height, tileSize: TILE, defaultGround: fillGrass ? BASE_GRASS_ASSET : undefined,
     layers: Object.fromEntries(layers.map((layer) => [layer, new Map()])) };
   return next;
 }
@@ -70,21 +72,16 @@ function draw() {
   if (map.defaultGround) {
     const ground = imageFor(map.defaultGround);
     if (ground.naturalWidth) {
-      const pattern = ctx.createPattern(ground, 'repeat');
       ctx.save();
-      if (isOverlappingFloorGrass(map.defaultGround)) {
-        // Repeat the central 16 px so the logical ground stays on the tile grid.
-        const tile = document.createElement('canvas');
-        tile.width = tile.height = TILE;
-        tile.getContext('2d').drawImage(ground, 2, 2, 16, 16, 0, 0, 16, 16);
-        ctx.fillStyle = ctx.createPattern(tile, 'repeat');
-      } else ctx.fillStyle = pattern;
+      const tile=document.createElement('canvas');tile.width=tile.height=16;
+      drawFloorTile(tile.getContext('2d'),ground,map.defaultGround,0,0);
+      ctx.fillStyle=ctx.createPattern(tile,'repeat');
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.restore();
     }
   }
   const tiles = [...map.layers.tiles.values()].sort((a, b) => a.plane - b.plane
-    || Number(isOverlappingFloorGrass(a.asset)) - Number(isOverlappingFloorGrass(b.asset)));
+    || Number(floorTileLayout(imageFor(a.asset),a.asset).width>16||floorTileLayout(imageFor(a.asset),a.asset).height>16)-Number(floorTileLayout(imageFor(b.asset),b.asset).width>16||floorTileLayout(imageFor(b.asset),b.asset).height>16));
   propHits.length = 0;
   collisionHits.length = 0;
   const props = [...map.layers.props.values()].map((entry) => entry === drag?.before && drag.preview ? drag.preview : entry);
@@ -97,14 +94,9 @@ function draw() {
       const x = entry.x * TILE + (entry.offsetX ?? 0);
       const y = entry.y * TILE + (entry.offsetY ?? 0);
       if (entry.asset === PLAYER_SPAWN_ASSET) continue;
-      const grass = isOverlappingFloorGrass(entry.asset);
       const image = imageFor(entry.asset);
       if (image.naturalWidth) {
-        if (grass) {
-          const pad = FLOOR_GRASS_OVERLAP;
-          ctx.drawImage(image, x - pad, y - pad, TILE + pad * 2, TILE + pad * 2);
-          continue;
-        }
+        if (layer==='tiles') {drawFloorTile(ctx,image,entry.asset,x,y);continue;}
         const floorAt = (column) => column >= 0 && column < map.width
           ? (map.layers.tiles.get(2 * map.width * map.height + entry.y * map.width + column)
             ?? map.layers.tiles.get(map.width * map.height + entry.y * map.width + column)
@@ -116,7 +108,7 @@ function draw() {
           hitBox(entry, x + layout.x, y + layout.y, layout.width, layout.height);
           continue;
         }
-        const scale = layer === 'props' && !/\/(walls|windows|doors|chests)\//i.test(entry.asset)
+        const scale = layer === 'props' && !/\/(walls|windows|doors|chests|fences)\//i.test(entry.asset)
           ? 1 : TILE / Math.max(image.naturalWidth, image.naturalHeight);
         const w = Math.round(image.naturalWidth * scale);
         const h = Math.round(image.naturalHeight * scale);
@@ -449,13 +441,14 @@ function readMap(data) {
     throw new Error('Nepodržan format ili veličina mape.');
   }
   const imported = createMap(data.width, data.height);
-  imported.defaultGround = data.defaultGround;
+  imported.defaultGround = data.type==='structure'&&!data.defaultGround?undefined:canonicalGround(data.defaultGround);
   imported.type=data.type;imported.name=data.name;imported.weight=data.weight;
   for (const layer of layers) {
     if (layer!=='indoor'&&!Array.isArray(data.layers?.[layer])) throw new Error('Nedostaje sloj ' + layer + '.');
     for (const entry of data.layers[layer]??[]) {
       if (entry == null) continue;
-      const { x, y, asset, quantity, plane = 0, offsetX = 0, offsetY = 0, collision, ySort } = entry;
+      const { x, y, quantity, plane = 0, offsetX = 0, offsetY = 0, collision, ySort } = entry;
+      const asset=canonicalAsset(entry.asset);
       if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0
         || x >= data.width || y >= data.height || !Number.isInteger(plane) || plane < 0 || plane >= (layer === 'loot' ? 1 : MAP_PLANES)
         || !isMapLayerAsset(layer, asset)
@@ -466,9 +459,6 @@ function readMap(data) {
         layer === 'loot' ? { x, y, asset, quantity } : layer === 'props'
           ? { x, y, asset, plane, offsetX, offsetY, collision, ySort } : { x, y, asset:layer==='indoor'?'marker:indoor':asset, plane });
     }
-  }
-  if (!imported.defaultGround && [...imported.layers.tiles.values()].filter((e) => e.plane === 0).length === data.width * data.height) {
-    imported.defaultGround = FLOOR_GRASS_ASSET;
   }
   for (const [key, entry] of imported.layers.tiles) {
     if (entry.plane === 0 && entry.asset === imported.defaultGround) imported.layers.tiles.delete(key);
@@ -493,9 +483,8 @@ function setMap(next) {
 }
 
 async function init() {
-  const response = await fetch('map-editor-assets.json', { cache: 'no-store' });
-  if (!response.ok) throw new Error('Paleta spriteova se nije učitala.');
-  catalog = await response.json();
+  const loadedCatalog=await loadMapCatalog();
+  catalog=loadedCatalog.catalog;
   catalog.indoor=['marker:indoor'];brushes.set('indoor','marker:indoor');
 
   byId('layer').addEventListener('change', () => {
@@ -761,6 +750,7 @@ async function init() {
 
   setMap(createMap(125, 125, true));
   renderPalette();
+  if(loadedCatalog.fallback)status.textContent='Paleta učitana iz spremljenog popisa asseta.';
 }
 
 init().catch((error) => { status.textContent = error.message; });

@@ -3,7 +3,7 @@ import { isAccessItem } from './doorAccess.js';
 import { storageLayout, canEquipHand } from './itemFootprint.js';
 import { customWeapons } from './customContent.js';
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
-import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX } from './sprites.js';
+import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX, CHARACTER_SIZE_RATIO } from './sprites.js';
 import { AMMO_STACK_MAX, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
 import { MATERIAL_STACK_MAX, materialStackMax, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
 import {
@@ -15,11 +15,11 @@ import {
 import { BACKPACK_CAPACITY, EQUIPMENT_SLOTS, VEST_RESISTANCE, equipmentSlotFor, isEquipmentItem, itemDurability, normalizeEquipmentItem } from './equipment.js';
 import { normalizeThrowableItem } from './throwables.js';
 
-export const GUN_HOLD_OFFSET = 1.1;
+export const GUN_HOLD_OFFSET = 1.1 * CHARACTER_SIZE_RATIO;
 /** Extra distance from gun hold point to barrel tip (world units). */
-export const BARREL_TIP_OFFSET = 0.55;
+export const BARREL_TIP_OFFSET = 0.55 * CHARACTER_SIZE_RATIO;
 /** Screen-up lift for player bullet spawn (pixels at PPU 8). */
-export const BULLET_SPAWN_RAISE_PX = 6;
+export const BULLET_SPAWN_RAISE_PX = 6 * CHARACTER_SIZE_RATIO;
 
 /** 24px diameter damage / melee hit circle at PPU 8. */
 export const PLAYER_HIT_RADIUS = 1.5;
@@ -27,9 +27,9 @@ export const PLAYER_HIT_RADIUS = 1.5;
 export const HUMAN_WALK_RATE = 6;
 export const HUMAN_SPRINT_RATE = 9;
 
-export const PLAYER_MOVE_W_PX = 16;
-export const PLAYER_MOVE_H_PX = 10;
-export const PLAYER_SPRITE_SCALE = 1.5;
+export const PLAYER_MOVE_W_PX = 16 * CHARACTER_SIZE_RATIO;
+export const PLAYER_MOVE_H_PX = 10 * CHARACTER_SIZE_RATIO;
+export const PLAYER_SPRITE_SCALE = 1.58;
 
 const SCREEN_PPU = 5.5;
 

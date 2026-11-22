@@ -4430,3 +4430,10 @@ body:has(#pause-menu:not(.hidden)) .menu-cursor-follow {width:40px;height:40px;}
  #inventory.open :is(#inventory-panel,#chest-panel:not(.hidden)) {animation:ui-soft-open 160ms ease-out both;}
 }
 body.mobile-ui .inv-context-menu {overflow-y:auto;overscroll-behavior:contain;}
+
+/* Mobile interaction hints leave the world unobstructed. */
+body.game-active.mobile-ui #interact-prompt { display: none !important; }
+body.game-active.mobile-ui #pickup-status { bottom: auto; top: calc(100% + 18px); max-width: 84vw; }
+@keyframes interact-ready { 0%,100% { outline-color: #efb94c; outline-offset: 2px; } 50% { outline-color: #fff0ab; outline-offset: 5px; } }
+.mb-interact.mb-nearby { outline: 2px solid #efb94c; animation: interact-ready 1s ease-in-out infinite; }
+@media(prefers-reduced-motion:reduce){.mb-interact.mb-nearby{animation:none;}}

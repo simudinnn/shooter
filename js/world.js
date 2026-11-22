@@ -762,7 +762,7 @@ export class World {
     const pxOriginX = Math.round(tileOriginX * ppu);
     const pxOriginZ = Math.round(tileOriginZ * ppu);
 
-    const bmp = sprites.getTileBitmap('floor_dirt', tilePx, null);
+    const bmp = sprites.getTileBitmap('floor_grass', tilePx, null);
     if (bmp) {
       if (!this._dirtPattern || this._dirtPatternPx !== tilePx) {
         this._dirtPattern = ctx.createPattern(bmp, 'repeat');

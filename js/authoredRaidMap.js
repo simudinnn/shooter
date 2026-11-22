@@ -1,3 +1,4 @@
+import { canonicalAsset, canonicalGround, BASE_GRASS_ASSET, GRASS_OVERLAY_ASSET, floorTileLayout, drawFloorTile } from './assetPaths.js';
 import { doorAccessError } from './doorAccess.js';
 import { moveColliderOverlapsRect } from './buildingGen.js';
 import { World, TILE } from './world.js';
@@ -15,10 +16,10 @@ export const FLOOR_GRASS_OVERLAP = 2;
 export const MAP_FOG_TILES = 7;
 export const MAP_PLANES = 3;
 export const PLAYER_SPAWN_ASSET = 'marker:player-spawn';
-export const FLOOR_GRASS_ASSET = 'assets/world/floor_grass.png';
-export const isOverlappingFloorGrass = (asset) => asset === FLOOR_GRASS_ASSET;
+export const FLOOR_GRASS_ASSET = GRASS_OVERLAY_ASSET;
+export const isOverlappingFloorGrass = (asset) => canonicalAsset(asset) === FLOOR_GRASS_ASSET;
 
-const hatchAsset = 'assets/world/hatch_closed.png';
+const hatchAsset = 'assets/buildings/misc/hatch_closed.png';
 const sideWall = 'assets/buildings/walls/wall_ew.png';
 const lootByAsset = new Map();
 for (const [kind, keys] of [
@@ -39,7 +40,7 @@ export function mapPropYSort(entry) {
 
 export function isRaidLootAsset(asset) { return lootByAsset.has(asset); }
 
-export function mapAssetPath(asset) { return asset.split('#')[0]; }
+export function mapAssetPath(asset) { return canonicalAsset(asset).split('#')[0]; }
 
 export function mapBrushes(asset) {
   if (/\/doors\/closed_wood\.png$/i.test(asset)) return [asset,asset+'#locked'];
@@ -58,7 +59,7 @@ function doorMatch(asset) {
 }
 
 export function mapPropLayout(asset, eastEdge = false) {
-  const [path, brush] = asset.split('#');
+  const [path, brush] = canonicalAsset(asset).split('#');
   const door = doorMatch(path);
   if (door) {
     const width = door[2].toLowerCase() === 'open' ? OPEN_DOOR_ART_W : 16;
@@ -78,6 +79,7 @@ export function mapCornerLayout(asset) {
 }
 
 export function isMapLayerAsset(layer, asset) {
+  asset=canonicalAsset(asset);
   if(layer==='indoor')return ['marker:indoor','marker:indoor-passive','marker:indoor-detection'].includes(asset);
   if (asset === PLAYER_SPAWN_ASSET) return layer === 'props';
   if (typeof asset !== 'string') return false;
@@ -86,7 +88,7 @@ export function isMapLayerAsset(layer, asset) {
   if (brush && (layer !== 'props' || !mapBrushes(path).includes(asset) && !(/^corner-(east|west)$/.test(brush) && /\/walls\//i.test(path)))) return false;
   if (layer === 'tiles') return /^assets\/(world\/floor|buildings\/floor\/)/i.test(path);
   if (layer === 'loot') return /^assets\/items\//i.test(path);
-  return /^assets\/(?:world\/(?:fol+iage|hatch_closed\.png$)|buildings\/(?:walls|windows|doors|misc|chests|fol+iage)\/)/i.test(path);
+  return /^assets\/(?:world\/(?:fol+iage|hatch_closed\.png$)|buildings\/(?:walls|windows|doors|misc|chests|fences|fol+iage)\/)/i.test(path);
 }
 
 export function parseRaidMap(data) {
@@ -94,7 +96,7 @@ export function parseRaidMap(data) {
   if (data?.version !== 1 || data.tileSize !== 16 || !size(data.width) || !size(data.height)) {
     throw new Error('Expected a version 1 map from the map editor.');
   }
-  const defaultGround = data.defaultGround ?? 'assets/world/floor_dirt.png';
+  const defaultGround = canonicalGround(data.defaultGround);
   if (!isMapLayerAsset('tiles', defaultGround)) throw new Error('Invalid default ground.');
   const warnings = new Set();
   const layers = {};
@@ -105,7 +107,8 @@ export function parseRaidMap(data) {
     layers[layer] = [];
     for (const entry of entries) {
       if (entry == null) continue;
-      const { x, y, asset, quantity, plane = 0, offsetX = 0, offsetY = 0, collision, ySort } = entry;
+      const { x, y, quantity, plane = 0, offsetX = 0, offsetY = 0, collision, ySort } = entry;
+      const asset=canonicalAsset(entry.asset);
       if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= data.width || y >= data.height
         || !Number.isInteger(plane) || plane < 0 || plane >= (layer === 'loot' ? 1 : MAP_PLANES)
         || !isMapLayerAsset(layer, asset)) throw new Error('Invalid position or sprite in ' + layer + ': ' + asset);
@@ -164,6 +167,7 @@ export class AuthoredRaidWorld extends World {
     this.mapDecorCasters = [];
     this.mapTreeCasters = [];
     this.mapGround = new Map();
+    this.floorOverlapPixels=0;
   }
 
   async build() {
@@ -193,9 +197,7 @@ export class AuthoredRaidWorld extends World {
         ctx.imageSmoothingEnabled = false;
         if (floor) {
           for (let py = 0; py < canvas.height; py += 16) {
-            for (let px = 0; px < canvas.width; px += 16) isOverlappingFloorGrass(dirt)
-              ? ctx.drawImage(floor, 2, 2, 16, 16, px, py, 16, 16)
-              : ctx.drawImage(floor, px, py, 16, 16);
+            for (let px = 0; px < canvas.width; px += 16) drawFloorTile(ctx,floor,dirt,px,py);
           }
         }
         this.mapGround.set(this._chunkKey(x / CHUNK_TILES, y / CHUNK_TILES), { canvas, ctx });
@@ -203,19 +205,18 @@ export class AuthoredRaidWorld extends World {
     }
     const floors = new Map();
     const orderedTiles = [...tiles].sort((a, b) => a.plane - b.plane
-      || Number(isOverlappingFloorGrass(a.asset)) - Number(isOverlappingFloorGrass(b.asset)));
+      || Number(floorTileLayout(images.get(a.asset)||{},a.asset).width>16||floorTileLayout(images.get(a.asset)||{},a.asset).height>16)-Number(floorTileLayout(images.get(b.asset)||{},b.asset).width>16||floorTileLayout(images.get(b.asset)||{},b.asset).height>16));
     for (const { x, y, asset } of orderedTiles) {
       const image = images.get(asset);
       if (!image) continue;
       floors.set(x + ',' + y, asset);
-      const pad = isOverlappingFloorGrass(asset) ? FLOOR_GRASS_OVERLAP : 0;
-      const left = x * 16 - pad;
-      const top = y * 16 - pad;
-      const size = 16 + pad * 2;
+      const tile=floorTileLayout(image,asset);
+      this.floorOverlapPixels=Math.max(this.floorOverlapPixels,-tile.x,-tile.y);
+      const left=x*16+tile.x,top=y*16+tile.y;
       const span = CHUNK_TILES * 16;
-      for (let cz = Math.floor(top / span); cz <= Math.floor((top + size - 1) / span); cz++) {
-        for (let cx = Math.floor(left / span); cx <= Math.floor((left + size - 1) / span); cx++) {
-          this.mapGround.get(this._chunkKey(cx, cz))?.ctx.drawImage(image, left - cx * span, top - cz * span, size, size);
+      for (let cz = Math.floor(top / span); cz <= Math.ceil((top + tile.height) / span)-1; cz++) {
+        for (let cx = Math.floor(left / span); cx <= Math.ceil((left + tile.width) / span)-1; cx++) {
+          this.mapGround.get(this._chunkKey(cx, cz))?.ctx.drawImage(image,tile.sx,tile.sy,tile.sw,tile.sh,left-cx*span,top-cz*span,tile.width,tile.height);
         }
       }
     }
@@ -436,7 +437,8 @@ export class AuthoredRaidWorld extends World {
     const corner = mapCornerLayout(asset);
     const door = doorMatch(path);
     const tree = /fol+iage.*tree/i.test(path);
-    const wall = /\/(walls|windows)\//i.test(path) || !!door;
+    const fence=/\/fences\//i.test(path);
+    const wall = /\/(walls|windows)\//i.test(path) || !!door || fence;
     const collision = entry.collision ?? (tree || !(/fol+iage/i.test(path) && !/rock/i.test(path)
       || /\/doors\//i.test(path) && !door));
     const prop = { ...position, image, asset, layout, tree, wall, plane: entry.plane, collision, ySort: mapPropYSort(entry) };
@@ -463,7 +465,7 @@ export class AuthoredRaidWorld extends World {
       z: position.z + (horizontal ? TILE * 0.375 : wall ? 0 : TILE / 2 - image.height * pixel / 4),
       halfW: vertical ? TILE / 8 : wall ? TILE / 2 : image.width * pixel / 2,
       halfH: horizontal ? TILE / 8 : wall ? TILE / 2 : image.height * pixel / 4,
-      blocksBullets: !window, blocksVision: !window,
+      blocksBullets: !window&&!fence, blocksVision: !window&&!fence,
     };
     if (vertical && collision) this.mapSideWalls.push(obstacle);
     if (window && horizontal && collision) {
@@ -575,12 +577,13 @@ export class AuthoredRaidWorld extends World {
   drawGroundLayer(ctx, camTx, camTy, halfW, halfH, ppu, sprites, camX, camZ) {
     const span = CHUNK_TILES * TILE;
     const scale = TILE * ppu / 16;
-    const pad = FLOOR_GRASS_OVERLAP * TILE / 16;
+    const pad = this.floorOverlapPixels * TILE / 16;
     const minX = Math.max(0, Math.floor((camX - halfW - pad) / span));
     const minZ = Math.max(0, Math.floor((camZ - halfH - pad) / span));
     const maxX = Math.min(Math.ceil(this.raidMap.width / CHUNK_TILES) - 1, Math.floor((camX + halfW + pad) / span));
     const maxZ = Math.min(Math.ceil(this.raidMap.height / CHUNK_TILES) - 1, Math.floor((camZ + halfH + pad) / span));
-    const key = [minX, minZ, maxX, maxZ, this.mapLightRevision].join(',');
+    const showShadows = localStorage.getItem('raid-shadows') !== 'off';
+    const key = [minX, minZ, maxX, maxZ, this.mapLightRevision, showShadows].join(',');
     if (this._terrainView?.key !== key) {
       const canvas = this._terrainView?.canvas ?? document.createElement('canvas');
       const chunkPx = CHUNK_TILES * 16;
@@ -590,7 +593,7 @@ export class AuthoredRaidWorld extends World {
       for (let z = minZ; z <= maxZ; z++) {
         for (let x = minX; x <= maxX; x++) {
           const chunk = this.mapGround.get(this._chunkKey(x, z));
-          if (chunk) g.drawImage(chunk.canvas, (x - minX) * chunkPx, (z - minZ) * chunkPx);
+          if (chunk) g.drawImage(!showShadows && chunk.cleanGround ? chunk.cleanGround : chunk.canvas, (x - minX) * chunkPx, (z - minZ) * chunkPx);
         }
       }
       this._terrainView = { key, canvas };

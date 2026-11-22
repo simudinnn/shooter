@@ -46,7 +46,7 @@ import {
   BUILDING_ART_PX,
 } from './buildingGen.js';
 import { chestSpriteName, getItemDisplayName, getItemIconSrc, rollChestLoot } from './loot.js';
-import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, resolveFlipX, isMovingForward, CHAR_NATIVE_PX, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
+import { SpriteBank, gunAimTransform, gunPivotHoldOffset, getReloadPoseBlend, getReloadHoldScreenX, getMeleeHoldPose, getHandHoldPose, getWalkSheet, getWalkAnim, getEnemyBodySheet, getEnemyBodyAnim, velToSpriteAngle, getPlayerSheet, getPlayerAnim, getPlayerFlipX, getPlayerBounceY, getPlayerIdleBreathY, getWalkBounceY, resolveFlipX, isMovingForward, CHAR_NATIVE_PX, CHARACTER_SIZE_RATIO, getEnemyNativePx, getEnemyDrawScale, spriteFeetOffset, PARTICLE_FX_NATIVE_PX, getParticleFxSprite, getParticleFxAnim } from './sprites.js';
 import { collectCollisionTargets, moveWithEntityCollision, applyApproachPush, updateLocomotion, isSprintAnimSpeed, entityPushRadius } from './collision.js';
 import { drawCollisionDebug } from './collisionDebug.js';
 import { createStepDust, createBulletCasing, createBloodSplatter, createRobotHitSparks, createRobotSmoke, createRobotFire, createRobotDeathFx, PARTICLE_SIZE_UNIT } from './particles.js';
@@ -65,6 +65,7 @@ import {
 const npcCollisionZ = (npc) => npc.z + (npc.getMoveCollider().zOff ?? 0);
 
 const SHADOW_MODE = new URLSearchParams(location.search).get('shadows');
+const shadowsEnabled = () => { try { return localStorage.getItem('raid-shadows') !== 'off'; } catch { return true; } };
 const DYNAMIC_SHADOWS = SHADOW_MODE === 'dynamic';
 const BAKED_SHADOWS = !DYNAMIC_SHADOWS && SHADOW_MODE !== '0';
 
@@ -74,12 +75,14 @@ const SORT_ENTITY = 2;
 const SORT_GUN = 3;
 const SORT_WALL_FRONT = 6;
 
-const SPRITE_PLAYER = 1.50;
+const SPRITE_PLAYER = 1.58;
+const CHARACTER_SHADOW_RX = 8;
+const CHARACTER_SHADOW_RY = 3;
 const SPRITE_CHEST = CHEST_DRAW_SCALE;
 const SPRITE_CRATE = 2.2;
 const SPRITE_BULLET = 1.2;
 const SPRITE_CASING = 1.5;
-const SPRITE_GUN = 1.35;
+const SPRITE_GUN = 1.35 * CHARACTER_SIZE_RATIO;
 
 const GAME_CURSOR_SRC = {
   inv_cursor: INV_CURSOR_SRC,
@@ -1424,7 +1427,7 @@ class Game {
     this.bullets = new BulletPool();
     this.robots = [];
     this.raiderSpawnSites = new Set();
-    this.nextRaiderSpawnCheck = 0;
+    this._raidersSpawned = false;
     this.items = new ItemManager(this.world);
     this.chests = new ChestManager(this.world);
     this.corpses = new CorpseManager(this.world);
@@ -1500,6 +1503,8 @@ class Game {
 
     this.chunkEntities = new ChunkEntityManager(this.world, this);
     this.chunkEntities.reset();
+    if(!saveData)this._spawnRaiders(0);
+    else this._raidersSpawned=true;
 
     this._weaponBreathY = 0;
     this.camOffset = { x: 0, z: 0 };
@@ -1815,7 +1820,6 @@ class Game {
 
     const simView = this.getViewBoundsWorld();
     const simPad = TILE * 10;
-    this._spawnRaiders(time);
     const raiders = this.robots.filter((robot) => robot.type === 'raider' && robot.alive);
     for (const robot of [...this.robots]) {
       if (!robot.alive) continue;
@@ -1997,37 +2001,27 @@ class Game {
   }
 
   _spawnRaiders(time) {
-    if (time < this.nextRaiderSpawnCheck) return;
-    this.nextRaiderSpawnCheck = time + 11;
-    if (this.robots.filter((enemy) => enemy.type === 'raider' && enemy.alive
-      && Math.hypot(enemy.x - this.player.x, enemy.z - this.player.z) < 100).length >= 3) return;
-    if(this.world.raidMap){
-      const anchors=this.chests.chests.length?this.chests.chests:[{x:this.player.x+36,z:this.player.z,slots:[],spawnOnly:true}];
-      for(const chest of anchors){
-        const site='map:'+chest.x+','+chest.z;
-        if(this.raiderSpawnSites.has(site))continue;
-        for(let attempt=0;attempt<24;attempt++){
-          const angle=Math.random()*Math.PI*2,distance=TILE*(2+Math.random()*4);
-          const x=chest.x+Math.sin(angle)*distance,z=chest.z+Math.cos(angle)*distance;
-          const fromPlayer=Math.hypot(x-this.player.x,z-this.player.z);
-          if(fromPlayer<24||fromPlayer>90||this.world.checkCollision(x,z,1.65)||this.robots.some(npc=>npc.alive&&Math.hypot(npc.x-x,npc.z-z)<4))continue;
-          this.raiderSpawnSites.add(site);this.robots.push(new Raider(x,z,chest.spawnOnly?null:chest));return;
-        }
+    if(this._raidersSpawned)return;
+    this._raidersSpawned=true;
+    const anchors=this.chests.chests.length?[...this.chests.chests]:[{x:this.player.x+36,z:this.player.z,spawnOnly:true}];
+    for(let i=anchors.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[anchors[i],anchors[j]]=[anchors[j],anchors[i]];}
+    const limit=3+Math.floor(Math.random()*3);
+    let spawned=0;
+    for(const chest of anchors){
+      if(spawned>=limit)break;
+      const building=chest.homeBuilding;
+      for(let attempt=0;attempt<40;attempt++){
+        const angle=Math.random()*Math.PI*2,distance=TILE*(2+Math.random()*5);
+        const x=chest.x+Math.sin(angle)*distance,z=chest.z+Math.cos(angle)*distance;
+        const bounds=this.world.bounds;
+        if(bounds&&(x<bounds.minX+2||x>bounds.maxX-2||z<bounds.minZ+2||z>bounds.maxZ-2))continue;
+        if(Math.hypot(x-this.player.x,z-this.player.z)<24||this.robots.some(npc=>npc.alive&&Math.hypot(npc.x-x,npc.z-z)<4))continue;
+        const npc=new Raider(x,z,chest.spawnOnly?null:chest);
+        const shape=npc.getMoveCollider();
+        if(this.world.checkCollisionShape(x,z,{...shape,radius:shape.radius+0.35},false,{buildings:this.buildings}))continue;
+        this.raiderSpawnSites.add(building?building.originX+','+building.originZ:'map:'+chest.x+','+chest.z);
+        this.robots.push(npc);spawned++;break;
       }
-      return;
-    }
-    for (const chest of this.chests.chests) {
-      const building = chest.homeBuilding;
-      if (!building || !chest.slots.some(Boolean)) continue;
-      const site = `${building.originX},${building.originZ}`;
-      if (this.raiderSpawnSites.has(site)) continue;
-      const x = building.originX + (building.doorTx + 0.5) * TILE;
-      const z = building.originZ + ((building.doorTz ?? building.h - 1) + 2) * TILE;
-      const distance = Math.hypot(x - this.player.x, z - this.player.z);
-      if (distance < 22 || distance > 70 || this.world.checkCollision(x, z, 1.3)) continue;
-      this.raiderSpawnSites.add(site);
-      this.robots.push(new Raider(x, z, chest));
-      return;
     }
   }
 
@@ -2931,7 +2925,7 @@ class Game {
 
     const gunAim = gunAimTransform(this.player.angle, this.player._flipX ?? false);
     const holdDist = GUN_HOLD_OFFSET + lunge + gunPivotHoldOffset(gunAim.angle);
-    const holdOffX = (Math.sin(this.player.angle) * holdDist * PPU);
+    const holdOffX = (Math.sin(this.player.angle) * holdDist * PPU * 1.12);
     const holdOffY = (Math.cos(this.player.angle) * holdDist * PPU);
     const normalSx = playerGs.x + holdOffX;
     const normalSy = playerGs.y + holdOffY;
@@ -3131,7 +3125,7 @@ class Game {
     const playerZ = this.player.z;
     const floorPixel = TILE / BUILDING_ART_PX;
     let lightView, lightKey, shadowMask, drawShadowMask;
-    if (DYNAMIC_SHADOWS) {
+    if (DYNAMIC_SHADOWS && shadowsEnabled()) {
       lightView = {
         minX: Math.floor(viewMinX / TILE) * TILE,
         maxX: Math.ceil(viewMaxX / TILE) * TILE,
@@ -3196,7 +3190,7 @@ class Game {
       const point = worldToScreen(item.x, item.z);
       this.sprites.drawGroundItem(ctx, item.key, point.x, point.y, 18, -item.lift);
     }
-    const bakedShade = (x, z) => BAKED_SHADOWS && this.world.isInBakedShadow?.(x, z);
+    const bakedShade = (x, z) => shadowsEnabled() && BAKED_SHADOWS && this.world.isInBakedShadow?.(x, z);
     const lit = (x, z) => pointInWallLight(this._wallLight, x, z);
     const lightPath = this._wallLight && makeWallLightPath(this._wallLight, worldToScreen);
     const drawList = this._drawListScratch;
@@ -3207,7 +3201,7 @@ class Game {
     };
     const shadowGridOrigin = worldToScreen(0, 0);
     const characterShadows = [];
-    const addCharacterShadow = (point, nativeSize, spriteScale, rx = 10, ry = 4) => {
+    const addCharacterShadow = (point, nativeSize, spriteScale, rx = CHARACTER_SHADOW_RX, ry = CHARACTER_SHADOW_RY) => {
       const feetY = point.y + spriteFeetOffset(nativeSize, spriteScale);
       characterShadows.push({ x: point.x, feetY, rx, ry });
     };
@@ -3296,7 +3290,7 @@ class Game {
       // SpriteBank mirrors the rotation when flipX is set.
       const angle = -Math.PI / 4 * (1 - fall * fall);
       const s = this._corpseScreenPos(corpse);
-      characterShadows.push({ x: s.x, feetY: s.y + 3, rx: 12 * corpseScale, ry: 3 * corpseScale });
+      characterShadows.push({ x: s.x, feetY: s.y + 3, rx: corpse.type === 'scout' ? 12 : CHARACTER_SHADOW_RX, ry: corpse.type === 'scout' ? 4 : CHARACTER_SHADOW_RY });
       drawList.push({ z: -Infinity, sortBias: SORT_ENTITY, bakedShade: bakedShade(corpse.x, corpse.z), draw: () => {
         this.sprites.draw(
           ctx,
@@ -3398,12 +3392,12 @@ class Game {
             const reach = (GUN_HOLD_OFFSET + gunPivotHoldOffset(aim.angle)) * PPU;
             const elapsed = gun.reloadTime - robot.reloadLeft;
             const blend = robot.reloadLeft > 0 ? Math.min(1, elapsed / 0.18, robot.reloadLeft / 0.18) : 0;
-            const sx = point.x + Math.sin(robot.angle) * reach * (1 - blend) + getReloadHoldScreenX(point.x, aim.flipX) * blend - point.x * blend;
+            const sx = point.x + Math.sin(robot.angle) * reach * 1.12 * (1 - blend) + getReloadHoldScreenX(point.x, aim.flipX) * blend - point.x * blend;
             const sy = point.y + Math.cos(robot.angle) * reach * (1 - blend);
             const shot = dropDrawTime < (robot.shotFlashUntil ?? 0);
             const sheet = shot && gun.shotSprite ? gun.shotSprite : robot.reloadLeft > 0 ? gun.sprite + '_reload' : gun.sprite;
             this.sprites.draw(ctx, sheet, sx, sy,
-              1.1, aim.angle * (1 - blend) - Math.PI * 0.35 * blend, aim.flipX, 'shoulder',
+              1.1 * CHARACTER_SIZE_RATIO, aim.angle * (1 - blend) - Math.PI * 0.35 * blend, aim.flipX, 'shoulder',
               0, robot.reloadLeft > 0 ? { elapsed } : null, true);
           } else {
             const melee = MELEE_WEAPONS[robot.weaponKey];
@@ -3411,7 +3405,7 @@ class Game {
             const swing = elapsed >= 0 && elapsed < 0.42 ? Math.sin(Math.PI * elapsed / 0.42) : 0;
             const pose = getMeleeHoldPose(robot, 0.14 * swing);
             const hold = this._entityToScreen(pose.worldX, pose.worldZ);
-            this.sprites.draw(ctx, melee.sprite, hold.x, hold.y + 8 * swing, 1.1,
+            this.sprites.draw(ctx, melee.sprite, hold.x, hold.y + 8 * swing * CHARACTER_SIZE_RATIO, 1.1 * CHARACTER_SIZE_RATIO,
               pose.angle, pose.flipX, 'shoulder', melee.swingAngle * swing, null, true);
           }
         }});
@@ -3423,7 +3417,7 @@ class Game {
       if (!robot.emerging) {
         const scout = robot.type === 'scout';
         addCharacterShadow(this._entityToScreen(robot.x, robot.z), enemyNativePx, enemyDrawScale,
-          scout ? 15 : 10, scout ? 5.5 : 4);
+          scout ? 12 : CHARACTER_SHADOW_RX, scout ? 4 : CHARACTER_SHADOW_RY);
       }
       drawList.push({ z: robotSortZ, sortBias: SORT_ENTITY, bakedShade: bakedShade(robot.x, npcCollisionZ(robot)), draw: () => {
         const drawTime = performance.now() / 1000;
@@ -3518,7 +3512,7 @@ class Game {
     this.world.eraseBakedShadowOverlap?.(mask, view, (x, z) => ({ x: camT.x + x * PPU, y: camT.y + z * PPU }), pixelScale);
     ctx.save();
     ctx.globalAlpha = 0.28;
-    ctx.drawImage(layer, maskX, maskY, width / shadowScale, height / shadowScale);
+    if(shadowsEnabled()) ctx.drawImage(layer, maskX, maskY, width / shadowScale, height / shadowScale);
     ctx.restore();
     const playerShade = bakedShade(playerX, playerZ + this.player.getMoveCollider(PPU).zOff);
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, bakedShade: playerShade, draw: () => {
@@ -3962,7 +3956,7 @@ class Game {
     const canCallHatch = this._canCallHatch();
     if (canCallHatch) mbInteract?.classList.add('mb-nearby');
     const showPrompt = canCallHatch || canToggleDoor || canOpenChest || canOpenCorpse || canPickupDrop;
-    this.el.interactPrompt.classList.toggle('hidden', !showPrompt);
+    this.el.interactPrompt.classList.toggle('hidden', this.mobile || !showPrompt);
     if (showPrompt) {
       const doorVerb = interactDoor?.doorOpen ? 'close' : 'open';
       const lockedLabel=interactDoor?.lockType&&!interactDoor.unlocked
@@ -4056,6 +4050,8 @@ class Game {
       perf.peak = Math.max(perf.peak, frameMs);
     }
     perf.npcPeak = Math.max(perf.npcPeak, this._npcFrameMs);
+    const perfElement=document.getElementById('raid-performance');
+    try{perfElement.style.display=localStorage.getItem('raid-debug')==='off'?'none':'';}catch{}
     if (now - perf.updated >= 500 && perf.total > 0) {
       document.getElementById('raid-performance').textContent =
         `${Math.round(1000 * perf.frames / perf.total)} FPS · max ${perf.peak.toFixed(0)} ms\n`

@@ -27,8 +27,8 @@ export function rollWorldSeed() {
   return _worldSeed;
 }
 
-/** Single ground tile everywhere — floor_dirt. */
-export const FLOOR_KIND = 'dirt';
+/** The world background uses the seamless base grass tile. */
+export const FLOOR_KIND = 'grass';
 
 /** One shared tint for all grass / bush foliage — tweak RGB here. */
 export const FOLIAGE_TINT = { r: 168, g: 182, b: 96 };

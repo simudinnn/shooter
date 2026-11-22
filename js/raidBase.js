@@ -369,6 +369,11 @@ export class RaidBase {
       applyVolume();
       saveToggle('raid-sound-effects', this.soundEnabled);
     });
+    for(const [id,key] of [['raid-shadows-enabled','raid-shadows'],['raid-debug-enabled','raid-debug']]){
+      const input=root.querySelector('#'+id);
+      try{input.checked=localStorage.getItem(key)!=='off';}catch{}
+      input.addEventListener('change',()=>saveToggle(key,input.checked));
+    }
     const settingsButton = root.querySelector('#raid-settings-open');
     settingsButton.addEventListener('click', () => {
       settings.showModal();

@@ -4,7 +4,7 @@ import { normalizeAmmoItem } from './ammo.js';
 export const CORPSE_SLOT_COUNT = CHEST_SLOT_COUNT;
 export const CORPSE_INTERACT_DIST = 3;
 export const CORPSE_LIFETIME_SEC = 300;
-export const CORPSE_DRAW_SCALE = 1.45;
+export const CORPSE_DRAW_SCALE = 1.53;
 
 const SPIDER_LOOT_KEYS = [
   'battery', 'electrical_comp', 'metal', 'microchip', 'rubber', 'spring', 'wires',
