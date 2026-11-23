@@ -862,6 +862,9 @@ export class Raider extends Robot {
     this.lastCombatSight = null;
     this.loot = [];
     this.lootTarget = chest;
+    this.guardPost = { x, z };
+    this.guardLookTimer = 0.8 + Math.random() * 2;
+    this.guardPatrol = null;
     this.fireCooldown = 0.6;
     this.lootCooldown = 0;
     this.lootedChests = new Set();
@@ -902,7 +905,7 @@ export class Raider extends Robot {
     let bestScore = Infinity;
     let secondScore = Infinity;
     for (const candidate of [player, ...robots]) {
-      if (candidate === this || !candidate.alive || candidate.emerging) continue;
+      if (candidate === this || candidate.type === 'raider' || !candidate.alive || candidate.emerging) continue;
       const distance = Math.hypot(candidate.x - this.x, candidate.z - this.z);
       const score = distance + (candidate === player || candidate.type === 'raider' ? 0 : 24);
       if (distance >= 30 || score >= secondScore || !hasCombatSight(world, this, candidate)) continue;
@@ -926,6 +929,7 @@ export class Raider extends Robot {
     this.searchPhase = null;
     const inside = buildings.getEntityBuildingAt(this);
     if (target) {
+      this.guardPatrol = null;
       this.exitBuilding = null;
       this.lastCombatSight = { x: target.x, z: target.z, building: buildings.getEntityBuildingAt(target), target, until: time + 12 };
     }
@@ -986,10 +990,12 @@ export class Raider extends Robot {
     } else if (target && melee) {
       const weapon = melee;
       this.angle = Math.atan2(target.x - this.x, target.z - this.z);
-      if (range > weapon.range) this._runToward(dt, target, world, robots, buildings, time);
+      if (range > weapon.range) {
+        if (Math.hypot(target.x - this.guardPost.x, target.z - this.guardPost.z) < TILE * 5) this._runToward(dt, target, world, robots, buildings, time);
+      }
       else if (attackReady && this.fireCooldown === 0) this.fireCooldown = attack(this, this.angle, target);
     } else if (target) {
-      this.speed = this.baseSpeed * 1.5;
+      this.speed = this.baseSpeed;
       this.angle = Math.atan2(target.x - this.x, target.z - this.z);
       this.combatStrafeTime = (this.combatStrafeTime ?? 0) - dt;
       if (this.combatStrafeTime <= 0) {
@@ -1001,7 +1007,7 @@ export class Raider extends Robot {
       const cos = Math.cos(this.angle);
       const dodge = this.dodgeCooldown === 0 ? this._incomingShotDodge(bullets) : null;
       if (dodge) this.dodgeCooldown = 0.95;
-      this._move(dt, world, player, robots,
+      if (dodge || (range < 11 && Math.hypot(this.x - this.guardPost.x, this.z - this.guardPost.z) < TILE * 3)) this._move(dt, world, player, robots,
         dodge?.x ?? (sin * forward + cos * this.strafeSide),
         dodge?.z ?? (cos * forward - sin * this.strafeSide), dodge ? 0.95 : 0.75, { buildings });
       if (attackReady && this.ammo > 0 && this.fireCooldown === 0) {
@@ -1009,93 +1015,51 @@ export class Raider extends Robot {
         this.ammo--;
         if (this.ammo === 0) this.reloadLeft = WEAPONS[this.weaponKey].reloadTime;
       }
-    } else if (this.lastCombatSight && time < this.lastCombatSight.until) {
-      const goal = this.lastCombatSight;
-      // Track the building transition while the last sighting is still fresh.
-      if (!goal.building && goal.target?.alive) {
-        const shelter = buildings.getEntityBuildingAt(goal.target);
-        if (shelter && Math.hypot(goal.x - goal.target.x, goal.z - goal.target.z) < TILE * 2) {
-          goal.building = shelter;
-          goal.x = goal.target.x;
-          goal.z = goal.target.z;
-        }
-      }
-      if (goal.building && inside !== goal.building) {
-        this._enterBuilding(dt, goal.building, world, robots, buildings, time);
-      } else {
-        this.enteringBuilding = null;
-        if (Math.hypot(goal.x - this.x, goal.z - this.z) <= 2) goal.reached = true;
-        if (goal.reached) {
-          this.speed = this.baseSpeed;
-          this._updateWander(dt, world, player, robots, 0.8, true);
-        } else this._runToward(dt, goal, world, robots, buildings, time);
-      }
     } else {
       this.fireCooldown = Math.max(this.fireCooldown, 0.4);
-      this.lootCooldown -= dt;
-      if (this.lootCooldown <= 0 && !(this.lootTarget?.slots?.some(Boolean)
-        || (this.lootTarget?.item && groundDrops.drops.includes(this.lootTarget)))) {
-        this.lootCooldown = 1.5;
-        let nearest = 72;
-        this.lootTarget = null;
-        if (this.loot.length < 12) {
-          for (const chest of [...chests, ...corpses, ...groundDrops.drops]) {
-            if (this.lootedChests.has(chest) || !(chest.item || chest.slots?.some(Boolean))) continue;
-            const distance = Math.hypot(chest.x - this.x, chest.z - this.z);
-            if (distance >= nearest) continue;
-            if (!chest.homeBuilding && !world.hasLineOfSight(this.x, this.z, chest.x, chest.z)) continue;
-            nearest = distance;
-            this.lootTarget = chest;
-          }
-        }
-      }
-      const chest = this.lootTarget;
-      if (!chest) {
-        this.speed = this.baseSpeed;
-        this._updateWander(dt, world, player, robots, this.wanderTimer > 0.65 ? 1.5 : 0.85, true);
-      }
-      else {
-        this.speed = this.baseSpeed;
-        const building = chest.homeBuilding?.cells&&Number.isFinite(chest.homeBuilding.w)?chest.homeBuilding:null;
-        if (Math.hypot(chest.x - this.x, chest.z - this.z) < TILE * 1.1
-          && (building ? inside === building : world.hasLineOfSight(this.x, this.z, chest.x, chest.z))) {
-          const index = chest.slots?.findIndex(Boolean) ?? -1;
-          if (index >= 0) {
-            this.loot.push(chest.slots[index]);
-            chest.slots[index] = null;
-            chest.opened = true;
-          } else if (chest.item && groundDrops.drops.includes(chest)) {
-            this.loot.push(chest.item);
-            groundDrops.remove(chest);
-          }
-          this.lootedChests.add(chest);
-          this.lootTarget = null;
-          if (building) this.exitBuilding = building;
-        } else {
-          if (building && inside !== building) {
-            this._enterBuilding(dt, building, world, robots, buildings, time);
-          } else {
-            this.enteringBuilding = null;
-            const goal = building ? { x: chest.x, z: chest.z + TILE * 0.85 } : chest;
-            this._runToward(dt, goal, world, robots, buildings, time);
-          }
-          if (this.lootProgressTarget !== chest || this._nav?.idleTime < 0.15) {
-            this.lootProgressTarget = chest;
-            this.lootStuckTime = 0;
-          } else if ((this.lootStuckTime += dt) > 4) {
-            this.lootTarget = null;
-            this.enteringBuilding = null;
-            this.lootCooldown = 3;
-            this.lootStuckTime = 0;
-          }
-        }
-      }
+      this._patrolGuardPost(dt, world, robots, buildings, time);
     }
     const moving = didDisplace(startX, startZ, this.x, this.z, MOTION_IDLE_EPS);
     this.isMoving = moving;
     this.moveDirX = moving ? this.x - startX : 0;
     this.isSprinting = moving && dt > 0 && Math.hypot(this.x - startX, this.z - startZ) / dt > this.baseSpeed * 1.15;
     this._applyLocomotion(startX, startZ, dt, moving ? (this.isSprinting ? HUMAN_SPRINT_RATE : HUMAN_WALK_RATE) : 0);
+  }
+
+  _patrolGuardPost(dt, world, robots, buildings, time) {
+    const post = this.guardPost;
+    if (Math.hypot(post.x - this.x, post.z - this.z) > TILE * 2.5) {
+      this.guardPatrol = null;
+      this._runToward(dt, post, world, robots, buildings, time, 0.8);
+      return;
+    }
+
+    const patrol = this.guardPatrol;
+    if (patrol) {
+      if (time < patrol.until && Math.hypot(patrol.x - this.x, patrol.z - this.z) > 0.6) {
+        this._runToward(dt, patrol, world, robots, buildings, time, 0.7);
+        return;
+      }
+      this.guardPatrol = null;
+      this.guardLookTimer = 0.7 + Math.random() * 1.5;
+    }
+    this.guardLookTimer -= dt;
+    if (this.guardLookTimer > 0) return;
+    this.guardLookTimer = 0.8 + Math.random() * 1.5;
+
+    const shape = this.getMoveCollider();
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = TILE * (0.7 + Math.random() * 1.2);
+      const x = post.x + Math.sin(angle) * distance;
+      const z = post.z + Math.cos(angle) * distance;
+      if (Math.hypot(x - this.x, z - this.z) < TILE * 0.55
+        || world.checkCollisionShape(x, z, shape)
+        || !world.hasLineOfSight(this.x, this.z, x, z)) continue;
+      this.guardPatrol = { x, z, until: time + 4 };
+      return;
+    }
+    this.angle += (Math.random() - 0.5) * Math.PI;
   }
 
   _incomingShotDodge(bullets) {
@@ -1193,8 +1157,8 @@ export class Raider extends Robot {
     return { x, z: z + direction * TILE * 0.85 - this.getMoveCollider().zOff };
   }
 
-  _runToward(dt, goal, world, robots, buildings, time) {
-    this.speed = this.baseSpeed * 1.5;
+  _runToward(dt, goal, world, robots, buildings, time, speedMultiplier = 1.5) {
+    this.speed = this.baseSpeed * speedMultiplier;
     this.angle = Math.atan2(goal.x - this.x, goal.z - this.z);
     this.searchPhase = 'investigate';
     this.hasLastKnown = true;

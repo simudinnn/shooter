@@ -94,6 +94,9 @@ export function captureGameState(game) {
     .filter((r) => r.alive || r.emerging)
     .map((r) => ({
       type: r.type ?? 'spider',
+      guardPost: r.guardPost,
+      weaponKey: r.weaponKey,
+      ammo: r.ammo,
       x: r.x,
       z: r.z,
       angle: r.angle,

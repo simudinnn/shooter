@@ -43,24 +43,6 @@
         "plane": 0
       },
       {
-        "x": 27,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 28,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 28,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
         "x": 0,
         "y": 26,
         "asset": "assets/buildings/floor/road.png",
@@ -745,12 +727,6 @@
         "plane": 0
       },
       {
-        "x": 47,
-        "y": 25,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
         "x": 48,
         "y": 25,
         "asset": "assets/buildings/floor/grass.png",
@@ -1807,18 +1783,6 @@
         "plane": 0
       },
       {
-        "x": 31,
-        "y": 19,
-        "asset": "assets/buildings/floor/beton4.png",
-        "plane": 0
-      },
-      {
-        "x": 28,
-        "y": 20,
-        "asset": "assets/buildings/floor/beton4.png",
-        "plane": 0
-      },
-      {
         "x": 28,
         "y": 24,
         "asset": "assets/buildings/floor/grass.png",
@@ -1828,72 +1792,6 @@
         "x": 28,
         "y": 23,
         "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 33,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 34,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 35,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 36,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 36,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 35,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 34,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 33,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 32,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 37,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 37,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
         "plane": 0
       },
       {
@@ -2156,51 +2054,9 @@
       },
       {
         "x": 33,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 34,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 35,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 36,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 37,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 37,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 33,
         "y": 28,
         "asset": "assets/buildings/floor/grass.png",
         "plane": 1
-      },
-      {
-        "x": 39,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
       },
       {
         "x": 40,
@@ -2235,48 +2091,6 @@
       {
         "x": 45,
         "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 45,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 46,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 47,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 48,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 48,
-        "y": 29,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 49,
-        "y": 29,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 50,
-        "y": 29,
         "asset": "assets/buildings/floor/road.png",
         "plane": 0
       },
@@ -2347,54 +2161,6 @@
         "plane": 0
       },
       {
-        "x": 39,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 41,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 40,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 42,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 43,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 44,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 45,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 46,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
         "x": 46,
         "y": 27,
         "asset": "assets/buildings/floor/road.png",
@@ -2408,12 +2174,6 @@
       },
       {
         "x": 48,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 47,
         "y": 26,
         "asset": "assets/buildings/floor/road.png",
         "plane": 0
@@ -2439,18 +2199,6 @@
       {
         "x": 50,
         "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 50,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 49,
-        "y": 28,
         "asset": "assets/buildings/floor/road.png",
         "plane": 0
       },
@@ -2503,36 +2251,6 @@
         "plane": 0
       },
       {
-        "x": 41,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 42,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 43,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 43,
-        "y": 29,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 42,
-        "y": 29,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
         "x": 42,
         "y": 30,
         "asset": "assets/buildings/floor/road.png",
@@ -2541,18 +2259,6 @@
       {
         "x": 41,
         "y": 30,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 41,
-        "y": 29,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 40,
-        "y": 29,
         "asset": "assets/buildings/floor/road.png",
         "plane": 0
       },
@@ -2918,18 +2624,6 @@
       },
       {
         "x": 44,
-        "y": 29,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 44,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 44,
         "y": 30,
         "asset": "assets/buildings/floor/grass.png",
         "plane": 0
@@ -3077,90 +2771,6 @@
         "y": 29,
         "asset": "assets/buildings/floor/grass.png",
         "plane": 0
-      },
-      {
-        "x": 50,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 49,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 48,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 47,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 47,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 39,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 40,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 41,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 42,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 45,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 44,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 46,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 43,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 1
-      },
-      {
-        "x": 48,
-        "y": 26,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 1
       },
       {
         "x": 49,
@@ -3241,42 +2851,6 @@
         "plane": 0
       },
       {
-        "x": 38,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 38,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 27,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 26,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 25,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 24,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
         "x": 23,
         "y": 27,
         "asset": "assets/buildings/floor/road.png",
@@ -3416,36 +2990,6 @@
       },
       {
         "x": 0,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 29,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 30,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 31,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 30,
-        "y": 27,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 29,
         "y": 27,
         "asset": "assets/buildings/floor/road.png",
         "plane": 0
@@ -3803,90 +3347,6 @@
         "y": 28,
         "asset": "assets/buildings/floor/beton1.png",
         "plane": 1
-      },
-      {
-        "x": 35,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 36,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 39,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 40,
-        "y": 28,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 35,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 1
-      },
-      {
-        "x": 36,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 1
-      },
-      {
-        "x": 37,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 38,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 39,
-        "y": 28,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 1
-      },
-      {
-        "x": 35,
-        "y": 28,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 2
-      },
-      {
-        "x": 36,
-        "y": 28,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 2
-      },
-      {
-        "x": 37,
-        "y": 28,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 1
-      },
-      {
-        "x": 38,
-        "y": 28,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 1
-      },
-      {
-        "x": 39,
-        "y": 28,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 2
       },
       {
         "x": 39,
@@ -4459,18 +3919,6 @@
         "plane": 0
       },
       {
-        "x": 25,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 26,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
         "x": 14,
         "y": 26,
         "asset": "assets/buildings/floor/road.png",
@@ -4699,18 +4147,6 @@
         "plane": 0
       },
       {
-        "x": 32,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
-        "x": 31,
-        "y": 26,
-        "asset": "assets/buildings/floor/road.png",
-        "plane": 0
-      },
-      {
         "x": 38,
         "y": 25,
         "asset": "assets/buildings/floor/grass.png",
@@ -4751,24 +4187,6 @@
         "y": 25,
         "asset": "assets/buildings/floor/grass.png",
         "plane": 0
-      },
-      {
-        "x": 45,
-        "y": 25,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 46,
-        "y": 25,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 0
-      },
-      {
-        "x": 47,
-        "y": 25,
-        "asset": "assets/buildings/floor/grass.png",
-        "plane": 1
       },
       {
         "x": 0,
@@ -4927,12 +4345,6 @@
         "plane": 1
       },
       {
-        "x": 28,
-        "y": 25,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 1
-      },
-      {
         "x": 32,
         "y": 25,
         "asset": "assets/buildings/floor/beton1.png",
@@ -4981,12 +4393,6 @@
         "plane": 1
       },
       {
-        "x": 41,
-        "y": 25,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 1
-      },
-      {
         "x": 43,
         "y": 25,
         "asset": "assets/buildings/floor/beton1.png",
@@ -4997,24 +4403,6 @@
         "y": 25,
         "asset": "assets/buildings/floor/beton1.png",
         "plane": 1
-      },
-      {
-        "x": 45,
-        "y": 25,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 1
-      },
-      {
-        "x": 46,
-        "y": 25,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 1
-      },
-      {
-        "x": 47,
-        "y": 25,
-        "asset": "assets/buildings/floor/beton1.png",
-        "plane": 2
       },
       {
         "x": 47,
@@ -5449,46 +4837,538 @@
         "plane": 1
       },
       {
+        "x": 26,
+        "y": 28,
+        "asset": "assets/buildings/floor/path.png",
+        "plane": 0
+      },
+      {
         "x": 19,
         "y": 25,
-        "asset": "assets/buildings/floor/beton2.png",
-        "plane": 1
-      },
-      {
-        "x": 28,
-        "y": 28,
-        "asset": "assets/buildings/floor/beton2.png",
-        "plane": 1
-      },
-      {
-        "x": 42,
-        "y": 25,
-        "asset": "assets/buildings/floor/beton2.png",
-        "plane": 1
-      },
-      {
-        "x": 31,
-        "y": 25,
-        "asset": "assets/buildings/floor/beton3.png",
+        "asset": "assets/buildings/floor/beton1.png",
         "plane": 1
       },
       {
         "x": 12,
         "y": 28,
-        "asset": "assets/buildings/floor/beton3.png",
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 28,
+        "y": 25,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 31,
+        "y": 25,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 42,
+        "y": 25,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 41,
+        "y": 25,
+        "asset": "assets/buildings/floor/beton1.png",
         "plane": 1
       },
       {
         "x": 23,
         "y": 28,
-        "asset": "assets/buildings/floor/beton3.png",
+        "asset": "assets/buildings/floor/beton1.png",
         "plane": 1
       },
       {
-        "x": 26,
+        "x": 28,
         "y": 28,
-        "asset": "assets/buildings/floor/path.png",
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 28,
+        "y": 20,
+        "asset": "assets/buildings/floor/beton.png",
         "plane": 0
+      },
+      {
+        "x": 31,
+        "y": 19,
+        "asset": "assets/buildings/floor/beton.png",
+        "plane": 0
+      },
+      {
+        "x": 25,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 26,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 27,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 28,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 29,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 30,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 30,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 29,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 28,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 27,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 26,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 25,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 24,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 37,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 36,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 35,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 34,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 33,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 32,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 31,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 31,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 32,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 33,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 34,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 35,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 36,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 37,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 38,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 35,
+        "y": 28,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 36,
+        "y": 28,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 37,
+        "y": 28,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 38,
+        "y": 28,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 39,
+        "y": 28,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 35,
+        "y": 28,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 36,
+        "y": 28,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 37,
+        "y": 28,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 38,
+        "y": 28,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 39,
+        "y": 28,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 44,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 43,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 42,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 41,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 40,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 39,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 38,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 39,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 48,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 1
+      },
+      {
+        "x": 48,
+        "y": 26,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 1
+      },
+      {
+        "x": 41,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 42,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 43,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 44,
+        "y": 28,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 40,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 40,
+        "y": 29,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 41,
+        "y": 29,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 42,
+        "y": 29,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 43,
+        "y": 29,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 44,
+        "y": 29,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 45,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 46,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 47,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 48,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 49,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 50,
+        "y": 28,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 50,
+        "y": 29,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 49,
+        "y": 29,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 48,
+        "y": 29,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 49,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 1
+      },
+      {
+        "x": 50,
+        "y": 27,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 1
+      },
+      {
+        "x": 45,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 46,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 47,
+        "y": 26,
+        "asset": "assets/buildings/floor/road.png",
+        "plane": 0
+      },
+      {
+        "x": 45,
+        "y": 25,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 46,
+        "y": 25,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 47,
+        "y": 25,
+        "asset": "assets/buildings/floor/grass.png",
+        "plane": 0
+      },
+      {
+        "x": 45,
+        "y": 25,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 46,
+        "y": 25,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
+      },
+      {
+        "x": 47,
+        "y": 25,
+        "asset": "assets/buildings/floor/beton1.png",
+        "plane": 1
       }
     ],
     "props": [
@@ -8975,14 +8855,6 @@
         "plane": 0,
         "offsetX": -1,
         "offsetY": -5
-      },
-      {
-        "x": 28,
-        "y": 25,
-        "asset": "assets/buildings/masks/crack1.png",
-        "plane": 0,
-        "offsetX": -5,
-        "offsetY": 0
       },
       {
         "x": 30,

@@ -1202,8 +1202,8 @@ export class InventoryUI {
       slots[index] = { ...item, amount: keep };
       slots[emptyIdx] = { ...item, amount: splitOff };
     } else if (item.kind === 'material') {
-      slots[index] = { kind: 'material', key: item.key, amount: keep };
-      slots[emptyIdx] = { kind: 'material', key: item.key, amount: splitOff };
+      slots[index] = { ...item, amount: keep };
+      slots[emptyIdx] = { ...item, amount: splitOff };
     } else {
       return false;
     }

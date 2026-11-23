@@ -1,3 +1,4 @@
+import { resolveBlueprint } from './blueprints.js';
 import { TILE, hash01 } from './worldGen.js';
 import { rollChestLoot, rollChestVariant } from './loot.js';
 import { CELL_FLOOR, isNorthInteriorColumn } from './buildingGen.js';
@@ -61,7 +62,7 @@ export class ChestManager {
         x: pos.x,
         z: pos.z,
         variant: rollChestVariant(),
-        slots: rollChestLoot(),
+        slots: rollChestLoot().map(item => resolveBlueprint(item, this.world.shopBlueprints)),
         opened: false,
         homeCx: chunk.cx,
         homeCz: chunk.cz,
@@ -158,7 +159,7 @@ export class ChestManager {
       x: saved.x,
       z: saved.z,
       variant: saved.variant,
-      slots: saved.slots.map((s) => (s ? { ...s } : null)),
+      slots: saved.slots.map(item => item ? resolveBlueprint({ ...item }, this.world.shopBlueprints) : null),
       opened: !!saved.opened,
       homeCx: building.homeCx,
       homeCz: building.homeCz,

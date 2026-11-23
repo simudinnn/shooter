@@ -1,3 +1,4 @@
+import { resolveBlueprint } from './blueprints.js';
 import { REMOVED_MATERIAL_KEYS } from './materials.js';
 import { isAccessItem } from './doorAccess.js';
 import { storageLayout, canEquipHand } from './itemFootprint.js';
@@ -966,12 +967,12 @@ export class Player {
     return true;
   }
 
-  addMaterialToInventory(key, amount = 1, tier = undefined) {
+  addMaterialToInventory(key, amount = 1, tier = undefined, blueprintWeapon = undefined) {
     let left = Math.max(1, Math.floor(amount));
     for (let i = 0; i < this.itemSlots.length && left > 0; i++) {
       if (!this.isItemSlotUnlocked(i)) continue;
       const slot = this.itemSlots[i];
-      if (slot?.kind !== 'material' || slot.key !== key || ((key.endsWith('_pack')||key==='keycard') && (slot.tier??1)!==(tier??1))) continue;
+      if (slot?.kind !== 'material' || slot.key !== key || slot.blueprintWeapon !== blueprintWeapon || ((key.endsWith('_pack')||key==='keycard') && (slot.tier??1)!==(tier??1))) continue;
       const room = materialStackMax({key}) - (slot.amount ?? 1);
       if (room <= 0) continue;
       const add = Math.min(room, left);
@@ -982,7 +983,7 @@ export class Player {
       const idx = this.findStorageSlot();
       if (idx < 0) break;
       const add = Math.min(left, materialStackMax({key}));
-      this.itemSlots[idx] = { kind: 'material', key, amount: add, ...((key.endsWith('_pack')||key==='keycard')?{tier:tier??1}:{}) };
+      this.itemSlots[idx] = { kind: 'material', key, amount: add, ...(blueprintWeapon ? { blueprintWeapon } : {}), ...((key.endsWith('_pack')||key==='keycard')?{tier:tier??1}:{}) };
       left -= add;
     }
     return amount - left;
@@ -1045,8 +1046,8 @@ export class Player {
       return { ok: true, remainder: null };
     }
     if (item.kind === 'material') {
-      const normalized = normalizeMaterialItem(item);
-      const stored = this.addMaterialToInventory(normalized.key, normalized.amount, normalized.tier);
+      const normalized = normalizeMaterialItem(resolveBlueprint(item, this.shopBlueprints));
+      const stored = this.addMaterialToInventory(normalized.key, normalized.amount, normalized.tier, normalized.blueprintWeapon);
       if (stored >= normalized.amount) return { ok: true, remainder: null };
       if (stored > 0) {
         return {

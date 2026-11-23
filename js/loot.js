@@ -1,3 +1,4 @@
+import { isBlueprint, resolveBlueprint } from './blueprints.js';
 import { isPack, isTieredItem, packTier, rollPackTier } from './containers.js';
 import { content, contentKey, customWeapons } from './customContent.js';
 import { WEAPONS, MELEE_WEAPONS } from './player.js';
@@ -64,11 +65,6 @@ const materialLootWeight=entry=>(RARITY_WEIGHT[entry.rarity]??1)*(BASIC_MATERIAL
 const LOOT_ENTRIES = [
   { key: 'battery', rarity: 'uncommon', min: 1, max: 1 },
   { key: 'book', rarity: 'common', min: 1, max: 1 },
-  { key: 'nails', rarity: 'common', min: 1, max: 3 },
-  { key: 'plank', rarity: 'common', min: 1, max: 3 },
-  { key: 'spring', rarity: 'uncommon', min: 1, max: 3 },
-  { key: 'tape', rarity: 'common', min: 1, max: 3 },
-  { key: 'wires', rarity: 'common', min: 1, max: 3 },
   { key: 'keycard', rarity: 'rare', min: 1, max: 1 },
   { key: 'key', rarity: 'epic', min: 1, max: 1 },
   { key: 'laptop', rarity: 'epic', min: 1, max: 1 },
@@ -76,7 +72,6 @@ const LOOT_ENTRIES = [
   { key: 'barbed_wire', rarity: 'uncommon', min: 1, max: 1 },
   { key: 'gas_bottle', rarity: 'uncommon', min: 1, max: 1 },
   { key: 'generator', rarity: 'rare', min: 1, max: 1 },
-  { key: 'matches', rarity: 'common', min: 1, max: 1 },
   { key: 'radar', rarity: 'rare', min: 1, max: 1 },
   { key: 'jewlery', rarity: 'rare', min: 1, max: 1 },
   {
@@ -247,7 +242,7 @@ function buildChestLootOptions() {
     if (!entry) continue;
     options.push({
       weight: materialLootWeight(entry),
-      roll: () => ({ kind: 'material', key: entry.key, amount: rollMaterialAmount(entry), ...((entry.key.endsWith('_pack')||entry.key==='keycard')?{tier:rollPackTier()}:{}) }),
+      roll: () => resolveBlueprint({ kind: 'material', key: entry.key, amount: rollMaterialAmount(entry), ...((entry.key.endsWith('_pack')||entry.key==='keycard')?{tier:rollPackTier()}:{}) }),
     });
   }
   options.push({ weight: CHEST_GEAR_WEIGHT.ammo, roll: rollChestAmmoItem });
@@ -385,6 +380,10 @@ export function getItemDisplayName(item) {
   }
   if (item.kind === 'material') {
     const normalized = normalizeMaterialItem(item);
+    if (isBlueprint(item) && WEAPONS[item.blueprintWeapon]) {
+      const name = WEAPONS[item.blueprintWeapon].name + ' Blueprint';
+      return (item.key === 'blueprint_old' ? 'Studied ' : '') + name + (normalized.amount > 1 ? ' x' + normalized.amount : '');
+    }
     return (isTieredItem(normalized)?'Tier '+packTier(normalized)+' ':'')+getMaterialDisplayName(normalized.key, normalized.amount);
   }
   return '';
@@ -424,11 +423,11 @@ export function getItemDescription(item) {
     return getThrowableDescription(normalized.key);
   }
   if (item.kind === 'material') {
-    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',matches:'Matches. Their purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Use, then click a locked door of this tier or lower. Consumed on unlocking.',key:'Use, then click a locked wooden door. Consumed on unlocking.',laptop:'Valuable laptop. Sell to the trader.',phone:'Valuable phone. Sell to the trader.'};
+    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Use, then click a locked door of this tier or lower. Consumed on unlocking.',key:'Use, then click a locked wooden door. Consumed on unlocking.',laptop:'Valuable laptop. Sell to the trader.',phone:'Valuable phone. Sell to the trader.'};
     if(tools[item.key])return tools[item.key];
     if (isPack(item)) return 'Tier '+packTier(item)+' sealed pack. Open for random loot or sell. Rare weapons and blueprints are not guaranteed.';
     if (item.key.endsWith('_box')) return 'Sealed ammunition box. Open for ammunition.';
-    if (item.key === 'blueprint') return 'Blueprint for a permanent shop unlock.';
+    if (item.key === 'blueprint') return 'Study at base to permanently unlock this weapon in the shop.';
     if (item.key === 'blueprint_old') return 'Already studied blueprint. Valuable to traders.';
     if (item.key.endsWith('_kit')) return 'Repair kit. No additional materials required.';
     if (item.key === 'fuel') return 'Fuel for machinery. Can also be sold.';

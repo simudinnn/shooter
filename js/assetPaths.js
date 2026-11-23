@@ -25,3 +25,4 @@ export function drawFloorTile(ctx,image,asset,x,y) {
   const tile=floorTileLayout(image,asset);
   ctx.drawImage(image,tile.sx,tile.sy,tile.sw,tile.sh,x+tile.x,y+tile.y,tile.width,tile.height);
 }
+

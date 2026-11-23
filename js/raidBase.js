@@ -1,3 +1,4 @@
+import { resolveBlueprint } from './blueprints.js';
 import { bindTouchSelection } from './touchSelection.js';
 import { REMOVED_MATERIAL_KEYS } from './materials.js';
 import { moveStacks } from './batchInventory.js';
@@ -24,6 +25,10 @@ const CATALOG_CATEGORIES = [
   ['Consumables', ['consumable', 'bandage']],
   ['Supplies & valuables', ['material']],
 ];
+
+const shopUnlockId = item => item.kind + ':' + item.key;
+const shopOfferUnlocked = (profile, offer) => raidLevel(profile) >= offer.level
+  || (profile.shopBlueprints ?? []).includes(shopUnlockId(offer.item));
 
 function catalogCategory(item) {
   if(item.kind==='material'&&item.key.endsWith('_box'))return 4;
@@ -127,7 +132,7 @@ export function normalizeRaidProfile(profile) {
     }
     normalized.stashStackVersion = 1;
   }
-  const retained=item=>item?.kind==='material'&&REMOVED_MATERIAL_KEYS.includes(item.key)?null:item;
+  const retained=item=>item?.kind==='material'&&REMOVED_MATERIAL_KEYS.includes(item.key)?null:resolveBlueprint(item, normalized.shopBlueprints);
   normalized.stash=(normalized.stash??[]).map(retained);
   if(normalized.kit){normalized.kit={...normalized.kit};for(const key of ['itemSlots','handSlots'])if(normalized.kit[key])normalized.kit[key]=normalized.kit[key].map(retained);}
   return migrateCash(normalized);
@@ -148,21 +153,30 @@ const CHALLENGES = [
 ];
 const ROTATION_MS=24*60*60*1000;
 const ROTATING_CHALLENGES=[
- {title:'Quick Return',metric:'extractions',goal:1,xp:80,cash:25},
- {title:'Clear the Street',metric:'extractedKills',goal:8,xp:130,item:{kind:'ammo',ammoType:'pistol',amount:24}},
+ {title:'Quick Return',metric:'extractions',goal:1,xp:80,cash:25,item:{kind:'material',key:'key',amount:1}},
+ {title:'Clear the Street',metric:'extractedRaiderKills',goal:2,xp:130,item:{kind:'material',key:'keycard',tier:2,amount:1}},
  {title:'Supply Search',metric:'chestsSearched',goal:4,xp:100,item:{kind:'consumable',key:'bandage',amount:3}},
- {title:'Rival Watch',metric:'extractedRaiderKills',goal:1,xp:150,cash:45},
+ {title:'Rival Watch',metric:'extractedRaiderKills',goal:1,xp:150,cash:45,item:{kind:'material',key:'keycard',tier:1,amount:1}},
  {title:'Unsealed',metric:'packsOpened',goal:2,xp:100,item:{kind:'material',key:'equipment_pack',tier:1,amount:1}},
  {title:'Field Treatment',metric:'healsUsed',goal:3,xp:90,item:{kind:'consumable',key:'medkit',amount:1}},
  {title:'Blocked Passage',metric:'trapsPlaced',goal:2,xp:110,item:{kind:'material',key:'barbed_wire',amount:2}},
- {title:'Trade Route',metric:'sellCash',goal:200,xp:100,item:{kind:'material',key:'archive_pack',tier:1,amount:1}},
+ {title:'Trade Route',metric:'sellCash',goal:200,xp:100,item:{kind:'material',key:'keycard',tier:3,amount:1}},
 ];
 const METRIC_LABELS={extractions:'Extract successfully',extractedKills:'Kill zombies and extract',extractedRaiderKills:'Kill raiders and extract',chestsSearched:'Search different chests and extract',packsOpened:'Open packs',trapsPlaced:'Place barbed wire and extract',healsUsed:'Use healing items and extract',sellCash:'Earn cash by selling loot'};
 export function refreshChallengeRotation(profile,now=Date.now()){
  const date=new Date(now),period=Math.floor(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())/ROTATION_MS),old=profile.challengeRotation;
- if(old?.period===period&&old.version===3&&!old.entries.every(e=>e.claimed))return false;
+ if (old?.period === period && old.version === 3 && !old.entries.every(entry => entry.claimed)) {
+   if (old.accessRewards) return false;
+   old.entries = old.entries.map(entry => {
+     const current = ROTATING_CHALLENGES.find(challenge => challenge.title === entry.title);
+     if (!current || entry.claimed) return entry;
+     return { ...entry, ...current, baseline: current.metric === entry.metric ? entry.baseline : Number(profile[current.metric]) || 0 };
+   });
+   old.accessRewards = true;
+   return true;
+ }
  const round=old?.version===3&&old.period===period?(old.round??0)+1:0;
- profile.challengeRotation={period,round,version:3,entries:Array.from({length:3},(_,i)=>{const entry=ROTATING_CHALLENGES[(period*3+round*3+i)%ROTATING_CHALLENGES.length];return {...entry,baseline:Number(profile[entry.metric])||0,claimed:false};})};return true;
+ profile.challengeRotation={period,round,version:3,accessRewards:true,entries:Array.from({length:3},(_,i)=>{const entry=ROTATING_CHALLENGES[(period*3+round*3+i)%ROTATING_CHALLENGES.length];return {...entry,baseline:Number(profile[entry.metric])||0,claimed:false};})};return true;
 }
 export function challengeProgress(profile,raidKills=0,raidStats={}){
  const rotation=profile.challengeRotation;
@@ -187,6 +201,7 @@ function stashInventory(profile, player) {
   inventory.itemSlots = Array.from({ length: Math.max(limit, profile.stash.length) }, (_, i) =>
     profile.stash[i] ? { ...profile.stash[i] } : null);
   inventory.raidLevel = raidLevel(profile);
+  inventory.shopBlueprints = profile.shopBlueprints ?? [];
   inventory.storageCapacity = limit;
   inventory.storageColumns = 10;
   inventory.isItemSlotUnlocked = (i) => i >= 0 && i < limit;
@@ -530,6 +545,7 @@ export class RaidBase {
     const player = new Player();
     player.applySaveData(next.kit);
     player.raidLevel = raidLevel(next);
+    player.shopBlueprints = next.shopBlueprints ?? [];
     const error = change(next, player);
     if (error) {
       reportError(error);
@@ -624,6 +640,11 @@ export class RaidBase {
         icon.alt = getItemDisplayName(challenge.item);
         icon.title = icon.alt;
         rewards.append(icon);
+        if (challenge.item.key === 'keycard') {
+          const tier = document.createElement('span');
+          this.pixelLabel(tier, ['I', 'II', 'III'][packTier(challenge.item) - 1]);
+          rewards.append(tier);
+        }
         if (challenge.item.amount > 1) {
           const quantity = document.createElement('span');
           this.pixelLabel(quantity, `x${challenge.item.amount}`);
@@ -937,6 +958,7 @@ export class RaidBase {
         const description = document.createElement('p');
         description.textContent = getItemDescription(item);
         detail.append(description);
+        if (item.kind === 'material' && item.key === 'blueprint') actions.push(['Study', () => this.studyBlueprint('stash', i)]);
         if (isContainer(item)) actions.push(['Open',()=>this.openStoredContainer('stash',i)]);
         this.addRepairAction(item, actions, (next) => next.stash[i]);
         this.addRecycleAction(item, actions, (next, player, quantity) => recycleAtBase(next, player, i, quantity));
@@ -965,6 +987,27 @@ export class RaidBase {
     stashGrid.scrollTop = stashScroll;
     this._scheduleStashCellSync();
     this._syncBatchSelection();
+  }
+
+  studyBlueprint(source, index) {
+    let unlocked;
+    const studied = this.transact((next, player) => {
+      const slots = source === 'stash' ? next.stash : player.itemSlots;
+      const item = slots[index];
+      if (item?.kind !== 'material' || item.key !== 'blueprint') return 'Blueprint is unavailable.';
+      const blueprint = resolveBlueprint(item, next.shopBlueprints);
+      if (blueprint.key === 'blueprint_old') return 'This blueprint is already studied.';
+      unlocked = SHOP.find(offer => offer.item.kind === 'weapon' && offer.item.key === blueprint.blueprintWeapon)?.item;
+      if (!unlocked) return 'This weapon is unavailable in the shop.';
+      slots[index] = item.amount > 1 ? { ...item, amount: item.amount - 1 } : null;
+      if (!storeInStash(next, player, [{ ...blueprint, key: 'blueprint_old', amount: 1 }])) {
+        return 'Make room in your stash for the studied blueprint.';
+      }
+      next.shopBlueprints = [...(next.shopBlueprints ?? []), shopUnlockId(unlocked)];
+      next.stash = next.stash.map(entry => resolveBlueprint(entry, next.shopBlueprints));
+      player.itemSlots = player.itemSlots.map(entry => resolveBlueprint(entry, next.shopBlueprints));
+    });
+    if (studied) this.setStatus(getItemDisplayName(unlocked) + ' unlocked in the shop.');
   }
 
   openStoredContainer(source,index) {
@@ -997,6 +1040,7 @@ export class RaidBase {
     this.addRepairAction(item, actions,
       (_, player) => key === 'handSlots' ? player.getHandSlotItem(index) : player[key][index],
       key === 'handSlots' ? (player, repaired) => player.restoreHandSlot(index, repaired) : null);
+    if (key === 'itemSlots' && item.kind === 'material' && item.key === 'blueprint') actions.push(['Study', () => this.studyBlueprint('kit', index)]);
     if(key==='itemSlots'&&isContainer(item))actions.push(['Open',()=>this.openStoredContainer('kit',index)]);
     if (key === 'itemSlots') {
       this.addSplitAction(item, actions, (next, amount, player) => {
@@ -1273,20 +1317,20 @@ export class RaidBase {
     const grid = this.root.querySelector('#raid-shop');
     grid.replaceChildren();
     const entries = SHOP.map((offer, index) => ({ offer, index }));
-    const level=raidLevel(this.profile);
-    entries.sort((a,b)=>catalogCategory(a.offer.item)-catalogCategory(b.offer.item)||Number(level<a.offer.level)-Number(level<b.offer.level)||a.offer.price-b.offer.price);
+    entries.sort((a,b)=>catalogCategory(a.offer.item)-catalogCategory(b.offer.item)||Number(!shopOfferUnlocked(this.profile,a.offer))-Number(!shopOfferUnlocked(this.profile,b.offer))||a.offer.price-b.offer.price);
     let previousCategory = null;
     for (const { offer, index } of entries) {
       const category = catalogCategory(offer.item);
       if (category !== previousCategory) this.appendCatalogHeading(grid, category);
       previousCategory = category;
-      const unlocked = raidLevel(this.profile) >= offer.level;
+      const unlocked = shopOfferUnlocked(this.profile, offer);
       const price = `${offer.price} Cash`;
       const select = (anchor, keepPosition = false) => {
         this.catalogSelection = index;
         this.inspect(offer.item, [['BUY',
         () => {
           if (!this.transact((next, player) => {
+            if (!shopOfferUnlocked(next, offer)) return 'This item is locked.';
             if (next.cash < offer.price) return 'Not enough cash.';
             if (!storeInStash(next, player, [offer.item])) return 'Stash is full.';
             next.cash -= offer.price;

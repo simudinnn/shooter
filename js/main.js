@@ -1,3 +1,4 @@
+import { resolveBlueprint } from './blueprints.js';
 import { doorAccessError, isAccessItem } from './doorAccess.js';
 import { loadStructures, generateStructureMap } from './structures.js';
 import { PLACEABLE_TOOLS, nearestPackChest, segmentDistance } from './tools.js';
@@ -10,7 +11,7 @@ import { World, TILE } from './world.js';
 import { AuthoredRaidWorld, MAP_FOG_TILES, parseRaidMap, isRoofAsset, isMapOverlay, isEdgeGrass } from './authoredRaidMap.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
-import { Robot, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
+import { Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
 import { Player, BulletPool, WEAPONS, MELEE_WEAPONS, GUN_HOLD_OFFSET, HUMAN_WALK_RATE, HUMAN_SPRINT_RATE, findBulletSpawn } from './player.js';
 import {
@@ -1420,6 +1421,7 @@ class Game {
       raidMap.generatedFromStructures=true;
     }
     this.world = raidMap ? new AuthoredRaidWorld(raidMap, { bakeShadows: BAKED_SHADOWS }) : new World();
+    this.world.shopBlueprints = this.raidProfile?.shopBlueprints ?? [];
     this.world.setSpriteBank(this.sprites);
     await this.world.build();
     await this._paintLoadingProgress(0.56, 'Preparing spawn area…');
@@ -1453,7 +1455,7 @@ class Game {
         this.chests.restoreInBuilding({ ...chest, slots: rollChestLoot(chest.variant) }, {}, {...chest,authored:true});
       }
       for (const { x, y, item } of raidMap.layers.loot) {
-        this.groundDrops.dropAt((x + 0.5) * TILE, (y + 0.5) * TILE, item, null, { preserve: true, exact: true });
+        this.groundDrops.dropAt((x + 0.5) * TILE, (y + 0.5) * TILE, resolveBlueprint(item, this.world.shopBlueprints), null, { preserve: true, exact: true });
       }
     }
 
@@ -1475,6 +1477,7 @@ class Game {
       this.player.x = spawn.x;
       this.player.z = spawn.z;
     }
+    this.player.shopBlueprints = this.world.shopBlueprints;
     this.player.raidLevel = this.raidProfile ? raidLevel(this.raidProfile) : 1;
     this.world.prewarmGround(this.player.x, this.player.z, 4);
     this.player.canSeeEnemyOnScreen = (robot) => {
@@ -1551,8 +1554,13 @@ class Game {
     this.buildings.restoreAllFromSave(data.buildings, this.world);
 
     for (const s of data.robots ?? []) {
-      const type = s.type === 'scout' ? 'spider' : s.type ?? 'spider';
-      const robot = new Robot(s.x, s.z, s.wave ?? 1, type);
+      if (s.type !== 'raider') continue;
+      const robot = new Raider(s.x, s.z, null);
+      if (s.guardPost) robot.guardPost = s.guardPost;
+      if (s.weaponKey && (WEAPONS[s.weaponKey] || MELEE_WEAPONS[s.weaponKey])) {
+        robot.weaponKey = s.weaponKey;
+        robot.ammo = s.ammo ?? WEAPONS[s.weaponKey]?.magSize ?? 0;
+      }
       robot.health = s.health;
       robot.maxHealth = s.maxHealth;
       robot.angle = s.angle ?? robot.angle;
@@ -2004,7 +2012,17 @@ class Game {
     this._raidersSpawned=true;
     const anchors=this.chests.chests.length?[...this.chests.chests]:[{x:this.player.x+36,z:this.player.z,spawnOnly:true}];
     for(let i=anchors.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[anchors[i],anchors[j]]=[anchors[j],anchors[i]];}
-    const limit=3+Math.floor(Math.random()*3);
+    const limit = 8 + Math.floor(Math.random() * 5);
+    const bounds = this.world.bounds;
+    for (let i = anchors.length; i < limit * 2; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 40 + Math.random() * 90;
+      const x = this.player.x + Math.sin(angle) * distance;
+      const z = this.player.z + Math.cos(angle) * distance;
+      if (!bounds || (x > bounds.minX && x < bounds.maxX && z > bounds.minZ && z < bounds.maxZ)) {
+        anchors.push({ x, z, spawnOnly: true });
+      }
+    }
     let spawned=0;
     for(const chest of anchors){
       if(spawned>=limit)break;
@@ -3206,9 +3224,7 @@ class Game {
     };
     const roofDraws = [];
     const edgeGrassDraws = [];
-    const grassBehindPlayer = [];
-    const playerScreen = this._entityToScreen(playerX, playerZ);
-    const playerHalf = CHAR_NATIVE_PX * SPRITE_PLAYER / 2 + 4;
+
     const roofTime = performance.now();
     const room = this.world.indoorRoomAt?.(playerX, entityFeetZ(this.player));
     const roofOnly = this.world.roofOnlyAt?.(playerX, entityFeetZ(this.player));
@@ -3297,11 +3313,7 @@ class Game {
         const x = p.x - Math.ceil(prop.image.width / 2) * nativeScale;
         const y = top;
         const draw = () => ctx.drawImage(prop.image, snap(x), snap(y), snap(x + width) - snap(x), snap(y + height) - snap(y));
-        if (isEdgeGrass(prop.asset)) {
-          const overlapsPlayer = x < playerScreen.x + playerHalf && x + width > playerScreen.x - playerHalf
-            && y < playerScreen.y + playerHalf && y + height > playerScreen.y - playerHalf;
-          (overlapsPlayer ? grassBehindPlayer : edgeGrassDraws).push(draw);
-        }
+        if (isEdgeGrass(prop.asset)) edgeGrassDraws.push({ image: prop.image, x: snap(x), y: snap(y), width: snap(x + width) - snap(x), height: snap(y + height) - snap(y) });
         else drawList.push({ z: prop.z + TILE / 2, sortBias: SORT_WALL_FRONT + 0.05 + prop.plane * 0.01, draw });
         continue;
       }
@@ -3632,7 +3644,6 @@ class Game {
     ctx.restore();
     const playerShade = bakedShade(playerX, playerZ + this.player.getMoveCollider(PPU).zOff);
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, bakedShade: playerShade, draw: () => {
-      for (const drawGrass of grassBehindPlayer) drawGrass();
       const s = this._entityToScreen(this.player.x, this.player.z);
       this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim, true);
     }});
@@ -3811,7 +3822,21 @@ class Game {
       for (const drawRoof of roofDraws) drawRoof();
       ctx.restore();
     }
-    for (const drawGrass of edgeGrassDraws) drawGrass();
+    if (edgeGrassDraws.length) {
+      const layer = this._edgeGrassLayer ??= document.createElement('canvas');
+      if (layer.width !== ctx.canvas.width) layer.width = ctx.canvas.width;
+      if (layer.height !== ctx.canvas.height) layer.height = ctx.canvas.height;
+      const grass = layer.getContext('2d');
+      grass.setTransform(this.renderScale, 0, 0, this.renderScale, 0, 0);
+      grass.clearRect(0, 0, INTERNAL_W, INTERNAL_H);
+      grass.imageSmoothingEnabled = false;
+      for (const { image, x, y, width, height } of edgeGrassDraws) grass.drawImage(image, x, y, width, height);
+      grass.globalCompositeOperation = 'destination-out';
+      const player = this._entityToScreen(playerX, playerZ);
+      this.sprites.draw(grass, playerSheet, player.x, player.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim, true);
+      grass.globalCompositeOperation = 'source-over';
+      ctx.drawImage(layer, 0, 0, INTERNAL_W, INTERNAL_H);
+    }
     if (roomPath) {
       const outside = new Path2D();
       outside.rect(0, 0, INTERNAL_W, INTERNAL_H);

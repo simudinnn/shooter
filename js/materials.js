@@ -1,17 +1,12 @@
 import { customItems } from './customContent.js';
-export const BASIC_MATERIAL_KEYS = ['battery','nails','plank','spring','tape','wires'];
-export const REMOVED_MATERIAL_KEYS = ["plastic","metal_scrap","fabric","cloth","glass_bottle","adhesive","chemicals","metal_sheet","rope"];
+export const BASIC_MATERIAL_KEYS = ['battery'];
+export const REMOVED_MATERIAL_KEYS = ["plastic","metal_scrap","fabric","cloth","glass_bottle","adhesive","chemicals","metal_sheet","rope","nails","plank","spring","tape","wires","matches"];
 export const MATERIAL_STACK_MAX = 50;
 export const materialStackMax = item => item?.key === 'cash' ? Number.MAX_SAFE_INTEGER : item?.key?.endsWith('_pack') ? 5 : MATERIAL_STACK_MAX;
 
 export const MATERIAL_KEYS = [
   "battery",
   "book",
-  "nails",
-  "plank",
-  "spring",
-  "tape",
-  "wires",
   "keycard",
   "key",
   "laptop",
@@ -19,7 +14,6 @@ export const MATERIAL_KEYS = [
   "barbed_wire",
   "gas_bottle",
   "generator",
-  "matches",
   "radar",
   "blueprint",
   "blueprint_old",
@@ -43,7 +37,7 @@ export const MATERIAL_KEYS = [
 ];
 
 const DISPLAY_NAMES = {
-  keycard:'Keycard',key:'Key',laptop:'Laptop',phone:'Phone',barbed_wire:'Barbed Wire',gas_bottle:'Gas Bottle',generator:'Generator',matches:'Matches',radar:'Pack Radar',
+  keycard:'Keycard',key:'Key',laptop:'Laptop',phone:'Phone',barbed_wire:'Barbed Wire',gas_bottle:'Gas Bottle',generator:'Generator',radar:'Pack Radar',
   equipment_pack: 'Equipment Pack',
   military_pack: 'Military Pack',
   archive_pack: 'Archive Pack',
@@ -76,24 +70,19 @@ const DISPLAY_NAMES = {
   metal_sheet: 'Metal Sheet',
   microchip: 'Microchip',
   military_comp: 'Military Component',
-  nails: 'Nails',
-  plank: 'Plank',
   plastic: 'Plastic',
   repair_kit: 'Repair Kit',
   rope: 'Rope',
   rubber: 'Rubber',
   sewing_kit: 'Sewing Kit',
   splint_kit: 'Splint Kit',
-  spring: 'Spring',
   stick: 'Stick',
-  tape: 'Tape',
   upgrade_kit: 'Upgrade Kit',
-  wires: 'Wires',
   wood: 'Wood',
 };
 
 export function materialSpritePath(key) {
-  if (['barbed_wire','gas_bottle','generator','matches','radar'].includes(key)) return 'assets/items/tools/'+key+'.png';
+  if (['barbed_wire','gas_bottle','generator','radar'].includes(key)) return 'assets/items/tools/'+key+'.png';
   if (key === 'cash') return 'assets/items/misc/cash.png';
   if (key.endsWith('_box')) return 'assets/items/weapons/' + key + '.png';
   return customItems[key]?.icon ?? `assets/items/materials/${key}.png`;
@@ -116,7 +105,7 @@ export function normalizeMaterialItem(item) {
 }
 
 export function materialItemsMatch(a, b) {
-  return a?.kind === 'material' && b?.kind === 'material' && a.key === b.key && (!(a.key.endsWith('_pack')||a.key==='keycard') || (a.tier??1)===(b.tier??1));
+  return a?.kind === 'material' && b?.kind === 'material' && a.key === b.key && a.blueprintWeapon === b.blueprintWeapon && (!(a.key.endsWith('_pack')||a.key==='keycard') || (a.tier??1)===(b.tier??1));
 }
 
 export function mergeMaterialStacks(a, b) {
@@ -129,8 +118,8 @@ export function mergeMaterialStacks(a, b) {
     return { ...left, amount: total };
   }
   return {
-    merged: { kind: 'material', key: left.key, amount: limit },
-    overflow: { kind: 'material', key: left.key, amount: total - limit },
+    merged: { ...left, amount: limit },
+    overflow: { ...left, amount: total - limit },
   };
 }
 

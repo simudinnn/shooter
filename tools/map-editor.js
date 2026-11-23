@@ -66,6 +66,35 @@ function scheduleDraw() {
   });
 }
 
+const previewShadowLayer = document.createElement('canvas');
+
+function drawEditorShadows(props) {
+  if (!byId('show-shadows').checked) return;
+  if (previewShadowLayer.width !== canvas.width) previewShadowLayer.width = canvas.width;
+  if (previewShadowLayer.height !== canvas.height) previewShadowLayer.height = canvas.height;
+  const shadow = previewShadowLayer.getContext('2d');
+  shadow.imageSmoothingEnabled = false;
+  shadow.clearRect(0, 0, canvas.width, canvas.height);
+  for (const entry of props) {
+    if (entry.asset === PLAYER_SPAWN_ASSET || !mapPropYSort(entry)) continue;
+    const image = imageFor(entry.asset);
+    if (!image.naturalWidth) continue;
+    const layout = mapPropLayout(entry.asset);
+    const w = layout?.width ?? image.naturalWidth;
+    const h = layout?.height ?? image.naturalHeight;
+    const x = entry.x * TILE + (entry.offsetX ?? 0) + (layout?.x ?? Math.floor((TILE - w) / 2));
+    const base = entry.y * TILE + (entry.offsetY ?? 0) + (layout ? layout.y + h : TILE);
+    shadow.setTransform(1, 0, -0.55, -0.48, x + h * 0.55, base + h * 0.48);
+    shadow.drawImage(image, 0, 0, w, h);
+  }
+  shadow.resetTransform();
+  shadow.globalCompositeOperation = 'source-in';
+  shadow.fillStyle = 'rgba(0, 0, 0, 0.28)';
+  shadow.fillRect(0, 0, canvas.width, canvas.height);
+  shadow.globalCompositeOperation = 'source-over';
+  ctx.drawImage(previewShadowLayer, 0, 0);
+}
+
 function draw() {
   ctx.fillStyle = '#252b22';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -89,7 +118,9 @@ function draw() {
     || (mapPropYSort(a) ? (a.y * TILE + (a.offsetY ?? 0)) - (b.y * TILE + (b.offsetY ?? 0)) : 0)
     || a.plane - b.plane);
   const hitBox = (entry, x, y, width, height) => propHits.push({ entry, x, y, width, height });
-  for (const [layer, entries] of [['tiles', tiles], ['props', props.filter(entry => !isEdgeGrass(entry.asset))], ['loot', map.layers.loot.values()], ['roofs', byId('show-roofs').checked ? map.layers.roofs.values() : []], ['props', props.filter(entry => isEdgeGrass(entry.asset))]]) {
+  const edgeGrass = props.filter(entry => isEdgeGrass(entry.asset));
+  for (const [layer, entries] of [['tiles', tiles], ['props', props.filter(entry => !isEdgeGrass(entry.asset))], ['loot', map.layers.loot.values()], ['roofs', byId('show-roofs').checked ? map.layers.roofs.values() : []], ['props', edgeGrass]]) {
+    if (layer === 'props' && entries !== edgeGrass) drawEditorShadows(props);
     for (const entry of entries) {
       const x = entry.x * TILE + (layer === 'roofs' ? 0 : entry.offsetX ?? 0);
       const y = entry.y * TILE + (layer === 'roofs' ? 0 : entry.offsetY ?? 0);
@@ -728,6 +759,7 @@ async function init() {
       status.textContent = 'Mapa se nije učitala. ' + error.message;
     }
   });
+  byId('show-shadows').addEventListener('change', scheduleDraw);
   byId('show-roofs').addEventListener('change', scheduleDraw);
   byId('save').addEventListener('click', async () => {
     const data = { ...map, layers: Object.fromEntries(layers.map((layer) =>
