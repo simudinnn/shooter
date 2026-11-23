@@ -34,8 +34,22 @@ for (const [kind, keys] of [
   }
 }
 
+export const isRoofAsset = (asset) => /\/buildings\/roof\//i.test(asset);
+
+export const ROOF_ONLY_MARKER = 'marker:roof-only';
+export const isMapOverlay = asset => /\/buildings\/(?:masks\/|foliage\/edge_grass)/i.test(asset);
+export const isEdgeGrass = asset => /\/edge_grass[^/]*\.png$/i.test(asset);
+
+export function mapLayerEntries(layers, layer) {
+  if (layer === 'roofs') {
+    return [...(layers.props ?? []).filter(entry => entry && isRoofAsset(entry.asset)), ...(layers.roofs ?? [])];
+  }
+  if (layer === 'props') return layers.props.filter(entry => !entry || !isRoofAsset(entry.asset));
+  return layers[layer] ?? [];
+}
+
 export function mapPropYSort(entry) {
-  return !/fol+iage.*(?:pebble|grass(?![^/]*tall))|\/doors\/mat_/i.test(entry.asset);
+  return !isRoofAsset(entry.asset) && !isMapOverlay(entry.asset) && !/fol+iage.*(?:pebble|grass(?![^/]*tall))|\/doors\/mat_/i.test(entry.asset);
 }
 
 export function isRaidLootAsset(asset) { return lootByAsset.has(asset); }
@@ -63,11 +77,13 @@ export function mapPropLayout(asset, eastEdge = false) {
   const door = doorMatch(path);
   if (door) {
     const width = door[2].toLowerCase() === 'open' ? OPEN_DOOR_ART_W : 16;
-    return { x: 16 - width, y: 0, width, height: 16 };
+    return { x: 16 - width, y: -4, width, height: 20 };
   }
   if (brush === 'east' || brush === 'west' || /\/wall_ew\.png$/i.test(path)) {
-    return { x: (brush ? brush === 'east' : eastEdge) ? 12 : 0, y: 0, width: 4, height: 16 };
+    return { x: (brush ? brush === 'east' : eastEdge) ? 12 : 0, y: -4, width: 4, height: 20 };
   }
+  if (isRoofAsset(path)) return { x: 0, y: 0, width: 16, height: 16 };
+  if (/\/buildings\/(walls|windows)\//i.test(path)) return { x: 0, y: -4, width: 16, height: 20 };
   if (path === hatchAsset) return { x: -8, y: -8, width: 32, height: 32 };
   if (/fol+iage.*tree/i.test(path)) return { x: -24, y: -48, width: 64, height: 64 };
   return null;
@@ -75,20 +91,21 @@ export function mapPropLayout(asset, eastEdge = false) {
 
 export function mapCornerLayout(asset) {
   const brush = asset.split('#')[1];
-  return brush?.startsWith('corner-') ? { x: brush === 'corner-east' ? 12 : 0, y: 0, width: 4, height: 16, asset: sideWall } : null;
+  return brush?.startsWith('corner-') ? { x: brush === 'corner-east' ? 12 : 0, y: 0, width: 4, height: 20, asset: sideWall } : null;
 }
 
 export function isMapLayerAsset(layer, asset) {
   asset=canonicalAsset(asset);
-  if(layer==='indoor')return ['marker:indoor','marker:indoor-passive','marker:indoor-detection'].includes(asset);
+  if(layer==='indoor')return ['marker:indoor','marker:indoor-passive','marker:indoor-detection',ROOF_ONLY_MARKER].includes(asset);
   if (asset === PLAYER_SPAWN_ASSET) return layer === 'props';
   if (typeof asset !== 'string') return false;
   const [path, brush, extra] = asset.split('#');
   if (extra !== undefined || !/^assets\/(?:[\w -]+\/)+[\w .-]+\.png$/i.test(path)) return false;
   if (brush && (layer !== 'props' || !mapBrushes(path).includes(asset) && !(/^corner-(east|west)$/.test(brush) && /\/walls\//i.test(path)))) return false;
   if (layer === 'tiles') return /^assets\/(world\/floor|buildings\/floor\/)/i.test(path);
+  if (layer === 'roofs') return isRoofAsset(path);
   if (layer === 'loot') return /^assets\/items\//i.test(path);
-  return /^assets\/(?:world\/(?:fol+iage|hatch_closed\.png$)|buildings\/(?:walls|windows|doors|misc|chests|fences|fol+iage)\/)/i.test(path);
+  return /^assets\/(?:world\/(?:fol+iage|hatch_closed\.png$)|buildings\/(?:walls|windows|doors|misc|chests|fences|masks|fol+iage)\/)/i.test(path);
 }
 
 export function parseRaidMap(data) {
@@ -100,12 +117,12 @@ export function parseRaidMap(data) {
   if (!isMapLayerAsset('tiles', defaultGround)) throw new Error('Invalid default ground.');
   const warnings = new Set();
   const layers = {};
-  for (const layer of ['tiles', 'props', 'loot', 'indoor']) {
-    const entries = data.layers?.[layer] ?? (layer==='indoor'?[]:undefined);
+  for (const layer of ['tiles', 'props', 'loot', 'indoor', 'roofs']) {
+    const entries = data.layers?.[layer] ?? (['indoor','roofs'].includes(layer)?[]:undefined);
     if (!Array.isArray(entries) || entries.length > data.width * data.height * MAP_PLANES) throw new Error('Invalid map layer: ' + layer);
     const cells = new Set();
     layers[layer] = [];
-    for (const entry of entries) {
+    for (const entry of mapLayerEntries(data.layers, layer)) {
       if (entry == null) continue;
       const { x, y, quantity, plane = 0, offsetX = 0, offsetY = 0, collision, ySort } = entry;
       const asset=canonicalAsset(entry.asset);
@@ -115,14 +132,14 @@ export function parseRaidMap(data) {
       const cell = plane * data.width * data.height + y * data.width + x;
       if (cells.has(cell)) throw new Error('Duplicate cell in ' + layer);
       cells.add(cell);
-      if (layer === 'props') {
+      if (layer === 'props' || layer === 'roofs') {
         const validOffset = (value) => Number.isInteger(value) && value >= -8 && value <= 7;
         if (!validOffset(offsetX) || !validOffset(offsetY)
           || [collision, ySort].some((value) => value !== undefined && typeof value !== 'boolean')) {
           throw new Error('Invalid prop settings: ' + asset);
         }
-        layers.props.push({ x, y, asset, plane, offsetX, offsetY, collision, ySort });
-      } else if (layer === 'indoor') layers.indoor.push({x,y,asset:'marker:indoor',plane:0});
+        layers[layer].push({ x, y, asset, plane, offsetX, offsetY, collision, ySort });
+      } else if (layer === 'indoor') layers.indoor.push({x,y,asset,plane:0});
       else if (layer === 'tiles') layers.tiles.push({ x, y, asset, plane });
       else if (!isRaidLootAsset(asset)) warnings.add('unsupported loot ' + asset.split('/').at(-1));
       else {
@@ -152,7 +169,27 @@ export class AuthoredRaidWorld extends World {
     super();
     this.raidMap = map;
     const indoorEntries=map.layers.indoor instanceof Map?[...map.layers.indoor.values()]:(map.layers.indoor??[]);
-    this.indoorCells=new Set(indoorEntries.map(e=>e.y*map.width+e.x));
+    const cellIndex = ({ x, y }) => y * map.width + x;
+    this.indoorCells = new Set(indoorEntries.filter(e => e.asset !== 'marker:indoor-passive' && e.asset !== ROOF_ONLY_MARKER).map(cellIndex));
+    this.indoorShadeCells = new Set(indoorEntries.filter(e => e.asset !== 'marker:indoor-detection' && e.asset !== ROOF_ONLY_MARKER).map(cellIndex));
+    this.roofOnlyCells = new Set(indoorEntries.filter(e => e.asset === ROOF_ONLY_MARKER).map(cellIndex));
+    this.indoorRooms = new Map();
+    for (const start of this.indoorCells) {
+      if (this.indoorRooms.has(start)) continue;
+      const queue = [start];
+      this.indoorRooms.set(start, start);
+      for (const cell of queue) {
+        const column = cell % map.width;
+        const neighbors = [cell - map.width, cell + map.width];
+        if (column > 0) neighbors.push(cell - 1);
+        if (column + 1 < map.width) neighbors.push(cell + 1);
+        for (const next of neighbors) {
+          if (!this.indoorCells.has(next) || this.indoorRooms.has(next)) continue;
+          this.indoorRooms.set(next, start);
+          queue.push(next);
+        }
+      }
+    }
     this.bakeShadows = bakeShadows;
     this.bounds = { minX: 0, minZ: 0, maxX: map.width * TILE, maxZ: map.height * TILE };
     this.mapProps = [];
@@ -171,10 +208,11 @@ export class AuthoredRaidWorld extends World {
   }
 
   async build() {
-    const { tiles, props } = this.raidMap.layers;
+    const { tiles, props, roofs = [] } = this.raidMap.layers;
+    const objects = [...props, ...roofs];
     const dirt = this.raidMap.defaultGround;
     const assets = new Set([dirt, ...tiles.map(({ asset }) => asset)]);
-    for (const { asset } of props) {
+    for (const { asset } of objects) {
       if (asset === hatchAsset || asset === PLAYER_SPAWN_ASSET) continue;
       const path = mapAssetPath(asset);
       assets.add(path);
@@ -220,7 +258,7 @@ export class AuthoredRaidWorld extends World {
         }
       }
     }
-    for (const entry of [...props].sort((a, b) => a.plane - b.plane)) {
+    for (const entry of objects.sort((a, b) => a.plane - b.plane)) {
       const { x, y, asset } = entry;
       this.addMapProp(entry, images, mapWallEastEdge(asset, floors.get((x - 1) + ',' + y), floors.get((x + 1) + ',' + y)));
     }
@@ -381,6 +419,34 @@ export class AuthoredRaidWorld extends World {
       && chunk.shadowPixels[py * chunk.canvas.width + px] > 0;
   }
 
+  indoorRoomAt(x, z) {
+    if (!this.isIndoorAt(x, z)) return undefined;
+    return this.indoorRooms.get(Math.floor(z / TILE) * this.raidMap.width + Math.floor(x / TILE));
+  }
+
+  roofOnlyAt(x, z) {
+    const tx = Math.floor(x / TILE), ty = Math.floor(z / TILE);
+    if (tx < 0 || tx >= this.raidMap.width || ty < 0 || ty >= this.raidMap.height) return undefined;
+    const cell = ty * this.raidMap.width + tx;
+    if (this.roofOnlyCells.has(cell)) return 'roof:' + cell;
+  }
+
+  roofRoomAt(x, z) {
+    const room = this.indoorRoomAt(x, z);
+    if (room !== undefined) return room;
+    for (const [dx, dz] of [[0, 1], [0, -1], [-1, 0], [1, 0], [-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+      const adjacent = this.indoorRoomAt(x + dx * TILE, z + dz * TILE);
+      if (adjacent !== undefined) return adjacent;
+    }
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== 2) continue;
+        const adjacent = this.indoorRoomAt(x + dx * TILE, z + dz * TILE);
+        if (adjacent !== undefined) return adjacent;
+      }
+    }
+  }
+
   isIndoorAt(x,z) {
     const tx=Math.floor(x/TILE),ty=Math.floor(z/TILE);
     return tx>=0&&ty>=0&&tx<this.raidMap.width&&ty<this.raidMap.height&&this.indoorCells.has(ty*this.raidMap.width+tx);
@@ -391,6 +457,14 @@ export class AuthoredRaidWorld extends World {
     if(doorAccessError(door,actor))return false;
     const mat = { minX: door.x - TILE / 2, maxX: door.x + TILE / 2,
       minZ: door.z + TILE / 4, maxZ: door.z + TILE / 2 };
+    if (door.doorOpen && door.collision && door.obstacle) {
+      const { x, z, halfW, halfH } = door.obstacle;
+      const margin = TILE / 16;
+      mat.minX = Math.min(mat.minX, x - halfW - margin);
+      mat.maxX = Math.max(mat.maxX, x + halfW + margin);
+      mat.minZ = Math.min(mat.minZ, z - halfH - margin);
+      mat.maxZ = Math.max(mat.maxZ, z + halfH + margin);
+    }
     if (occupants.some((entity) => moveColliderOverlapsRect(entity, mat))) return false;
     if (door.collision) {
       if (door.doorOpen) this.addDynamicObstacle(door.obstacle);
@@ -448,6 +522,19 @@ export class AuthoredRaidWorld extends World {
     let bucket = this.mapPropChunks.get(key);
     if (!bucket) this.mapPropChunks.set(key, bucket = []);
     bucket.push(prop);
+    if (isRoofAsset(asset)) {
+      prop.roofCell = { x: entry.x, y: entry.y };
+      prop.roofOnly = [];
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const marker = this.roofOnlyAt((entry.x + dx + 0.5) * TILE, (entry.y + dy + 0.5) * TILE);
+          if (marker !== undefined) prop.roofOnly.push(marker);
+        }
+      }
+      prop.room = this.roofRoomAt((entry.x + 0.5) * TILE, (entry.y + 0.5) * TILE);
+      return;
+    }
+    if (isMapOverlay(asset)) return;
     if (tree && collision) {
       prop._obstacle = { kind: 'circle', x: position.x, z: position.z + TILE * 0.2, radius: 1 };
       this.addDynamicObstacle(prop._obstacle);
@@ -462,9 +549,9 @@ export class AuthoredRaidWorld extends World {
     const obstacle = {
       kind: 'aabb',
       x: position.x + (vertical ? (layout.x + 2 - 8) * TILE / 16 : 0),
-      z: position.z + (horizontal ? TILE * 0.375 : wall ? 0 : TILE / 2 - image.height * pixel / 4),
+      z: position.z + (horizontal ? (fence ? TILE * 0.4375 : TILE * 0.25) : vertical ? -TILE / 8 : wall ? 0 : TILE / 2 - image.height * pixel / 4),
       halfW: vertical ? TILE / 8 : wall ? TILE / 2 : image.width * pixel / 2,
-      halfH: horizontal ? TILE / 8 : wall ? TILE / 2 : image.height * pixel / 4,
+      halfH: horizontal ? (fence ? TILE / 16 : TILE / 4) : vertical ? TILE * 5 / 8 : wall ? TILE / 2 : image.height * pixel / 4,
       blocksBullets: !window&&!fence, blocksVision: !window&&!fence,
     };
     if (vertical && collision) this.mapSideWalls.push(obstacle);
@@ -479,7 +566,7 @@ export class AuthoredRaidWorld extends World {
     if (corner) {
       prop.corner = { ...corner, image: images.get(corner.asset) ?? image };
       const edge = { ...obstacle, x: position.x + (corner.x + 2 - 8) * TILE / 16,
-        z: position.z, halfW: TILE / 8, halfH: TILE / 2 };
+        z: position.z - TILE / 8, halfW: TILE / 8, halfH: TILE * 5 / 8 };
       if (collision) {
         this.addDynamicObstacle(edge);
         this.mapWallObstacles.push(edge);

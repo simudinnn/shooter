@@ -1363,7 +1363,8 @@ export class SpriteBank {
 
   getBakedShadeBitmap(ctx, image) {
     if (!ctx.bakedSpriteShade) return image;
-    const cache = this._bakedShadeBitmaps ??= new WeakMap();
+    const roomShade = ctx.bakedSpriteShade === 'room';
+    const cache = roomShade ? (this._roomShadeBitmaps ??= new WeakMap()) : (this._bakedShadeBitmaps ??= new WeakMap());
     let shaded = cache.get(image);
     if (!shaded) {
       shaded = document.createElement('canvas');
@@ -1372,7 +1373,7 @@ export class SpriteBank {
       const g = shaded.getContext('2d');
       g.drawImage(image, 0, 0);
       g.globalCompositeOperation = 'source-atop';
-      g.fillStyle = 'rgba(0, 0, 0, 0.23)';
+      g.fillStyle = roomShade ? 'rgba(0, 0, 0, 0.36)' : 'rgba(0, 0, 0, 0.23)';
       g.fillRect(0, 0, shaded.width, shaded.height);
       cache.set(image, shaded);
     }

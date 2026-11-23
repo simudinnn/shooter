@@ -17,7 +17,7 @@ export async function scanMapAssets(root) {
   await Promise.all([
     scan('assets/world', (path) => /\/floor/i.test(path) ? 'tiles' : /fol+iage|foli+age|hatch_closed/i.test(path) ? 'props' : null),
     scan('assets/buildings', (path) => /\/floor\//i.test(path) ? 'tiles'
-      : /\/(walls|windows|doors|misc|chests|fences|foliage|folliage)\//i.test(path) ? 'props' : null),
+      : /\/(walls|windows|doors|misc|chests|fences|roof|masks|foliage|folliage)\//i.test(path) ? 'props' : null),
     scan('assets/items', () => 'loot'),
   ]);
   for (const assets of Object.values(catalog)) assets.sort();

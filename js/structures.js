@@ -2,9 +2,9 @@ import { canonicalAsset, canonicalGround, BASE_GRASS_ASSET } from './assetPaths.
 const GRASS=BASE_GRASS_ASSET;
 export function validateStructure(data){
  if(data?.version!==1||data.tileSize!==16||!Number.isInteger(data.width)||!Number.isInteger(data.height)||data.width<1||data.height<1||data.width>64||data.height>64)throw Error('Structures must be version 1, 16px tiles and at most 64×64 tiles.');
- data={...data,defaultGround:data.defaultGround?canonicalGround(data.defaultGround):undefined,layers:{...data.layers,indoor:data.layers?.indoor??[]}};
+ data={...data,defaultGround:data.defaultGround?canonicalGround(data.defaultGround):undefined,layers:{...data.layers,indoor:data.layers?.indoor??[],roofs:data.layers?.roofs??[]}};
  for(const key of Object.keys(data.layers))if(Array.isArray(data.layers[key]))data.layers[key]=data.layers[key].map(e=>e?{...e,asset:canonicalAsset(e.asset)}:e);
- for(const layer of ['tiles','props','loot','indoor']){
+ for(const layer of ['tiles','props','loot','indoor','roofs']){
   if(!Array.isArray(data.layers?.[layer])||data.layers[layer].length>data.width*data.height*3)throw Error('Invalid structure layer.');
   const cells=new Set();
   for(const entry of data.layers[layer]){
@@ -27,7 +27,7 @@ export async function loadStructures(fetcher=fetch){
 export function generateStructureMap(structures,{seed=1,width=125,height=125,count=14}={}){
  structures=structures.map(validateStructure);if(!structures.length)throw Error('No structures available.');
  let state=Number(seed)>>>0;const random=()=>((state=(Math.imul(state,1664525)+1013904223)>>>0)/4294967296);
- const map={version:1,tileSize:16,width,height,defaultGround:GRASS,layers:{tiles:[],props:[],loot:[],indoor:[]}},tiles=new Map(),placed=[];
+ const map={version:1,tileSize:16,width,height,defaultGround:GRASS,layers:{tiles:[],props:[],loot:[],indoor:[],roofs:[]}},tiles=new Map(),placed=[];
  const mx=Math.floor(width/2),my=Math.floor(height/2),margin=9;
  const tile=(x,y,asset)=>{if(x>=0&&y>=0&&x<width&&y<height)tiles.set(x+','+y,{x,y,asset,plane:0});};
  const reserved=[{x:margin+2,y:my},{x:width-margin-3,y:my},{x:mx,y:margin+2}];
@@ -39,7 +39,7 @@ export function generateStructureMap(structures,{seed=1,width=125,height=125,cou
   if(reserved.some(p=>p.x>=x-3&&p.x<x+w+3&&p.y>=y-3&&p.y<y+h+3))continue;
   if(placed.some(p=>x<p.x+p.w+4&&x+w+4>p.x&&y<p.y+p.h+4&&y+h+4>p.y))continue;
   placed.push({x,y,w,h,name:structure.name??'Structure'});
-  for(const layer of ['tiles','props','loot','indoor'])for(const entry of structure.layers[layer]){
+  for(const layer of ['tiles','props','loot','indoor','roofs'])for(const entry of structure.layers[layer]){
    if(entry.asset==='marker:player-spawn'||entry.asset==='assets/buildings/misc/hatch_closed.png')continue;
    const value={...entry,x:x+entry.x,y:y+entry.y};
    if(layer==='tiles'&&!(entry.plane??0))tile(value.x,value.y,value.asset);else map.layers[layer].push(value);

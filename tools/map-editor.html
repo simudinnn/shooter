@@ -20,7 +20,7 @@
 </header>
 <main>
   <aside>
-    <label>Sloj <select id="layer"><option value="tiles">Tileovi</option><option value="props">Rekviziti</option><option value="loot">Loot</option><option value="indoor">Indoor oznake</option></select></label>
+    <label>Sloj <select id="layer"><option value="tiles">Tileovi</option><option value="props">Rekviziti</option><option value="roofs">Krovovi</option><option value="loot">Loot</option><option value="indoor">Indoor oznake</option></select></label>
     <div><button id="undo" type="button" disabled>Undo</button> <button id="redo" type="button" disabled>Redo</button></div>
     <label>Širina brusha <input id="brush-size" type="number" min="1" max="15" value="1"></label>
     <label><input id="random-brush" type="checkbox"> Nasumične varijante</label>
@@ -35,6 +35,7 @@
     <div class="toolbar">
       <label>Zoom <select id="zoom"><option value="0.5">50%</option><option value="1" selected>100%</option><option value="2">200%</option><option value="3">300%</option></select></label>
       <label><input id="grid" type="checkbox" checked> Mreža</label>
+      <label><input id="show-roofs" type="checkbox" checked> Krovovi</label>
       <label><input id="fog" type="checkbox" checked> Rub magle</label>
       <span id="position"></span>
       <span id="status" role="status"></span>
@@ -43,5 +44,5 @@
     <p class="hint">Povuci postojeći rekvizit za premještanje. Shift poravnava na mrežu, Alt + povlačenje označava sve elemente u pravokutniku. Povuci oznaku za zajedničko premještanje. Indoor sloj služi samo za zvukove: oboji unutarnje tileove, gumicom ih vrati u outdoor. Zaključana vrata odaberi u paleti (locked ili tier). U F3 prikazu desni klik na koliziju briše koliziju rekvizita.</p>
   </section>
 </main>
-<script type="module" src="map-editor.js?v=564"></script>
+<script type="module" src="map-editor.js?v=576"></script>
 </html>

@@ -7,7 +7,7 @@ import { RaidBase, raidLevel, challengeProgress, newRaidProfile, deployProfile, 
 import { collectWallOccluders, collectPropOccluders, computeWallVisibility, makeWallLightPath, pointInWallLight, rasterizeWallShadow, resolveWallLightOrigin } from './wallShadows.js';
 import { drawPixelText, setElementPixelText, setElementWrappedPixelText, preloadPixelTextAtlas, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { World, TILE } from './world.js';
-import { AuthoredRaidWorld, MAP_FOG_TILES, parseRaidMap } from './authoredRaidMap.js';
+import { AuthoredRaidWorld, MAP_FOG_TILES, parseRaidMap, isRoofAsset, isMapOverlay, isEdgeGrass } from './authoredRaidMap.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
 import { Robot, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
@@ -27,7 +27,6 @@ import {
   BuildingManager,
   drawBuildingFloors,
   drawBuildingWall,
-  drawWallImage,
   drawBuildingDoor,
   drawBuildingDecor,
   drawDecorPiece,
@@ -3205,8 +3204,74 @@ class Game {
       const feetY = point.y + spriteFeetOffset(nativeSize, spriteScale);
       characterShadows.push({ x: point.x, feetY, rx, ry });
     };
+    const roofDraws = [];
+    const edgeGrassDraws = [];
+    const grassBehindPlayer = [];
+    const playerScreen = this._entityToScreen(playerX, playerZ);
+    const playerHalf = CHAR_NATIVE_PX * SPRITE_PLAYER / 2 + 4;
+    const roofTime = performance.now();
+    const room = this.world.indoorRoomAt?.(playerX, entityFeetZ(this.player));
+    const roofOnly = this.world.roofOnlyAt?.(playerX, entityFeetZ(this.player));
+    if (this._roofFade?.world !== this.world) {
+      this._roofFade = { world: this.world, hidden: new Map(), time: roofTime, shade: 0 };
+      if (room !== undefined) this._roofFade.hidden.set(room, 1);
+      if (roofOnly !== undefined) this._roofFade.hidden.set(roofOnly, 1);
+    }
+    const roof = this._roofFade;
+    const roofStep = Math.min(50, roofTime - roof.time) / 260;
+    if (room !== undefined && !roof.hidden.has(room)) roof.hidden.set(room, 0);
+    if (roofOnly !== undefined && !roof.hidden.has(roofOnly)) roof.hidden.set(roofOnly, 0);
+    for (const [id, amount] of roof.hidden) {
+      const active = id === room || id === roofOnly;
+      const next = active ? Math.min(1, amount + roofStep) : Math.max(0, amount - roofStep);
+      if (next === 0 && !active) roof.hidden.delete(id);
+      else roof.hidden.set(id, next);
+    }
+    roof.shade = room === undefined ? Math.max(0, roof.shade - roofStep) : Math.min(1, roof.shade + roofStep);
+    roof.time = roofTime;
+    const snap = value => Math.round(value * this.renderScale) / this.renderScale;
+    const gridPoint = (x, z) => {
+      const p = worldToScreen(x, z);
+      return { x: snap(p.x), y: snap(p.y) };
+    };
+    if (room !== undefined) roof.protectedRoom = room;
+    const protectedRoom = roof.protectedRoom;
+    const shadeRoomAt = (x, z) => {
+      const cell = z * this.world.raidMap.width + x;
+      if (!this.world.indoorShadeCells.has(cell)) return undefined;
+      return this.world.roofRoomAt((x + 0.5) * TILE, (z + 0.5) * TILE);
+    };
+    const roomPath = roof.shade > 0 ? new Path2D() : null;
+    if (roomPath) {
+      const minX = Math.max(0, Math.floor(viewMinX / TILE));
+      const maxX = Math.min(this.world.raidMap.width, Math.ceil(viewMaxX / TILE));
+      const minZ = Math.max(0, Math.floor(viewMinZ / TILE));
+      const maxZ = Math.min(this.world.raidMap.height, Math.ceil(viewMaxZ / TILE));
+      const indoor = (x, z) => shadeRoomAt(x, z) === protectedRoom;
+      for (let z = minZ; z < maxZ; z++) {
+        for (let x = minX; x < maxX;) {
+          if (!indoor(x, z)) { x++; continue; }
+          const start = x++;
+          while (x < maxX && indoor(x, z)) x++;
+          const a = gridPoint(start * TILE, z * TILE);
+          const b = gridPoint(x * TILE, (z + 1) * TILE);
+          roomPath.rect(a.x, a.y, b.x - a.x, b.y - a.y);
+        }
+      }
+    }
+    const visibleProps = [...(this.world.mapPropsInView?.(view, TILE * 4) ?? [])];
+    const shadeSpriteAcrossRoom = (x, bottomZ, draw) => {
+      if (!roomPath || shadeRoomAt(Math.floor(x / TILE), Math.floor(bottomZ / TILE)) === protectedRoom) return;
+      ctx.save();
+      ctx.clip(roomPath);
+      ctx.globalAlpha *= roof.shade;
+      ctx.bakedSpriteShade = 'room';
+      draw();
+      ctx.bakedSpriteShade = false;
+      ctx.restore();
+    };
     const brightParticles = [];
-    for (const prop of this.world.mapPropsInView?.(view, TILE * 4) ?? []) {
+    for (const prop of visibleProps) {
       if (!inView(prop.x, prop.z, TILE * (prop.tree ? 4 : 2))) continue;
       const p = worldToScreen(prop.x, prop.z);
       const nativeScale = tilePx / 16;
@@ -3215,10 +3280,36 @@ class Game {
       const height = prop.layout ? prop.layout.height * nativeScale : prop.image.height * scale;
       const left = prop.layout ? p.x - tilePx / 2 + prop.layout.x * nativeScale : p.x - width / 2;
       const top = prop.layout ? p.y - tilePx / 2 + prop.layout.y * nativeScale : p.y + tilePx / 2 - height;
+      if (isRoofAsset(prop.asset)) {
+        const opacity = 1 - Math.max(roof.hidden.get(prop.room) ?? 0, ...prop.roofOnly.map(marker => roof.hidden.get(marker) ?? 0));
+        if (opacity > 0) {
+          const { x, y } = prop.roofCell;
+          const a = gridPoint(x * TILE, y * TILE);
+          const b = gridPoint((x + 1) * TILE, (y + 1) * TILE);
+          roofDraws.push(() => {
+            ctx.globalAlpha = opacity;
+            ctx.drawImage(prop.image, a.x, a.y, b.x - a.x, b.y - a.y);
+          });
+        }
+        continue;
+      }
+      if (isMapOverlay(prop.asset)) {
+        const x = p.x - Math.ceil(prop.image.width / 2) * nativeScale;
+        const y = top;
+        const draw = () => ctx.drawImage(prop.image, snap(x), snap(y), snap(x + width) - snap(x), snap(y + height) - snap(y));
+        if (isEdgeGrass(prop.asset)) {
+          const overlapsPlayer = x < playerScreen.x + playerHalf && x + width > playerScreen.x - playerHalf
+            && y < playerScreen.y + playerHalf && y + height > playerScreen.y - playerHalf;
+          (overlapsPlayer ? grassBehindPlayer : edgeGrassDraws).push(draw);
+        }
+        else drawList.push({ z: prop.z + TILE / 2, sortBias: SORT_WALL_FRONT + 0.05 + prop.plane * 0.01, draw });
+        continue;
+      }
       const z = prop.ySort === false ? -Infinity : prop.z + TILE / 2;
+      const doorMat = /\/doors\/mat_/i.test(prop.asset);
       drawList.push({
         z,
-        sortBias: SORT_WALL_FRONT + prop.plane * 0.01,
+        sortBias: (doorMat ? SORT_ENTITY - 1 : SORT_WALL_FRONT) + prop.plane * 0.01,
         receivesShadow: !prop.wall,
         shadowSource: prop,
         bakedShade: !prop.wall && bakedShade(prop.x, prop.z + TILE / 2),
@@ -3227,12 +3318,32 @@ class Game {
         shadowBounds: { minX: left, minY: top, maxX: left + width, maxY: top + height },
         draw: () => {
           const image = this.sprites.getBakedShadeBitmap(ctx, prop.image);
-          if (prop.wall) drawWallImage(ctx, image, left, top, width, height);
-          else ctx.drawImage(image, left, top, width, height);
+          if (prop.wall) {
+            const x = snap(left), y = snap(top);
+            ctx.drawImage(image, x, y, snap(left + width) - x, snap(top + height) - y);
+          } else {
+            const playerFeet = prop.tree ? worldToScreen(playerX, entityFeetZ(this.player)) : null;
+            const behindTree = playerFeet && entityFeetZ(this.player) < prop.z + TILE * 0.2
+              && playerFeet.x >= left && playerFeet.x <= left + width
+              && playerFeet.y >= top && playerFeet.y <= top + height;
+            if (behindTree) {
+              ctx.save();
+              ctx.globalAlpha *= 0.38;
+            }
+            ctx.drawImage(image, left, top, width, height);
+            if (prop.ySort) {
+              const bottomZ = prop.z + (top + height - p.y) / PPU;
+              shadeSpriteAcrossRoom(prop.x, bottomZ, () => {
+                ctx.drawImage(this.sprites.getBakedShadeBitmap(ctx, prop.image), left, top, width, height);
+              });
+            }
+            if (behindTree) ctx.restore();
+          }
           if (prop.corner) {
             const edge = prop.corner;
-            ctx.drawImage(edge.image, left + edge.x * nativeScale, top,
-              edge.width * nativeScale, edge.height * nativeScale);
+            const x = left + edge.x * nativeScale;
+            ctx.drawImage(edge.image, snap(x), snap(top),
+              snap(x + edge.width * nativeScale) - snap(x), snap(top + edge.height * nativeScale) - snap(top));
           }
         },
       });
@@ -3340,7 +3451,7 @@ class Game {
         shadowSplit: chestScreen.y + ((chest.spriteHeight ?? 0) / 2 - CHEST_DRAW_PIVOT.ny) * SPRITE_CHEST,
         shadowBounds: shadowBounds(chest.x, chest.z, tilePx * 2), draw: () => {
         const s = this._chestScreenPos(chest);
-        this.sprites.draw(
+        const drawChest = () => this.sprites.draw(
           ctx,
           chestSpriteName(chest.variant),
           s.x,
@@ -3350,6 +3461,11 @@ class Game {
           false,
           CHEST_DRAW_PIVOT,
         );
+        drawChest();
+        if (chest.ySort !== false) {
+          const bottomZ = chest.z + ((chest.spriteHeight ?? 16) - CHEST_DRAW_PIVOT.ny) * SPRITE_CHEST / PPU;
+          shadeSpriteAcrossRoom(chest.x, bottomZ, drawChest);
+        }
       }});
     }
     for(const tool of this.placedTools??[]){
@@ -3516,6 +3632,7 @@ class Game {
     ctx.restore();
     const playerShade = bakedShade(playerX, playerZ + this.player.getMoveCollider(PPU).zOff);
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, bakedShade: playerShade, draw: () => {
+      for (const drawGrass of grassBehindPlayer) drawGrass();
       const s = this._entityToScreen(this.player.x, this.player.z);
       this.sprites.draw(ctx, playerSheet, s.x, s.y + playerBounce, SPRITE_PLAYER, 0, playerFlip, 'center', 0, playerAnim, true);
     }});
@@ -3689,6 +3806,21 @@ class Game {
       }
     }
 
+    if (roofDraws.length) {
+      ctx.save();
+      for (const drawRoof of roofDraws) drawRoof();
+      ctx.restore();
+    }
+    for (const drawGrass of edgeGrassDraws) drawGrass();
+    if (roomPath) {
+      const outside = new Path2D();
+      outside.rect(0, 0, INTERNAL_W, INTERNAL_H);
+      outside.addPath(roomPath);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, ' + roof.shade * 0.36 + ')';
+      ctx.fill(outside, 'evenodd');
+      ctx.restore();
+    }
     this._drawPlayerCooldown(ctx, performance.now() / 1000);
 
     applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);

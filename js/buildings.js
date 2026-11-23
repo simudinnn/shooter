@@ -156,8 +156,9 @@ function drawBuildingTile(sprites, ctx, name, x, y, tilePx) {
   if (!img) return false;
   const px = tilePx;
   ctx.imageSmoothingEnabled = false;
-  if (/^bld_(wall|window)_/.test(name)) drawWallImage(ctx, img, x, y, px, px);
-  else ctx.drawImage(img, x, y, px, px);
+  const height = /^bld_(wall|window|door)_/.test(name) ? px * img.height / 16 : px;
+  if (/^bld_(wall|window)_/.test(name)) drawWallImage(ctx, img, x, y + px - height, px, height);
+  else ctx.drawImage(img, x, y + px - height, px, height);
   return true;
 }
 
@@ -166,9 +167,9 @@ function drawOpenDoorSprite(sprites, ctx, name, tileX, tileY, tilePx) {
   const img = sprites?.images?.[name];
   if (!img) return false;
   const drawW = Math.round(tilePx * (OPEN_DOOR_ART_W / BUILDING_ART_PX));
-  const drawH = Math.round(tilePx);
+  const drawH = tilePx * img.height / 16;
   const x = tileX + tilePx - drawW;
-  const y = tileY;
+  const y = tileY + tilePx - drawH;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, x, y, drawW, drawH);
   return true;
@@ -461,7 +462,7 @@ export function drawBuildingWall(ctx, wall, building, worldToScreen, tilePx, spr
         const drawY = tileY + tilePx - drawH;
         for (let i = 0; i < segments; i++) {
           const segY = drawY + (segments - 1 - i) * segH;
-          drawSnappedWallSprite(sprites, ctx, sprite, drawX, segY, ewDrawW, segH);
+          drawSnappedWallSprite(sprites, ctx, sprite, drawX, segY - tilePx / 4, ewDrawW, segH + tilePx / 4);
         }
       } else {
         drawBuildingTile(sprites, ctx, sprite, tileX, tileY, tilePx);

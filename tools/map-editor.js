@@ -3,11 +3,11 @@ import { canonicalAsset, canonicalGround, BASE_GRASS_ASSET, floorTileLayout, dra
 import { validateStructure } from '../js/structures.js';
 import { ChestManager } from '../js/chests.js';
 import { TILE as WORLD_TILE } from '../js/world.js';
-import { AuthoredRaidWorld, MAP_FOG_TILES, MAP_PLANES, PLAYER_SPAWN_ASSET, isRaidLootAsset, isMapLayerAsset, mapAssetPath, mapBrushes, mapCornerLayout, mapPropLayout, mapPropYSort, mapWallEastEdge } from '../js/authoredRaidMap.js';
+import { AuthoredRaidWorld, MAP_FOG_TILES, MAP_PLANES, PLAYER_SPAWN_ASSET, isRaidLootAsset, isMapLayerAsset, mapAssetPath, isRoofAsset, isEdgeGrass, ROOF_ONLY_MARKER, mapLayerEntries, mapBrushes, mapCornerLayout, mapPropLayout, mapPropYSort, mapWallEastEdge } from '../js/authoredRaidMap.js';
 
 const TILE = 16;
 const MAX_SIZE = 256;
-const layers = ['tiles', 'props', 'loot', 'indoor'];
+const layers = ['tiles', 'props', 'loot', 'indoor', 'roofs'];
 const byId = (id) => document.getElementById(id);
 const canvas = byId('map');
 const ctx = canvas.getContext('2d', { alpha: false });
@@ -85,14 +85,14 @@ function draw() {
   propHits.length = 0;
   collisionHits.length = 0;
   const props = [...map.layers.props.values()].map((entry) => entry === drag?.before && drag.preview ? drag.preview : entry);
-  props.sort((a, b) => Number(mapPropYSort(a)) - Number(mapPropYSort(b))
+  props.sort((a, b) => Number(isRoofAsset(a.asset)) - Number(isRoofAsset(b.asset)) || Number(mapPropYSort(a)) - Number(mapPropYSort(b))
     || (mapPropYSort(a) ? (a.y * TILE + (a.offsetY ?? 0)) - (b.y * TILE + (b.offsetY ?? 0)) : 0)
     || a.plane - b.plane);
   const hitBox = (entry, x, y, width, height) => propHits.push({ entry, x, y, width, height });
-  for (const [layer, entries] of [['tiles', tiles], ['props', props], ['loot', map.layers.loot.values()]]) {
+  for (const [layer, entries] of [['tiles', tiles], ['props', props.filter(entry => !isEdgeGrass(entry.asset))], ['loot', map.layers.loot.values()], ['roofs', byId('show-roofs').checked ? map.layers.roofs.values() : []], ['props', props.filter(entry => isEdgeGrass(entry.asset))]]) {
     for (const entry of entries) {
-      const x = entry.x * TILE + (entry.offsetX ?? 0);
-      const y = entry.y * TILE + (entry.offsetY ?? 0);
+      const x = entry.x * TILE + (layer === 'roofs' ? 0 : entry.offsetX ?? 0);
+      const y = entry.y * TILE + (layer === 'roofs' ? 0 : entry.offsetY ?? 0);
       if (entry.asset === PLAYER_SPAWN_ASSET) continue;
       const image = imageFor(entry.asset);
       if (image.naturalWidth) {
@@ -102,10 +102,15 @@ function draw() {
             ?? map.layers.tiles.get(map.width * map.height + entry.y * map.width + column)
             ?? map.layers.tiles.get(entry.y * map.width + column))?.asset : null;
         const eastEdge = layer === 'props' && mapWallEastEdge(entry.asset, floorAt(entry.x - 1), floorAt(entry.x + 1));
-        const layout = layer === 'props' ? mapPropLayout(entry.asset, eastEdge) : null;
+        const layout = layer === 'props' || layer === 'roofs' ? mapPropLayout(entry.asset, eastEdge) : null;
         if (layout) {
           ctx.drawImage(image, x + layout.x, y + layout.y, layout.width, layout.height);
-          hitBox(entry, x + layout.x, y + layout.y, layout.width, layout.height);
+          if (layer === 'props') hitBox(entry, x + layout.x, y + layout.y, layout.width, layout.height);
+          const corner = mapCornerLayout(entry.asset);
+          if (corner) {
+            const edge = imageFor(corner.asset);
+            if (edge.naturalWidth) ctx.drawImage(edge, x + corner.x, y + corner.y, corner.width, corner.height);
+          }
           continue;
         }
         const scale = layer === 'props' && !/\/(walls|windows|doors|chests|fences)\//i.test(entry.asset)
@@ -158,7 +163,7 @@ function draw() {
     hitBox(entry, x + 2, y + 2, 12, 12);
   }
   if(byId('layer').value==='indoor'){
-    for(const entry of map.layers.indoor.values()){ctx.fillStyle='#58b9e955';ctx.fillRect(entry.x*TILE,entry.y*TILE,TILE,TILE);}
+    for(const entry of map.layers.indoor.values()){ctx.fillStyle=entry.asset===ROOF_ONLY_MARKER?'#e86d9366':entry.asset==='marker:indoor-passive'?'#ad78ef66':entry.asset==='marker:indoor-detection'?'#e8b34d66':'#58b9e955';ctx.fillRect(entry.x*TILE,entry.y*TILE,TILE,TILE);}
   }
   if (showCollision) drawCollisions(props);
   const box = marquee ? rectBetween(marquee.start, marquee.end) : selection?.box;
@@ -212,6 +217,7 @@ function drawCollisions(props) {
 }
 
 function spriteName(asset) {
+  if(asset===ROOF_ONLY_MARKER)return 'Samo krovovi (2 tilea)';
   if(asset==='marker:indoor-detection')return 'Indoor samo detekcija';
   if(asset==='marker:indoor')return 'Indoor';
   if(asset==='marker:indoor-passive')return 'Indoor bez promjene zone';
@@ -242,8 +248,9 @@ function renderPalette() {
     button.setAttribute('aria-label', name);
     button.setAttribute('aria-pressed', String(!erasing && selected === asset));
     const image = document.createElement('img');
-    if(asset==='marker:indoor-detection')button.textContent='Samo detekcija';
-    else if(asset==='marker:indoor-passive')button.textContent='Indoor bez detekcije';
+    if(asset===ROOF_ONLY_MARKER)button.textContent='Samo krovovi (2 tilea)';
+    else if(asset==='marker:indoor-detection')button.textContent='Samo detekcija';
+    else if(asset==='marker:indoor-passive')button.textContent='Maska bez detekcije';
     else if(asset==='marker:indoor')button.textContent='Indoor';
     else if (asset === PLAYER_SPAWN_ASSET) button.textContent = 'Spawn';
     else {
@@ -444,8 +451,8 @@ function readMap(data) {
   imported.defaultGround = data.type==='structure'&&!data.defaultGround?undefined:canonicalGround(data.defaultGround);
   imported.type=data.type;imported.name=data.name;imported.weight=data.weight;
   for (const layer of layers) {
-    if (layer!=='indoor'&&!Array.isArray(data.layers?.[layer])) throw new Error('Nedostaje sloj ' + layer + '.');
-    for (const entry of data.layers[layer]??[]) {
+    if (!['indoor','roofs'].includes(layer)&&!Array.isArray(data.layers?.[layer])) throw new Error('Nedostaje sloj ' + layer + '.');
+    for (const entry of mapLayerEntries(data.layers, layer)) {
       if (entry == null) continue;
       const { x, y, quantity, plane = 0, offsetX = 0, offsetY = 0, collision, ySort } = entry;
       const asset=canonicalAsset(entry.asset);
@@ -456,8 +463,8 @@ function readMap(data) {
         throw new Error('Neispravan unos u sloju ' + layer + '.');
       }
       imported.layers[layer].set(plane * data.width * data.height + y * data.width + x,
-        layer === 'loot' ? { x, y, asset, quantity } : layer === 'props'
-          ? { x, y, asset, plane, offsetX, offsetY, collision, ySort } : { x, y, asset:layer==='indoor'?'marker:indoor':asset, plane });
+        layer === 'loot' ? { x, y, asset, quantity } : layer === 'props' || layer === 'roofs'
+          ? { x, y, asset, plane, offsetX, offsetY, collision, ySort } : { x, y, asset, plane });
     }
   }
   for (const [key, entry] of imported.layers.tiles) {
@@ -485,7 +492,9 @@ function setMap(next) {
 async function init() {
   const loadedCatalog=await loadMapCatalog();
   catalog=loadedCatalog.catalog;
-  catalog.indoor=['marker:indoor'];brushes.set('indoor','marker:indoor');
+  catalog.roofs = catalog.props.filter(isRoofAsset);
+  catalog.props = catalog.props.filter(asset => !isRoofAsset(asset));
+  catalog.indoor=['marker:indoor','marker:indoor-detection','marker:indoor-passive',ROOF_ONLY_MARKER];brushes.set('indoor','marker:indoor');
 
   byId('layer').addEventListener('change', () => {
     byId('search').value = '';
@@ -719,6 +728,7 @@ async function init() {
       status.textContent = 'Mapa se nije učitala. ' + error.message;
     }
   });
+  byId('show-roofs').addEventListener('change', scheduleDraw);
   byId('save').addEventListener('click', async () => {
     const data = { ...map, layers: Object.fromEntries(layers.map((layer) =>
       [layer, Array.from(map.layers[layer].values()).filter((entry) =>
@@ -738,7 +748,24 @@ async function init() {
       }catch(error){status.textContent=error.message;}
       return;
     }
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    const json = JSON.stringify(data, null, 2);
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const file = await window.showSaveFilePicker({
+          suggestedName: 'raid-map.json',
+          types: [{ description: 'JSON mapa', accept: { 'application/json': ['.json'] } }],
+        });
+        const output = await file.createWritable();
+        await output.write(json);
+        await output.close();
+        dirty = false;
+        status.textContent = 'Spremljeno ' + file.name;
+      } catch (error) {
+        if (error.name !== 'AbortError') status.textContent = 'Spremanje nije uspjelo. ' + error.message;
+      }
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url;
     link.download = 'raid-map.json';
