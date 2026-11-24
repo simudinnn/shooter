@@ -81,9 +81,9 @@ export function containerLoot(item) {
 }
 export function openContainer(player,index){
  const item=player.itemSlots[index];if(!isContainer(item))return false;
- const previous=structuredClone(player.itemSlots),loot=containerLoot(item);
+ const previous=structuredClone(player.itemSlots),loot=containerLoot(item).map(reward => resolveBlueprint(reward, player.shopBlueprints));
  player.itemSlots[index]=(item.amount??1)>1?{...item,amount:item.amount-1}:null;
- for(const reward of loot){const result=player.tryStoreItem(resolveBlueprint(reward, player.shopBlueprints));if(!result.ok||result.remainder){player.itemSlots=previous;return false;}}
+ for(const reward of loot){const result=player.tryStoreItem(reward);if(!result.ok||result.remainder){player.itemSlots=previous;return false;}}
  if(isPack(item)&&player.raidStats)player.raidStats.packsOpened=(player.raidStats.packsOpened??0)+1;
- return true;
+ return loot;
 }

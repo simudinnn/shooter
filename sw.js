@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v613';
+const CACHE = 'robot-ruins-v620';
 
 function buildingKitSprites() {
   return [
@@ -211,6 +211,7 @@ const SHELL = [
 const ASSETS = [
   './js/assetPaths.js',
   './js/blueprints.js',
+  './js/packRewards.js',
   './assets/items/weapons/ak47.png',
   './assets/items/weapons/machete.png',
   './assets/items/weapons/sig.png',

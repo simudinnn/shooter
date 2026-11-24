@@ -273,7 +273,11 @@ class Game {
         const label = `${challenge.title} / ${challenge.progress}/${challenge.goal}`;
         row.setAttribute('aria-label', label);
         this._setPixelText(row, label, PIXEL_TEXT_SCALE_SM);
-        challenges.appendChild(row);
+        const description = document.createElement('p');
+        description.className = 'raid-pause-objective';
+        description.setAttribute('aria-label', challenge.description);
+        setElementWrappedPixelText(description, challenge.description, 270, PIXEL_TEXT_SCALE_SM);
+        challenges.append(row, description);
       }
     }
     this.el.pauseMenu?.classList.remove('hidden');

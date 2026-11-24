@@ -1,3 +1,4 @@
+import { showPackRewards } from './packRewards.js';
 import { blueprintOnlyWeapon, resolveBlueprint, DISPLAY_ONLY_GUNS, BLUEPRINT_SUPPLIES, blueprintUnlockId } from './blueprints.js';
 import { bindTouchSelection } from './touchSelection.js';
 import { REMOVED_MATERIAL_KEYS } from './materials.js';
@@ -60,10 +61,10 @@ export function raidLevel(profile) {
 const BASE_TIER_LABELS = ['', 'I', 'II', 'III'];
 const BASE_UPGRADES = {
   stash: [
-    { slots: 32 }, { slots: 40, level: 5, cash: 450 }, { slots: 48, level: 10, cash: 900 },
+    { slots: 32 }, { slots: 40, level: 5, cash: 650 }, { slots: 48, level: 10, cash: 1300 },
   ],
   shop: [
-    {}, { level: 6, cash: 600 }, { level: 12, cash: 1400 },
+    {}, { level: 6, cash: 850 }, { level: 12, cash: 1900 },
   ],
 };
 
@@ -444,7 +445,7 @@ export class RaidBase {
     this.stashPanel = root.querySelector('[data-base-panel="stash"]');
     this.workspace = this.stashPanel.parentElement;
     this._stashCellObserver = new ResizeObserver(() => this._scheduleStashCellSync());
-    this._stashCellObserver.observe(root.querySelector('#raid-kit'));
+    this._stashCellObserver.observe(root.querySelector('.raid-loadout-layout'));
     this._stashCellObserver.observe(root.querySelector('#raid-stash'));
     const repositionSelection = (event) => {
       if (event?.target === this.selection) return;
@@ -455,6 +456,7 @@ export class RaidBase {
     root.addEventListener('scroll', repositionSelection, { capture: true, passive: true });
     window.addEventListener('resize', repositionSelection, { passive: true });
     window.visualViewport?.addEventListener('resize', repositionSelection, { passive: true });
+    window.visualViewport?.addEventListener('scroll', repositionSelection, { passive: true });
     this.deployDialog = root.querySelector('#raid-deploy-dialog');
     this.station = 'deploy';
     this.catalogSelection = null;
@@ -462,10 +464,6 @@ export class RaidBase {
     this.music = new Audio('sounds/ui/menu_song.ogg');
     this.music.loop = true;
     this.music.preload = 'auto';
-    this.music.addEventListener('ended', () => {
-      this.music.currentTime = 0;
-      this.startMusic();
-    });
     this.music.volume = 0.28;
     const settings = root.querySelector('#raid-settings');
     const musicEnabled = root.querySelector('#raid-music-enabled');
@@ -591,11 +589,12 @@ export class RaidBase {
     this.closeSelection();
     this.root.classList.add('hidden');
     this.music.pause();
-    if (this.music.readyState > 0) this.music.currentTime = 0;
+
   }
 
   startMusic(fromInteraction = false) {
-    if (fromInteraction && !this.musicGain) {
+    if (this.music.muted || this.root.classList.contains('hidden')) return;
+    if (fromInteraction && !this.musicGain && !matchMedia('(pointer: coarse)').matches && !(navigator.maxTouchPoints > 0)) {
       const Context = window.AudioContext || window.webkitAudioContext;
       if (Context) {
         const context = this.audioContext ??= new Context();
@@ -610,8 +609,8 @@ export class RaidBase {
     if (this.audioContext && this.audioContext.state !== 'running') {
       this.audioContext.resume().catch(() => {});
     }
-    if (!this.music.muted && !this.root.classList.contains('hidden') && this.music.paused) {
-      this.music.play().catch(() => {});
+    if (this.music.paused && !this.musicPlayPending) {
+      this.musicPlayPending = this.music.play().catch(() => {}).finally(() => { this.musicPlayPending = null; });
     }
   }
 
@@ -636,14 +635,7 @@ export class RaidBase {
 
   refreshChallenges() {
     const next = structuredClone(this.profile);
-    let changed = refreshChallengeRotation(next);
-    for (const challenge of challengeProgress(next)) {
-      if (!challenge.claimed && challenge.progress >= challenge.goal && !claimChallenge(next, challenge.id)) {
-        changed = true;
-      }
-    }
-    changed = refreshChallengeRotation(next) || changed;
-    if (!changed || !this.save(next)) return false;
+    if (!refreshChallengeRotation(next) || !this.save(next)) return false;
     this.profile = next;
     return true;
   }
@@ -961,8 +953,9 @@ export class RaidBase {
           if(drag.rotated&&itemWidth(entry)>1){drag.ghost.style.width=slot.offsetHeight+'px';drag.ghost.style.height=slot.offsetWidth+'px';drag.ghost.style.transform='translate(-50%, -50%) rotate(90deg)';}
           (this.deployDialog.open ? this.deployDialog : this.root).appendChild(drag.ghost);
         }
-        drag.ghost.style.left = `${event.clientX}px`;
-        drag.ghost.style.top = `${event.clientY}px`;
+        const zoom = drag.ghost.currentCSSZoom || (this.deployDialog.open ? Number(getComputedStyle(this.deployDialog).zoom) || 1 : 1);
+        drag.ghost.style.left = `${event.clientX / zoom}px`;
+        drag.ghost.style.top = `${event.clientY / zoom}px`;
       }
       target.classList.toggle('raid-drop-target', drag.moved && overTarget(event));
     };
@@ -1029,16 +1022,56 @@ export class RaidBase {
   }
 
   _syncStashCellSize() {
-    const stash=this.root.querySelector('#raid-stash');
-    const slot=this.root.querySelector('#raid-kit > .raid-base-slot');
-    if(!stash || !slot || !stash.getClientRects().length)return;
-    const measured=slot.getBoundingClientRect().width;
-    if(measured<=0)return;
-    const cell=document.body.classList.contains('mobile-ui')?Math.max(48,measured):measured;
-    if(cell<=0 || Math.abs(cell-(this._stashCellSize??0))<0.1)return;
-    this._stashCellSize=cell;
-    stash.style.setProperty('--raid-stash-cell',cell+'px');
-    stash.style.gridTemplateColumns='repeat(auto-fill, '+cell+'px)';
+    const layout = this.root.querySelector('.raid-loadout-layout');
+    const gear = this.root.querySelector('#raid-gear');
+    const kit = this.root.querySelector('#raid-kit');
+    const stash = this.root.querySelector('#raid-stash');
+    if (!layout.clientWidth || !layout.clientHeight || !stash.clientWidth || !kit.children.length) return;
+
+    const mobile = document.body.classList.contains('mobile-ui') || matchMedia('(pointer: coarse)').matches;
+    const fit = (width, height, count, gap, leftColumn = 0, minRows = 1) => {
+      let best = { columns: 1, cell: 1 };
+      for (let columns = 1; columns <= count; columns++) {
+        const rows = Math.max(minRows, Math.ceil(count / columns));
+        const across = columns + leftColumn;
+        const cell = Math.floor(Math.min(mobile ? 64 : 128, (width - (across - 1) * gap) / across,
+          (height - (rows - 1) * gap) / rows));
+        if (cell > best.cell) best = { columns, cell };
+      }
+      return best;
+    };
+    const expand = (fitted, width, height, count, gap, left = 0, minRows = 1) => {
+      const columns = fitted.columns + left;
+      const rows = Math.max(minRows, Math.ceil(count / fitted.columns));
+      return Math.floor(Math.min(fitted.cell + 4, (width - (columns - 1) * gap) / columns,
+        (height - (rows - 1) * gap) / rows));
+    };
+    const gap = parseFloat(getComputedStyle(kit).columnGap) || 0;
+    const fitted = fit(layout.clientWidth - 12, layout.clientHeight - 8, kit.children.length,
+      gap, 1, gear.children.length);
+    fitted.cell = expand(fitted, layout.clientWidth - 2, layout.clientHeight - 2,
+      kit.children.length, gap, 1, gear.children.length);
+    const gearScale = 1.15;
+    const gearRows = gear.children.length;
+    const availableWidth = layout.clientWidth - 2 - fitted.columns * gap;
+    fitted.cell = Math.min(fitted.cell, Math.floor(availableWidth / (fitted.columns + gearScale)),
+      Math.floor((layout.clientHeight - 2 - (gearRows - 1) * gap) / (gearRows * gearScale)));
+    layout.style.setProperty('--raid-fitted-cell', Math.max(1, fitted.cell) + 'px');
+    fitted.cell = Math.max(1, fitted.cell);
+    kit.style.gridTemplateColumns = 'repeat(' + fitted.columns + ', ' + fitted.cell + 'px)';
+    kit.style.gridTemplateRows = 'none';
+    kit.style.gridAutoRows = fitted.cell + 'px';
+    const player = new Player();
+    player.applySaveData(this.profile.kit);
+    applyStorageLayout(kit, this.profile.kit.itemSlots, kit.children.length, fitted.columns, player.inventoryCapacity);
+
+    const stashGap = parseFloat(getComputedStyle(stash).columnGap) || 0;
+    const result = fit(stash.clientWidth - 12, stash.clientHeight - 8, stash.children.length, stashGap);
+    const cell = Math.max(18, expand(result, stash.clientWidth - 2, stash.clientHeight - 2, stash.children.length, stashGap));
+    const columns = Math.max(1, Math.min(result.columns, Math.floor((stash.clientWidth - 2 + stashGap) / (cell + stashGap))));
+    stash.style.setProperty('--raid-stash-cell', cell + 'px');
+    stash.style.gridTemplateColumns = 'repeat(' + columns + ', ' + cell + 'px)';
+    applyStorageLayout(stash, this.profile.stash, stash.children.length, columns);
   }
 
   renderStash() {
@@ -1142,21 +1175,28 @@ export class RaidBase {
   openStoredContainer(source,index) {
     const position={left:this.selection.style.left,top:this.selection.style.top};
     this._keepSelection=true;
-    let opened;
+    const pack = (source === 'stash' ? this.profile.stash : this.profile.kit.itemSlots)[index];
+    let opened, rewards;
     try {opened=this.transact((next,player)=>{
       if(source==='stash'){
         const storage=stashInventory(next,player);
-        if(!openContainer(storage,index))return 'Not enough room to open this container.';
+        if(!(rewards = openContainer(storage,index)))return 'Not enough room to open this container.';
         next.stash=storage.itemSlots;
-      } else if(!openContainer(player,index))return 'Not enough room to open this container.';
+      } else if(!(rewards = openContainer(player,index)))return 'Not enough room to open this container.';
       if(isPack(source==='stash'?this.profile.stash[index]:this.profile.kit.itemSlots[index]))next.packsOpened=(next.packsOpened??0)+1;
     });} finally {this._keepSelection=false;}
     if(!opened)return;
+    if (isPack(pack)) {
+      this.closeSelection();
+      showPackRewards(this.deployDialog.open ? this.deployDialog : this.root, pack, rewards);
+      return;
+    }
     const entry=source==='stash'?this.profile.stash[index]:this.profile.kit.itemSlots[index];
     const slot=this.root.querySelector(source==='stash'?'#raid-stash':'#raid-kit')?.children[index];
     if(!entry||!slot){this.closeSelection();return;}
     if(source==='stash')slot.click();else this.inspectKit(entry,'itemSlots',index,slot);
-    Object.assign(this.selection.style,position);
+    if (matchMedia('(pointer: coarse)').matches) this.positionSelection(this.selectionAnchor ?? slot);
+    else Object.assign(this.selection.style,position);
   }
 
   inspectKit(item, key, index, anchor) {
@@ -1205,23 +1245,33 @@ export class RaidBase {
   }
 
   addRepairAction(item, actions, getItem, equip = null) {
-    const repairLimit = 80;
+    const repairLimit = MAX_DURABILITY;
     if (itemDurability(item) >= repairLimit) return;
     const equipment = item.kind === 'equipment';
     if (!equipment && item.kind !== 'weapon' && item.kind !== 'melee') return;
     const costs = equipment
       ? { sewing_kit: 1 }
       : { repair_kit: 1 };
-    actions.push(['Repair', () => this.openQuantityDialog('Repair', item, 1, (next, player) => {
+    actions.push(['Repair', () => {
+      const anchor = this.selectionAnchor;
+      const position = this.slotPositions.get(anchor);
+      this._keepSelection = true;
+      let repairedSuccessfully;
+      try { repairedSuccessfully = this.transact((next, player) => {
       const current = getItem(next, player);
       if (!current || itemDurability(current) >= repairLimit) return 'Item does not need repair.';
       const inventory = stashInventory(next, player);
       if (!inventory.consumeMaterials(costs)) return 'Missing repair materials in stash.';
       next.stash = inventory.itemSlots;
       const repaired = getItem(next, player);
-      repaired.durability = repairLimit;
+      repaired.durability = Math.min(repairLimit, itemDurability(repaired) + 85);
       if (equip) equip(player, repaired);
-    }, costs),!stashInventory(this.profile,new Player()).hasMaterials(costs)]);
+      }); } finally { this._keepSelection = false; }
+      if (!repairedSuccessfully || !position) return;
+      const grid = position.source === 'stash' ? '#raid-stash' : position.key === 'itemSlots' ? '#raid-kit' : '#raid-gear';
+      const index = position.key === 'handSlots' ? this.profile.kit.equipmentSlots.length + position.index : position.index;
+      this.root.querySelector(grid)?.children[index]?.click();
+    }, !stashInventory(this.profile,new Player()).hasMaterials(costs)]);
   }
 
   addRecycleAction(item, actions, recycle) {
@@ -1553,12 +1603,13 @@ export class RaidBase {
         behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
       });
     }
-    if (!keepPosition || !this.selection.style.left) this.positionSelection(anchor);
+    if (!keepPosition || !this.selection.style.left || touch) this.positionSelection(anchor);
   }
 
   positionSelection(anchor) {
     const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
     const rect = anchor.getBoundingClientRect();
+    const zoom = this.selection.currentCSSZoom || (this.deployDialog.open ? Number(getComputedStyle(this.deployDialog).zoom) || 1 : 1);
     const viewport = window.visualViewport;
     const maxX = viewport?.width ?? window.innerWidth;
     const maxY = viewport?.height ?? window.innerHeight;
@@ -1568,20 +1619,20 @@ export class RaidBase {
       const topEdge = Math.max(bounds.top, viewport?.offsetTop ?? 0) + 32;
       const rightEdge = Math.min(bounds.right, (viewport?.offsetLeft ?? 0) + maxX) - 8;
       const bottomEdge = Math.min(bounds.bottom, (viewport?.offsetTop ?? 0) + maxY) - 8;
-      this.selection.style.maxWidth = `${rightEdge - leftEdge}px`;
-      this.selection.style.maxHeight = `${bottomEdge - topEdge}px`;
+      this.selection.style.maxWidth = `${(rightEdge - leftEdge) / zoom}px`;
+      this.selection.style.maxHeight = `${(bottomEdge - topEdge) / zoom}px`;
       const box = this.selection.getBoundingClientRect();
       const x = rect.right + box.width + 5 <= rightEdge ? rect.right + 5 : rect.left - box.width - 5;
-      this.selection.style.left = `${Math.max(leftEdge, Math.min(x, rightEdge - box.width))}px`;
-      this.selection.style.top = `${Math.max(topEdge, Math.min(rect.top + 16, bottomEdge - box.height))}px`;
+      this.selection.style.left = `${(Math.max(leftEdge, Math.min(x, rightEdge - box.width))) / zoom}px`;
+      this.selection.style.top = `${(Math.max(topEdge, Math.min(rect.top + 16, bottomEdge - box.height))) / zoom}px`;
       return;
     }
-    this.selection.style.maxWidth = `${maxX - 16}px`;
-    this.selection.style.maxHeight = `${maxY - 16}px`;
+    this.selection.style.maxWidth = `${(maxX - 16) / zoom}px`;
+    this.selection.style.maxHeight = `${(maxY - 16) / zoom}px`;
     const { width, height } = this.selection.getBoundingClientRect();
     const left = rect.right + width + 8 <= maxX ? rect.right + 5 : rect.left - width - 5;
-    this.selection.style.left = `${Math.max(8, Math.min(left, maxX - width - 8))}px`;
-    this.selection.style.top = `${Math.max(8, Math.min(rect.top, maxY - height - 8))}px`;
+    this.selection.style.left = `${(Math.max(8, Math.min(left, maxX - width - 8))) / zoom}px`;
+    this.selection.style.top = `${(Math.max(8, Math.min(rect.top, maxY - height - 8))) / zoom}px`;
   }
 
   positionItemName({ clientX, clientY }) {

@@ -1,3 +1,4 @@
+import { showPackRewards } from './packRewards.js';
 import { bindTouchSelection } from './touchSelection.js';
 import { isAccessItem } from './doorAccess.js';
 import { drawOutlinedCanvasText } from './pixelText.js';
@@ -498,11 +499,15 @@ export class InventoryUI {
 
   _ensureMobileScaleObserver() {
     if (this._mobileScaleObs) return;
-    const onResize = () => this._syncMobilePanelScale();
+    const onResize = () => {
+      this._syncMobilePanelScale();
+      if (this._isContextMenuOpen()) this._positionContextMenu(this._contextAnchorEl);
+    };
     this._mobileScaleObs = new ResizeObserver(onResize);
     if (this.dualWrap) this._mobileScaleObs.observe(this.dualWrap);
     window.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('scroll', onResize);
   }
 
   _syncMobilePanelScale() {
@@ -870,24 +875,24 @@ export class InventoryUI {
     const overlap = 6;
     const slotRect = anchorEl.getBoundingClientRect();
     this._contextMenuEl.style.visibility = 'hidden';
-    if(this.game.mobile)this._contextMenuEl.style.maxHeight=Math.max(80,(window.visualViewport?.height??window.innerHeight)-56)+'px';
+    const viewport = window.visualViewport;
+    const minX = (viewport?.offsetLeft ?? 0) + 8;
+    const minY = (viewport?.offsetTop ?? 0) + 8;
+    const maxX = minX + (viewport?.width ?? window.innerWidth) - 16;
+    const maxY = minY + (viewport?.height ?? window.innerHeight) - 16;
+    this._contextMenuEl.style.maxWidth = Math.max(0, maxX - minX) + 'px';
+    this._contextMenuEl.style.maxHeight = Math.max(0, maxY - minY) + 'px';
     this._contextMenuEl.classList.remove('hidden');
     const menuRect = this._contextMenuEl.getBoundingClientRect();
 
     let left = slotRect.right - overlap;
-    const viewport=window.visualViewport;
-    const minY=this.game.mobile?(viewport?.offsetTop??0)+40:8;
-    const maxY=(viewport?.offsetTop??0)+(viewport?.height??window.innerHeight)-12;
     let top = this.game.mobile?slotRect.top+16:slotRect.top + (slotRect.height - menuRect.height) * 0.5;
 
-    if (left + menuRect.width > window.innerWidth - 8) {
+    if (left + menuRect.width > maxX) {
       left = slotRect.left - menuRect.width + overlap;
     }
-    if (top + menuRect.height > window.innerHeight - 8) {
-      top = window.innerHeight - menuRect.height - 8;
-    }
-    top=Math.max(minY,Math.min(top,maxY-menuRect.height));
-    left = Math.max(8, left);
+    top = Math.max(minY, Math.min(top, maxY - menuRect.height));
+    left = Math.max(minX, Math.min(left, maxX - menuRect.width));
 
     this._contextMenuEl.style.left = `${left}px`;
     this._contextMenuEl.style.top = `${top}px`;
@@ -935,10 +940,15 @@ export class InventoryUI {
         if(container==='chest'){
           storage=Object.create(player);storage.itemSlots=this.chest.slots;storage.storageCapacity=this.chest.slots.length;storage.storageColumns=storage.storageCapacity===5?5:4;storage.isItemSlotUnlocked=i=>i>=0&&i<storage.storageCapacity;
         }
-        if(!openContainer(storage,index))this.game.items?.setPickupMsg('Not enough room to open this container.');
+        const rewards = openContainer(storage, index);
+        if(!rewards)this.game.items?.setPickupMsg('Not enough room to open this container.');
         if(container==='chest')this.chest.slots=storage.itemSlots;
         this.game.audio?.inventoryPlace();
         this._renderAfterContextAction();
+        if (rewards && isPack(item)) {
+          this._hideContextMenu();
+          showPackRewards(this.root, item, rewards);
+        }
       });actions.appendChild(btn);
     }
     if(itemWidth(item)>1 && (container==='item'||container==='chest')) {
