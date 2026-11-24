@@ -180,9 +180,12 @@ function finishText(canvas, scale, options) {
   result.height = canvas.height;
   const shadow = result.getContext('2d');
   const offset = TEXT_SHADOW_OFFSET * scale;
-  shadow.filter = 'brightness(18%)';
-  shadow.drawImage(canvas, offset, offset);
-  shadow.filter = 'none';
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < pixels.data.length; i += 4) {
+    if (!pixels.data[i + 3]) continue;
+    for (let channel = 0; channel < 3; channel++) pixels.data[i + channel] *= 0.18;
+  }
+  shadow.putImageData(pixels, offset, offset);
   shadow.drawImage(canvas, 0, 0);
   return options.outlineColor ? outlineCanvas(result, options.outlineColor) : result;
 }
