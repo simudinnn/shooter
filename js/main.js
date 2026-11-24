@@ -11,7 +11,7 @@ import { World, TILE } from './world.js';
 import { AuthoredRaidWorld, MAP_FOG_TILES, parseRaidMap, isRoofAsset, isMapOverlay, isEdgeGrass } from './authoredRaidMap.js';
 import { ChunkEntityManager } from './chunkEntities.js';
 import { unpackTintGradient, isTreeFoliage, treeOccludesPlayer, rollWorldSeed, setWorldSeed, getWorldSeed } from './worldGen.js';
-import { Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
+import { Robot, Raider, createGroundSpew, updateParticles, createExplosion } from './enemies.js';
 import { CorpseManager, corpseSpriteName, CORPSE_DRAW_SCALE } from './corpses.js';
 import { Player, BulletPool, WEAPONS, MELEE_WEAPONS, GUN_HOLD_OFFSET, HUMAN_WALK_RATE, HUMAN_SPRINT_RATE, findBulletSpawn } from './player.js';
 import {
@@ -1554,8 +1554,8 @@ class Game {
     this.buildings.restoreAllFromSave(data.buildings, this.world);
 
     for (const s of data.robots ?? []) {
-      if (s.type !== 'raider') continue;
-      const robot = new Raider(s.x, s.z, null);
+      const type = s.type === 'scout' ? 'spider' : s.type ?? 'spider';
+      const robot = type === 'raider' ? new Raider(s.x, s.z, null) : new Robot(s.x, s.z, s.wave ?? 1, type);
       if (s.guardPost) robot.guardPost = s.guardPost;
       if (s.weaponKey && (WEAPONS[s.weaponKey] || MELEE_WEAPONS[s.weaponKey])) {
         robot.weaponKey = s.weaponKey;
@@ -2702,7 +2702,7 @@ class Game {
     else if (w.sound === 'famas') this.audio.famas();
     else if (w.sound === 'fal') this.audio.fal();
     else this.audio.m16();
-    this.player.wearActiveHand(100 / (cfg?.durabilityShots ?? 650));
+    this.player.wearActiveHand(280 / (cfg?.durabilityShots ?? 650));
   }
 
   _spillLockedInventory() {
@@ -2744,7 +2744,7 @@ class Game {
         hitAny = true;
       }
     }
-    if (hitAny && this.player.isMeleeActive()) this.player.wearActiveHand(1);
+    if (hitAny && this.player.isMeleeActive()) this.player.wearActiveHand(3);
   }
 
   _onBulletHit(bullet,dt=1/60) {

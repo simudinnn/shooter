@@ -14,6 +14,11 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
+    <filter id="cash-pixel-shadow" primitiveUnits="objectBoundingBox" x="-10%" y="-10%" width="125%" height="125%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0.0625" dy="0.0625" stdDeviation="0" flood-color="#000" flood-opacity=".55"/>
+    </filter>
+  </svg>
   <canvas id="game-canvas"></canvas>
 
   <div id="spawn-curtain" class="hidden" aria-hidden="true">
@@ -41,7 +46,7 @@
     <div id="raid-base" class="hidden">
       <section class="raid-base-frame" aria-label="Safe base">
         <header class="raid-base-top">
-          <div class="raid-level-progress"><div id="raid-stats"></div><progress id="raid-xp-progress" aria-label="Level XP"></progress></div>
+          <div class="raid-level-progress"><div class="raid-level-heading"><span id="raid-stats"></span><span id="raid-xp-label"></span></div><progress id="raid-xp-progress" aria-label="Level XP"></progress></div>
 
           <nav aria-label="Base stations">
             <button type="button" class="ui-slice-button" data-station="deploy">Deploy</button>
@@ -78,12 +83,28 @@
                 <div id="raid-kit" class="raid-base-grid" aria-label="Backpack inventory"></div>
               </div>
             </div>
-            <div class="raid-base-section"><div class="raid-stash-tools"><h2 id="raid-stash-title">Stash</h2><button type="button" id="raid-stash-sort" class="ui-slice-button">Sort stash</button></div><p class="raid-station-description">Keep spare gear and materials here between raids.</p><div id="raid-stash" class="raid-base-grid"></div></div>
+            <div class="raid-base-section"><div class="raid-stash-tools"><div class="raid-station-title"><h2 id="raid-stash-title">Stash</h2><button type="button" data-base-upgrade="stash" class="ui-slice-button ui-action-red">UPGRADE</button></div><button type="button" id="raid-stash-sort" class="ui-slice-button">Sort stash</button></div><p class="raid-station-description">Keep spare gear and materials here between raids.</p><div id="raid-stash" class="raid-base-grid"></div></div>
           </section>
           <section data-base-panel="craft" class="raid-base-section hidden"><h2>Crafting station</h2><p class="raid-station-description">Select a recipe to see which materials it needs from your stash.</p><div id="raid-recipes" class="raid-base-grid raid-recipe-grid"></div></section>
-          <section data-base-panel="shop" class="raid-base-section hidden"><h2>Quartermaster</h2><p class="raid-station-description">Buy supplies with cash. Purchases go straight to your stash.</p><div id="raid-shop" class="raid-base-grid"></div></section>
+          <section data-base-panel="shop" class="raid-base-section hidden"><div class="raid-stash-tools"><div class="raid-station-title"><h2>Quartermaster</h2><button type="button" data-base-upgrade="shop" class="ui-slice-button ui-action-red">UPGRADE</button></div></div><p class="raid-station-description">Upgrade the shop to stock more supplies. Study weapon blueprints to add their guns to the catalog.</p><div id="raid-shop" class="raid-base-grid"></div></section>
           <aside id="raid-selection" class="inv-context-menu raid-base-selection hidden" aria-label="Selected item"></aside>
         </main>
+        <dialog id="raid-base-upgrade" class="raid-quantity-dialog" aria-label="Base upgrade">
+          <h2 id="raid-upgrade-title"></h2>
+          <p id="raid-upgrade-detail"></p>
+          <div id="raid-upgrade-preview"></div>
+          <div class="raid-upgrade-requirements">
+            <span id="raid-upgrade-required"></span>
+            <span id="raid-upgrade-level"></span>
+            <span id="raid-upgrade-plus"></span>
+            <span class="raid-shop-price" id="raid-upgrade-cost"><span id="raid-upgrade-cash"></span><img src="assets/items/misc/cash.png" alt="Cash"></span>
+            <span id="raid-upgrade-end"></span>
+          </div>
+          <form method="dialog" class="raid-quantity-actions">
+            <button class="ui-slice-button">Cancel</button>
+            <button type="button" id="raid-upgrade-confirm" class="ui-slice-button ui-action-red">Upgrade</button>
+          </form>
+        </dialog>
         <dialog id="raid-settings" aria-label="Settings">
           <h2>Settings</h2>
           <form method="dialog">

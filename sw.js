@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v587';
+const CACHE = 'robot-ruins-v612';
 
 function buildingKitSprites() {
   return [
@@ -129,6 +129,21 @@ const SHELL = [
   './js/batchInventory.js',
   './assets/items/materials/radar_on.png',
   './assets/items/materials/keycard.png',
+  './assets/items/materials/keycard1.png',
+  './assets/items/materials/keycard2.png',
+  './assets/items/materials/keycard3.png',
+  './assets/items/materials/archive_pack1.png',
+  './assets/items/materials/archive_pack2.png',
+  './assets/items/materials/archive_pack3.png',
+  './assets/items/materials/equipment_pack1.png',
+  './assets/items/materials/equipment_pack2.png',
+  './assets/items/materials/equipment_pack3.png',
+  './assets/items/materials/industrial_pack1.png',
+  './assets/items/materials/industrial_pack2.png',
+  './assets/items/materials/industrial_pack3.png',
+  './assets/items/materials/military_pack1.png',
+  './assets/items/materials/military_pack2.png',
+  './assets/items/materials/military_pack3.png',
   './assets/items/materials/key.png',
   './assets/items/materials/laptop.png',
   './assets/items/materials/phone.png',
@@ -196,6 +211,12 @@ const SHELL = [
 const ASSETS = [
   './js/assetPaths.js',
   './js/blueprints.js',
+  './assets/items/weapons/ak47.png',
+  './assets/items/weapons/machete.png',
+  './assets/items/weapons/sig.png',
+  './assets/items/weapons/mp5.png',
+  './assets/items/weapons/kar98.png',
+  './assets/items/weapons/ar15.png',
   './assets/buildings/fences/bars1.png',
   './assets/buildings/fences/bars2.png',
   './assets/buildings/fences/white_fence.png',

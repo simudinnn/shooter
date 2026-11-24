@@ -125,7 +125,7 @@ function outlineCanvas(canvas,colour){const context=canvas.getContext('2d');cons
 export function measurePixelText(text, scale = PIXEL_TEXT_SCALE) {
   let width = 0;
   for (const ch of text) width += charAdvance(ch, scale);
-  const pad = Math.max(2,TEXT_SHADOW_OFFSET * scale);
+  const pad = 1 + TEXT_SHADOW_OFFSET * scale;
   return { width: Math.max(1, width + pad), height: CELL * scale + pad };
 }
 
@@ -162,7 +162,32 @@ function wrapPixelLines(text, maxWidth, scale) {
 }
 
 /** @param {string} text */
-export function renderWrappedPixelTextCanvas(text, maxWidth, scale = PIXEL_TEXT_SCALE, img = atlas) {
+function finishText(canvas, scale, options) {
+  const context = canvas.getContext('2d');
+  if (/^#[0-9a-f]{6}$/i.test(options.fillColor ?? '')) {
+    const tint = [1, 3, 5].map(index => parseInt(options.fillColor.slice(index, index + 2), 16));
+    const glyphs = context.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < glyphs.data.length; i += 4) {
+      if (!glyphs.data[i + 3]) continue;
+      const brightness = (glyphs.data[i] * 0.2126 + glyphs.data[i + 1] * 0.7152 + glyphs.data[i + 2] * 0.0722) / 255;
+      for (let channel = 0; channel < 3; channel++) glyphs.data[i + channel] = tint[channel] * brightness;
+    }
+    context.putImageData(glyphs, 0, 0);
+  }
+  if (options.shadow === false) return options.outlineColor ? outlineCanvas(canvas, options.outlineColor) : canvas;
+  const result = document.createElement('canvas');
+  result.width = canvas.width;
+  result.height = canvas.height;
+  const shadow = result.getContext('2d');
+  const offset = TEXT_SHADOW_OFFSET * scale;
+  shadow.filter = 'brightness(18%)';
+  shadow.drawImage(canvas, offset, offset);
+  shadow.filter = 'none';
+  shadow.drawImage(canvas, 0, 0);
+  return options.outlineColor ? outlineCanvas(result, options.outlineColor) : result;
+}
+
+export function renderWrappedPixelTextCanvas(text, maxWidth, scale = PIXEL_TEXT_SCALE, img = atlas, options = {}) {
   const lines = wrapPixelLines(text, maxWidth, scale);
   if (!lines.length) return renderPixelTextCanvas('', scale, img);
   const lineHeight = CELL * scale + LINE_GAP_PX * scale;
@@ -173,7 +198,7 @@ export function renderWrappedPixelTextCanvas(text, maxWidth, scale = PIXEL_TEXT_
   }
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, width);
-  canvas.height = Math.max(1, lines.length * lineHeight + shadowPad);
+  canvas.height = Math.max(1, (lines.length - 1) * lineHeight + CELL * scale + shadowPad + 1);
   const ctx = canvas.getContext('2d');
   if (!ctx || !img) return canvas;
   ctx.imageSmoothingEnabled = false;
@@ -181,11 +206,11 @@ export function renderWrappedPixelTextCanvas(text, maxWidth, scale = PIXEL_TEXT_
     const y = i * lineHeight;
     drawGlyphRun(ctx,line,scale,img,1,y+1);
   });
-  return canvas;
+  return finishText(canvas, scale, options);
 }
 
 /** Replace element contents with wrapped atlas text. */
-export function setElementWrappedPixelText(el, text, maxWidth, scale = PIXEL_TEXT_SCALE) {
+export function setElementWrappedPixelText(el, text, maxWidth, scale = PIXEL_TEXT_SCALE, options = {}) {
   if (!el) return;
   el.textContent = '';
   el.style.color = 'transparent';
@@ -198,7 +223,7 @@ export function setElementWrappedPixelText(el, text, maxWidth, scale = PIXEL_TEX
   img.draggable = false;
   img.decoding = 'sync';
   const apply = () => {
-    img.src = renderWrappedPixelTextCanvas(text, maxWidth, scale).toDataURL('image/png');
+    img.src = renderWrappedPixelTextCanvas(text, maxWidth, scale, atlas, options).toDataURL('image/png');
     img.style.maxWidth = '100%';
     img.style.height = 'auto';
   };
@@ -216,10 +241,8 @@ export function renderPixelTextCanvas(text, scale = PIXEL_TEXT_SCALE, img = atla
   const ctx = canvas.getContext('2d');
   if (!ctx || !img) return canvas;
   ctx.imageSmoothingEnabled = false;
-  const shadowOff = TEXT_SHADOW_OFFSET * scale;
-  drawGlyphRun(ctx,text,scale,img,1,1);
-  if(options.fillColor){ctx.globalCompositeOperation='source-in';ctx.fillStyle=options.fillColor;ctx.fillRect(0,0,canvas.width,canvas.height);ctx.globalCompositeOperation='source-over';}
-  return options.outlineColor?outlineCanvas(canvas,options.outlineColor):canvas;
+  drawGlyphRun(ctx, text, scale, img, 1, 1);
+  return finishText(canvas, scale, options);
 }
 
 /** @param {string} text */
@@ -238,18 +261,18 @@ export function createPixelTextImg(text, scale = PIXEL_TEXT_SCALE, options = {})
 }
 
 /** Replace element contents with colored atlas text. */
-export function setElementPixelText(el, text, scale = PIXEL_TEXT_SCALE) {
+export function setElementPixelText(el, text, scale = PIXEL_TEXT_SCALE, options = {}) {
   if (!el) return;
   const previous = renderedLabels.get(el);
-  if (previous?.text === text && previous.scale === scale && previous.atlas === atlas
+  if (previous?.text === text && previous.scale === scale && previous.fillColor === options.fillColor && previous.atlas === atlas
     && el.firstChild === previous.node && el.lastChild === previous.node) return;
   el.textContent = '';
   el.style.color = 'transparent';
   el.style.fontSize = '0';
   el.style.lineHeight = '0';
   if (!text) return;
-  el.appendChild(createPixelTextImg(text, scale));
-  renderedLabels.set(el, { text, scale, atlas, node: el.firstChild });
+  el.appendChild(createPixelTextImg(text, scale, options));
+  renderedLabels.set(el, { text, scale, fillColor: options.fillColor, atlas, node: el.firstChild });
 }
 
 /** Draw atlas text on a 2D canvas (world/HUD). */

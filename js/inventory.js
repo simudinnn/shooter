@@ -3,12 +3,12 @@ import { isAccessItem } from './doorAccess.js';
 import { drawOutlinedCanvasText } from './pixelText.js';
 import { moveStacks } from './batchInventory.js';
 import { PLACEABLE_TOOLS } from './tools.js';
-import { isContainer, isPack, isTieredItem, packTier, openContainer } from './containers.js';
+import { isContainer, isPack, openContainer } from './containers.js';
 import { itemWidth, itemSize, canEquipHand, styleItemSlot, storageLayout, applyStorageLayout } from './itemFootprint.js';
 import { normalizeThrowableItem } from './throwables.js';
 import { WEAPONS, MELEE_WEAPONS, ITEM_STORAGE_SIZE, EQUIPMENT_SLOT_COUNT, HAND_SLOT_COUNT } from './player.js';
 import { weaponItemSpritePath } from './sprites.js';
-import { CHEST_SLOT_COUNT, getItemDisplayName, getItemDescription, getItemIconSrc } from './loot.js';
+import { CHEST_SLOT_COUNT, getItemDisplayName, getItemDescription, getItemIconSrc, itemTextRarity, ITEM_TEXT_COLORS } from './loot.js';
 import { mergeMaterialStacks, MATERIAL_STACK_MAX, materialStackMax, materialItemsMatch } from './materials.js';
 import {
   AMMO_STACK_MAX,
@@ -655,7 +655,7 @@ export class InventoryUI {
 
   _appendStackCount(slot, amount) {
     if (!amount || amount <= 1) return;
-    const label = createPixelTextImg(String(amount), this.game.mobile ? PIXEL_TEXT_SCALE_SM : PIXEL_TEXT_SCALE,{outlineColor:[0,0,0]});
+    const label = createPixelTextImg(String(amount), this.game.mobile ? PIXEL_TEXT_SCALE_SM : PIXEL_TEXT_SCALE,{shadow: false, outlineColor:[0,0,0]});
     label.className = 'inv-stack-count inv-pixel-text-img';
     slot.appendChild(label);
   }
@@ -672,12 +672,6 @@ export class InventoryUI {
     return this._slotIcon(weaponItemSpritePath(sprite));
   }
 
-  _appendPackTier(slot,item) {
-    if(!isTieredItem(item))return;
-    const tier=document.createElement('span');tier.className='inv-pack-tier';
-    tier.append(createPixelTextImg(['','I','II','III'][packTier(item)],PIXEL_TEXT_SCALE_SM,{fillColor:'#e5bc50',outlineColor:[220,112,24]}));slot.append(tier);
-  }
-
   _itemIcon(item) {
     return this._slotIcon(getItemIconSrc(item));
   }
@@ -686,11 +680,12 @@ export class InventoryUI {
     const icon=this._slotIcon(INV_LOCK_SRC);icon.classList.add('inv-slot-lock');return icon;
   }
 
-  _bindTooltip(slot, text) {
+  _bindTooltip(slot, text, item) {
     if (!text) return;
     const show = (e) => {
       if (e.pointerType === 'touch' || this._isContextMenuOpen()) return;
       this._hoverTooltipText = text;
+      this._hoverTooltipColor = ITEM_TEXT_COLORS[itemTextRarity(item)];
       this._showTooltipAt(e.clientX, e.clientY, text);
     };
     const move = (e) => {
@@ -753,7 +748,7 @@ export class InventoryUI {
       this._tooltipEl.className = 'inv-tooltip';
       document.body.appendChild(this._tooltipEl);
     }
-    setElementPixelText(this._tooltipEl, text, PIXEL_TEXT_SCALE);
+    setElementPixelText(this._tooltipEl, text, PIXEL_TEXT_SCALE, { fillColor: this._hoverTooltipColor });
     this._tooltipEl.classList.add('visible');
     this._tooltipEl.style.visibility = 'hidden';
     this._tooltipEl.style.left = '0';
@@ -929,7 +924,8 @@ export class InventoryUI {
     const desc = this._contextMenuEl.querySelector('.inv-context-desc');
     const actions = this._contextMenuEl.querySelector('.inv-context-actions');
     const maxTextW = Math.max(120, Math.min(326, (this._contextMenuEl.offsetWidth || 280) - 28));
-    setElementWrappedPixelText(title, getItemDisplayName(item), maxTextW, PIXEL_TEXT_SCALE);
+    title.dataset.rarity = itemTextRarity(item);
+    setElementWrappedPixelText(title, getItemDisplayName(item), maxTextW, PIXEL_TEXT_SCALE, { fillColor: ITEM_TEXT_COLORS[title.dataset.rarity] });
     setElementWrappedPixelText(desc, this._contextDetailText(item), maxTextW, PIXEL_TEXT_SCALE_SM);
     actions.innerHTML = '';
     if((container==='item'||container==='chest')&&isContainer(item)){
@@ -2106,11 +2102,10 @@ export class InventoryUI {
 
   _bindPlayerItemSlot(slot, index, player, data) {
     slot.appendChild(this._itemIcon(data));
-    this._appendPackTier(slot,data);
 
     this._appendDurability(slot, data);
     this._appendStackCount(slot, this._stackAmount(data));
-    this._bindTooltip(slot, getItemDisplayName({ ...data, amount: 1 }));
+    this._bindTooltip(slot, getItemDisplayName({ ...data, amount: 1 }), data);
     this._bindItemSlotDrag(slot, index, player, 'item');
     this._bindContextMenu(slot, 'item', index);
     this._bindStackDoubleClick(slot, 'item', index, data);
@@ -2204,10 +2199,9 @@ export class InventoryUI {
       const data = this.chest.slots[i];
       if (data) {
         slot.appendChild(this._itemIcon(data));
-    this._appendPackTier(slot,data);
         this._appendDurability(slot, data);
         this._appendStackCount(slot, this._stackAmount(data));
-        this._bindTooltip(slot, getItemDisplayName({ ...data, amount: 1 }));
+        this._bindTooltip(slot, getItemDisplayName({ ...data, amount: 1 }), data);
         this._bindItemSlotDrag(slot, i, this.game.player, 'chest');
         this._bindContextMenu(slot, 'chest', i);
         this._bindStackDoubleClick(slot, 'chest', i, data);
@@ -2368,9 +2362,8 @@ export class InventoryUI {
         const label = EQUIPMENT_LABELS[i] ?? 'Gear';
         if (data) {
           slot.appendChild(this._itemIcon(data));
-    this._appendPackTier(slot,data);
           this._appendDurability(slot, data);
-          this._bindTooltip(slot, `${getItemDisplayName({ ...data, amount: 1 })}`);
+          this._bindTooltip(slot, `${getItemDisplayName({ ...data, amount: 1 })}`, data);
           this._bindEquipmentSlotDrag(slot, i, player);
           this._bindContextMenu(slot, 'equipment', i);
         } else {
@@ -2401,7 +2394,7 @@ export class InventoryUI {
         } else {
           slot.appendChild(this._slotIcon(getItemIconSrc(handItem)));
         }
-        this._bindTooltip(slot, `${getItemDisplayName({ ...handItem, amount: 1 })}`);
+        this._bindTooltip(slot, `${getItemDisplayName({ ...handItem, amount: 1 })}`, handItem);
         this._bindHandSlotDrag(slot, h, player);
         this._bindContextMenu(slot, zone, -1);
       } else {

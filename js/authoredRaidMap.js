@@ -1,3 +1,5 @@
+import { isTieredItem } from './containers.js';
+import { materialSpritePath } from './materials.js';
 import { canonicalAsset, canonicalGround, BASE_GRASS_ASSET, GRASS_OVERLAY_ASSET, floorTileLayout, drawFloorTile } from './assetPaths.js';
 import { doorAccessError } from './doorAccess.js';
 import { moveColliderOverlapsRect } from './buildingGen.js';
@@ -31,6 +33,13 @@ for (const [kind, keys] of [
     const item = kind === 'ammo' ? { kind, ammoType: key } : { kind, key };
     const asset = getItemIconSrc(item);
     if (asset) lootByAsset.set(asset, item);
+    if (isTieredItem(item)) {
+      lootByAsset.set(materialSpritePath(key), { ...item, tier: 1 });
+      for (const tier of [1, 2, 3]) {
+        const variant = { ...item, tier };
+        lootByAsset.set(getItemIconSrc(variant), variant);
+      }
+    }
   }
 }
 

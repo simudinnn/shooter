@@ -1,3 +1,4 @@
+import { DISPLAY_ONLY_GUNS } from './blueprints.js';
 import { drawOutlinedCanvasText } from './pixelText.js';
 import { customEnemies, customWeapons } from './customContent.js';
 import { EQUIPMENT_ITEM_KEYS, equipmentSpritePath } from './equipment.js';
@@ -126,6 +127,22 @@ const CORE_ASSETS = {
   scout_walk: 'assets/enemies/scout_walk.png',
   scout_charge: 'assets/enemies/charge.png',
   ...MATERIAL_ASSET_PATHS,
+  ...Object.fromEntries(Object.keys(DISPLAY_ONLY_GUNS).map(key => ['item_' + key, weaponItemSpritePath(key)])),
+  keycard1: materialSpritePath('keycard1'),
+  keycard2: materialSpritePath('keycard2'),
+  keycard3: materialSpritePath('keycard3'),
+  archive_pack1: materialSpritePath('archive_pack1'),
+  archive_pack2: materialSpritePath('archive_pack2'),
+  archive_pack3: materialSpritePath('archive_pack3'),
+  equipment_pack1: materialSpritePath('equipment_pack1'),
+  equipment_pack2: materialSpritePath('equipment_pack2'),
+  equipment_pack3: materialSpritePath('equipment_pack3'),
+  industrial_pack1: materialSpritePath('industrial_pack1'),
+  industrial_pack2: materialSpritePath('industrial_pack2'),
+  industrial_pack3: materialSpritePath('industrial_pack3'),
+  military_pack1: materialSpritePath('military_pack1'),
+  military_pack2: materialSpritePath('military_pack2'),
+  military_pack3: materialSpritePath('military_pack3'),
   radar_on:'assets/items/materials/radar_on.png',
   ...DEAD_ENEMY_ASSET_PATHS,
   ...WORLD_ASSET_PATHS,

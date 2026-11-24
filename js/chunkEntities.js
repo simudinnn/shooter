@@ -299,7 +299,7 @@ export class ChunkEntityManager {
     chunks.sort((a, b) => b.ahead - a.ahead);
 
     for (const { chunk } of chunks) {
-      chunk.spidersSpawned = true;
+      if (!chunk.spidersSpawned) this._spawnChunkSpiders(chunk, player, fx, fz);
     }
   }
 

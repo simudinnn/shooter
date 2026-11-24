@@ -1,4 +1,4 @@
-import { isBlueprint, resolveBlueprint } from './blueprints.js';
+import { isBlueprint, resolveBlueprint, DISPLAY_ONLY_GUNS, BLUEPRINT_SUPPLIES } from './blueprints.js';
 import { isPack, isTieredItem, packTier, rollPackTier } from './containers.js';
 import { content, contentKey, customWeapons } from './customContent.js';
 import { WEAPONS, MELEE_WEAPONS } from './player.js';
@@ -59,7 +59,24 @@ const RARITY_WEIGHT = {
   epic: 1,
 };
 
-const materialLootWeight=entry=>(RARITY_WEIGHT[entry.rarity]??1)*(BASIC_MATERIAL_KEYS.includes(entry.key)?0.45:1)*({phone:2,jewlery:4,laptop:6,electrical_comp:1.5,military_comp:1.5}[entry.key]??1);
+const VALUABLE_LOOT_MULTIPLIERS = {
+  book: 1.35,
+  phone: 3.4,
+  jewlery: 6,
+  laptop: 8,
+  electrical_comp: 2.1,
+  electrical_trans: 1.5,
+  military_comp: 1.9,
+  blueprint_old: 1.4,
+};
+
+function materialLootWeight(entry) {
+  const base = RARITY_WEIGHT[entry.rarity] ?? 1;
+  const { key } = entry;
+  if (key.endsWith('_kit')) return base * 0.35;
+  if (key === 'blueprint' || key === 'cash') return base;
+  return base * (VALUABLE_LOOT_MULTIPLIERS[key] ?? (BASIC_MATERIAL_KEYS.includes(key) ? 0.3 : 0.75));
+}
 
 /** Min/max stack per slot and rarity tier for weighted rolls. */
 const LOOT_ENTRIES = [
@@ -197,15 +214,15 @@ const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 
 /** Chest gear category weights (compete with materials + empty). */
 const CHEST_GEAR_WEIGHT = {
-  ammo: 22,
-  bandage: 22,
-  melee: 2,
-  weapon: 1,
+  ammo: 17,
+  bandage: 16,
+  melee: 1.5,
+  weapon: 0.75,
 };
 
 const EQUIPMENT_LOOT_WEIGHTS = {
-  backpack_1: 2, backpack2: 0.7, backpack3: 0.2,
-  vest: 1.5, hunting_vest: 1, police_vest: 0.5, military_vest: 0.3,
+  backpack_1: 2, backpack2: 0.7, backpack3: 0.04,
+  vest: 1.5, hunting_vest: 1, police_vest: 0.16, military_vest: 0.05,
 };
 
 function rollMaterialAmount(entry) {
@@ -230,7 +247,8 @@ function rollChestMeleeItem() {
 }
 
 function rollChestWeaponItem() {
-  const key = GUN_KEYS[Math.floor(Math.random() * GUN_KEYS.length)];
+  const pool = Math.random() < 0.05 ? GUN_KEYS : GUN_KEYS.filter(key => ['glock', 'revolver', 'uzi', 'm870'].includes(key));
+  const key = pool[Math.floor(Math.random() * pool.length)];
   const cfg = WEAPONS[key];
   return { kind: 'weapon', key, ammo: cfg?.magSize ?? 0 };
 }
@@ -250,7 +268,7 @@ function buildChestLootOptions() {
   options.push({ weight: CHEST_GEAR_WEIGHT.melee, roll: rollChestMeleeItem });
   options.push({ weight: CHEST_GEAR_WEIGHT.weapon, roll: rollChestWeaponItem });
   for (const [key, weight] of Object.entries(EQUIPMENT_LOOT_WEIGHTS)) {
-    options.push({ weight, roll: () => ({ kind: 'equipment', key }) });
+    options.push({ weight: weight * 0.75, roll: () => ({ kind: 'equipment', key }) });
   }
   for (const entry of content.loot) {
     const key = contentKey(entry.group, entry.target);
@@ -335,15 +353,20 @@ export function rollChestLoot(variant = 'chest_wood') {
     slots[i] = rollChestLootSlot();
   }
   if (variant==='chest_crate') {
-    const valuable=()=>({kind:'material',key:['repair_kit','sewing_kit','electrical_comp','fuel','industrial_pack'][Math.floor(Math.random()*5)],amount:1});
-    slots[0]=valuable();slots[1]=rollChestBandageItem();slots[2]=Math.random()<0.5?rollChestAmmoItem():valuable();
+    const valuable=()=>({kind:'material',key:['electrical_comp','phone','electrical_trans','fuel','industrial_pack','repair_kit','sewing_kit'][Math.floor(Math.random()*7)],amount:1});
+    slots[0]=Math.random()<0.06?resolveBlueprint({kind:'material',key:'blueprint',amount:1}):valuable();slots[1]=rollChestBandageItem();slots[2]=Math.random()<0.5?rollChestAmmoItem():valuable();
   }
   if (['chest_military','chest_millitary'].includes(variant)) {
     const key=['m16','famas','fal','m24'][Math.floor(Math.random()*4)];
-    slots[0]={kind:'weapon',key,ammo:WEAPONS[key].magSize,durability:90+Math.floor(Math.random()*11)};
+    const rareRoll = Math.random();
+    slots[0] = rareRoll < 0.05
+      ? { kind: 'weapon', key, ammo: WEAPONS[key].magSize, durability: 70 + Math.floor(Math.random() * 21) }
+      : rareRoll < 0.29
+        ? resolveBlueprint({ kind: 'material', key: 'blueprint', blueprintWeapon: key, amount: 1 })
+        : { kind: 'material', key: 'military_comp', amount: 1 };
     slots[1]={kind:'ammo',ammoType:WEAPONS[key].ammoType??(key==='m24'?'sniper':'rifle'),amount:30};
-    slots[2]={kind:'material',key:'military_pack',tier:Math.random()<0.3?3:2,amount:1};
-    slots[3]=Math.random()<0.5?{kind:'consumable',key:'medkit',amount:1}:{kind:'material',key:'military_comp',amount:1};
+    slots[2]={kind:'material',key:'military_pack',tier:Math.random()<0.12?3:Math.random()<0.55?2:1,amount:1};
+    slots[3]=Math.random()<0.5?{kind:'consumable',key:'medkit',amount:1}:{kind:'material',key:Math.random()<0.3?'repair_kit':'electrical_comp',amount:1};
   }
   return slots;
 }
@@ -354,7 +377,7 @@ export function rollRandomChestItem() {
 
 export function getItemDisplayName(item) {
   if (!item) return '';
-  if (item.kind === 'weapon') return WEAPONS[item.key]?.name ?? item.key;
+  if (item.kind === 'weapon') return WEAPONS[item.key]?.name ?? DISPLAY_ONLY_GUNS[item.key]?.name ?? item.key;
   if (item.kind === 'melee') return MELEE_WEAPONS[item.key]?.name ?? item.key;
   if (item.kind === 'ammo') {
     const normalized = normalizeAmmoItem(item);
@@ -380,8 +403,8 @@ export function getItemDisplayName(item) {
   }
   if (item.kind === 'material') {
     const normalized = normalizeMaterialItem(item);
-    if (isBlueprint(item) && WEAPONS[item.blueprintWeapon]) {
-      const name = WEAPONS[item.blueprintWeapon].name + ' Blueprint';
+    if (isBlueprint(item) && (WEAPONS[item.blueprintWeapon] || DISPLAY_ONLY_GUNS[item.blueprintWeapon] || BLUEPRINT_SUPPLIES[item.blueprintWeapon])) {
+      const name = (WEAPONS[item.blueprintWeapon] ?? DISPLAY_ONLY_GUNS[item.blueprintWeapon] ?? BLUEPRINT_SUPPLIES[item.blueprintWeapon]).name + ' Blueprint';
       return (item.key === 'blueprint_old' ? 'Studied ' : '') + name + (normalized.amount > 1 ? ' x' + normalized.amount : '');
     }
     return (isTieredItem(normalized)?'Tier '+packTier(normalized)+' ':'')+getMaterialDisplayName(normalized.key, normalized.amount);
@@ -393,19 +416,19 @@ export function getItemDescription(item) {
   if (!item) return '';
   if (item.kind === 'weapon') {
     const w = WEAPONS[item.key];
-    if (!w) return item.key;
+    if (!w) return DISPLAY_ONLY_GUNS[item.key] ? 'Can be stored or sold. Cannot be equipped yet.' : '';
     const mode = w.automatic ? 'Automatic' : 'Semi-auto';
     const ammo = item.ammo ?? w.magSize;
-    return `${w.name} — ${mode}, ${w.damage} damage, ${ammo}/${w.magSize} in mag. Durability ${Math.ceil(itemDurability(item))}%.`;
+    return `${mode}, ${w.damage} damage, ${ammo}/${w.magSize} in mag. Durability ${Math.ceil(itemDurability(item))}%.`;
   }
   if (item.kind === 'melee') {
     const m = MELEE_WEAPONS[item.key];
     if (!m) return item.key;
-    return `${m.name} — melee weapon, ${m.damage ?? '?'} damage. Durability ${Math.ceil(itemDurability(item))}%.`;
+    return `Melee weapon, ${m.damage ?? '?'} damage. Durability ${Math.ceil(itemDurability(item))}%.`;
   }
   if (item.kind === 'ammo') {
     const normalized = normalizeAmmoItem(item);
-    return `${getAmmoDisplayName(normalized.ammoType, normalized.amount)} for reloading.`;
+    return normalized ? 'Used to reload compatible weapons.' : '';
   }
   if (item.kind === 'bandage' || item.kind === 'consumable') {
     const normalized = normalizeConsumableItem(item);
@@ -423,11 +446,11 @@ export function getItemDescription(item) {
     return getThrowableDescription(normalized.key);
   }
   if (item.kind === 'material') {
-    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Use, then click a locked door of this tier or lower. Consumed on unlocking.',key:'Use, then click a locked wooden door. Consumed on unlocking.',laptop:'Valuable laptop. Sell to the trader.',phone:'Valuable phone. Sell to the trader.'};
+    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Use, then click a locked door of this tier or lower. Consumed on unlocking.',key:'Use, then click a locked wooden door. Consumed on unlocking.',laptop:'Valuable electronics to sell to the trader.',phone:'Valuable electronics to sell to the trader.'};
     if(tools[item.key])return tools[item.key];
     if (isPack(item)) return 'Tier '+packTier(item)+' sealed pack. Open for random loot or sell. Rare weapons and blueprints are not guaranteed.';
     if (item.key.endsWith('_box')) return 'Sealed ammunition box. Open for ammunition.';
-    if (item.key === 'blueprint') return 'Study at base to permanently unlock this weapon in the shop.';
+    if (item.key === 'blueprint') return 'Study at base to permanently unlock this item in the shop.';
     if (item.key === 'blueprint_old') return 'Already studied blueprint. Valuable to traders.';
     if (item.key.endsWith('_kit')) return 'Repair kit. No additional materials required.';
     if (item.key === 'fuel') return 'Fuel for machinery. Can also be sold.';
@@ -461,6 +484,7 @@ export function getItemIconSrc(item) {
     const normalized = normalizeThrowableItem(item);
     return throwableSpritePath(normalized?.key ?? item.key);
   }
+  if (isTieredItem(item)) return materialSpritePath(item.key + packTier(item));
   if (item.kind === 'material') return item.key==='radar'&&item.radarOn?'assets/items/materials/radar_on.png':materialSpritePath(item.key);
   return '';
 }
@@ -492,6 +516,7 @@ export function getItemSpriteName(item) {
     const normalized = normalizeThrowableItem(item);
     return normalized?.key ?? null;
   }
+  if (isTieredItem(item)) return item.key + packTier(item);
   if (item.kind === 'material') return item.key==='radar'&&item.radarOn?'radar_on':item.key;
   return null;
 }
@@ -500,3 +525,15 @@ export function chestSpriteName(variant) {
   return [...CHEST_VARIANTS,'chest_crate','chest_military','chest_millitary'].includes(variant) ? variant : CHEST_VARIANTS[0];
 }
 
+
+
+export function itemTextRarity(item) {
+  if (!item) return 'normal';
+  const key = item.key;
+  if (['fal', 'm24', 'military_vest', 'backpack3', 'blueprint'].includes(key)
+    || (isTieredItem(item) && packTier(item) === 3)) return 'epic';
+  if (['m16', 'famas', 'police_vest', 'backpack2', 'laptop', 'jewlery', 'military_comp', 'blueprint_old'].includes(key)
+    || (isTieredItem(item) && packTier(item) === 2)) return 'rare';
+  return 'normal';
+}
+export const ITEM_TEXT_COLORS = { rare: '#edbd5b', epic: '#c99afa' };

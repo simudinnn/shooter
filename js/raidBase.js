@@ -1,4 +1,4 @@
-import { resolveBlueprint } from './blueprints.js';
+import { blueprintOnlyWeapon, resolveBlueprint, DISPLAY_ONLY_GUNS, BLUEPRINT_SUPPLIES, blueprintUnlockId } from './blueprints.js';
 import { bindTouchSelection } from './touchSelection.js';
 import { REMOVED_MATERIAL_KEYS } from './materials.js';
 import { moveStacks } from './batchInventory.js';
@@ -8,7 +8,7 @@ import { storageLayout, applyStorageLayout, itemWidth, itemSize, canEquipHand, s
 import economy from './economy-data.js';
 import { Player, WEAPONS } from './player.js';
 import { capturePlayerState } from './saveGame.js';
-import { getItemDescription, getItemDisplayName, getItemIconSrc } from './loot.js';
+import { getItemDescription, getItemDisplayName, getItemIconSrc, itemTextRarity, ITEM_TEXT_COLORS } from './loot.js';
 import { INV_LOCK_SRC } from './inventory.js';
 import { equipmentSlotFor, itemDurability, MAX_DURABILITY } from './equipment.js';
 import { createPixelTextImg, setElementPixelText, setElementWrappedPixelText, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
@@ -27,18 +27,24 @@ const CATALOG_CATEGORIES = [
 ];
 
 const shopUnlockId = item => item.kind + ':' + item.key;
-const shopOfferUnlocked = (profile, offer) => raidLevel(profile) >= offer.level
-  || (profile.shopBlueprints ?? []).includes(shopUnlockId(offer.item));
+const shopOfferUnlocked = (profile, offer) => (profile.shopBlueprints ?? []).includes(shopUnlockId(offer.item))
+  || (!offer.blueprintOnly && baseTier(profile, 'shop') >= offer.shopTier);
+const advancedGear = new Set(['hunting_vest', 'police_vest', 'military_vest', 'backpack2', 'backpack3', 'upgrade_kit', 'grenade']);
 
 function catalogCategory(item) {
+  if (item.key === 'machete') return 2;
   if(item.kind==='material'&&item.key.endsWith('_box'))return 4;
   return CATALOG_CATEGORIES.findIndex(([, kinds]) => kinds.includes(item.kind));
 }
 
+const roundSellPrice = value => Math.max(1, Math.round(value / 5) * 5);
+
 export function getSellPrice(item) {
-  const price = economy.sellPrices[item.kind]?.[item.kind==='ammo'?item.ammoType:item.kind==='bandage'?'bandage':item.key];
-  if (item.kind === 'material') return Math.max(1,Math.floor((price ?? economy.economy.materialSellCash)*(isTieredItem(item)?[0,0.6,1,1.7][packTier(item)]:1)));
-  return price ? Math.max(1, Math.floor(price * itemDurability(item) / MAX_DURABILITY)) : 0;
+  const price = economy.sellPrices[item.kind]?.[item.kind==='ammo'?item.ammoType:item.kind==='bandage'?'bandage':item.key]
+    ?? (item.kind === 'weapon' && DISPLAY_ONLY_GUNS[item.key] ? DISPLAY_ONLY_GUNS[item.key].price * 0.35 : undefined);
+  if (item.key === 'cash' && item.kind === 'material') return 1;
+  if (item.kind === 'material') return roundSellPrice(0.65 * (price ?? economy.economy.materialSellCash) * (isTieredItem(item) ? [0, 0.6, 1, 1.7][packTier(item)] : 1));
+  return price ? roundSellPrice(0.65 * price * itemDurability(item) / MAX_DURABILITY) : 0;
 }
 const XP_PER_LEVEL = 300;
 const XP_LEVEL_INCREMENT = 150;
@@ -51,9 +57,23 @@ export function raidLevel(profile) {
   return level;
 }
 
+const BASE_TIER_LABELS = ['', 'I', 'II', 'III'];
+const BASE_UPGRADES = {
+  stash: [
+    { slots: 32 }, { slots: 40, level: 5, cash: 450 }, { slots: 48, level: 10, cash: 900 },
+  ],
+  shop: [
+    {}, { level: 6, cash: 600 }, { level: 12, cash: 1400 },
+  ],
+};
+
+function baseTier(profile, station) {
+  const upgrades = BASE_UPGRADES[station];
+  return Math.max(1, Math.min(upgrades.length, Math.floor(Number(profile.baseUpgrades?.[station]) || 1)));
+}
+
 export function stashLimit(profile) {
-  const level = raidLevel(profile);
-  return level >= 40 ? 100 : level >= 30 ? 80 : level >= 20 ? 60 : level >= 10 ? 50 : 40;
+  return BASE_UPGRADES.stash[baseTier(profile, 'stash') - 1].slots;
 }
 
 function freshKit(empty = false) {
@@ -88,6 +108,12 @@ export function deployProfile(profile) {
 }
 
 export function extractProfile(profile, player, kills) {
+  const kit = capturePlayerState(player);
+  for (const item of [...kit.equipmentSlots, ...kit.handSlots]) {
+    if (item && ['equipment', 'weapon', 'melee'].includes(item.kind)) {
+      item.durability = Math.max(1, itemDurability(item) - 8);
+    }
+  }
   return {
     ...profile,
     deployed: false,
@@ -95,7 +121,7 @@ export function extractProfile(profile, player, kills) {
     xp: profile.xp + 120 + kills * 25,
     extractedKills: profile.extractedKills + kills,
     extractions: profile.extractions + 1,
-    kit: capturePlayerState(player),
+    kit,
   };
 }
 
@@ -103,9 +129,28 @@ export function loseRaidProfile(profile) {
   return { ...profile, deployed: false, losses: profile.losses + 1 };
 }
 
-const SHOP = economy.shop.map((offer) => offer.item.kind === 'weapon'
-  ? { ...offer, item: { ...offer.item, ammo: WEAPONS[offer.item.key]?.magSize ?? 0 } }
-  : offer);
+const STARTER_SHOP = new Set(['pistol_box', 'bandage', 'apple', 'crowbar', 'wooden_bat', 'glock']);
+const ADVANCED_SHOP = new Set(['shotgun_box', 'sniper_box', 'vaccine', 'molotov', 'fire_axe']);
+
+const SHOP_PRICE_OVERRIDES = {
+  knife: 130, crowbar: 80, wooden_bat: 50,
+  repair_kit: 150,
+  rifle_box: 100, shotgun_box: 120, sniper_box: 150,
+};
+
+const SHOP = [...economy.shop, { item: { kind: 'material', key: 'barbed_wire', amount: 1 }, price: 85 }, ...Object.entries(DISPLAY_ONLY_GUNS).map(([key, gun]) => ({
+  item: { kind: 'weapon', key },
+  price: gun.price,
+}))].map(offer => {
+  const weapon = offer.item.kind === 'weapon';
+  return {
+    ...offer,
+    price: SHOP_PRICE_OVERRIDES[offer.item.key] ?? Math.round(offer.price * (['repair_kit', 'sewing_kit'].includes(offer.item.key) ? 1.65 : 1.15) / 10) * 10,
+    shopTier: STARTER_SHOP.has(offer.item.key) ? 1 : (ADVANCED_SHOP.has(offer.item.key) || advancedGear.has(offer.item.key)) ? 3 : 2,
+    blueprintOnly: !!BLUEPRINT_SUPPLIES[offer.item.key] || (weapon && blueprintOnlyWeapon(offer.item.key)),
+    item: weapon ? { ...offer.item, ammo: WEAPONS[offer.item.key]?.magSize ?? 0 } : offer.item,
+  };
+});
 
 export function normalizeRaidProfile(profile) {
   const { credits, ...saved } = profile;
@@ -121,6 +166,13 @@ export function normalizeRaidProfile(profile) {
     const oldCost=n=>saved.xpCurveVersion?100+(n-1)*25:100;
     while(xp>=oldStart+oldCost(level)){oldStart+=oldCost(level);level++;}
     normalized.xp=levelStart(level)+Math.floor((xp-oldStart)/oldCost(level)*levelCost(level));normalized.xpCurveVersion=2;
+  }
+  if (!normalized.baseUpgrades) {
+    const level = raidLevel(normalized);
+    normalized.baseUpgrades = {
+      stash: level >= 20 ? 3 : level >= 10 ? 2 : 1,
+      shop: 1,
+    };
   }
   if (!normalized.stashStackVersion) {
     const previous = normalized.stash;
@@ -144,44 +196,57 @@ const CHALLENGES = [
  {id:'workshop',title:'Return Trip',metric:'extractions',goal:3,xp:150,item:{kind:'consumable',key:'medkit',amount:2}},
  {id:'extract_5',title:'Reliable Runner',metric:'extractions',goal:5,xp:220,item:{kind:'equipment',key:'backpack_1'},cash:80},
  {id:'search_10',title:'Leave No Drawer',metric:'chestsSearched',goal:10,xp:180,item:{kind:'material',key:'equipment_pack',tier:1,amount:1}},
- {id:'raiders_3',title:'Rival Patrol',metric:'extractedRaiderKills',goal:3,xp:250,item:{kind:'material',key:'military_pack',tier:2,amount:1}},
- {id:'packs_5',title:'Lucky Find',metric:'packsOpened',goal:5,xp:160,item:{kind:'material',key:'archive_pack',tier:2,amount:1}},
+ {id:'raiders_3',title:'Rival Patrol',metric:'extractedRaiderKills',goal:3,xp:250,item:{kind:'material',key:'military_pack',tier:1,amount:1}},
+ {id:'packs_5',title:'Lucky Find',metric:'packsOpened',goal:5,xp:160,item:{kind:'material',key:'archive_pack',tier:1,amount:1}},
  {id:'traps_3',title:'Hold the Line',metric:'trapsPlaced',goal:3,xp:150,item:{kind:'material',key:'barbed_wire',amount:2}},
  {id:'heals_5',title:'Field Medic',metric:'healsUsed',goal:5,xp:140,item:{kind:'consumable',key:'medkit',amount:2}},
- {id:'trade_500',title:'Making a Living',metric:'sellCash',goal:500,xp:250,item:{kind:'material',key:'industrial_pack',tier:2,amount:1}},
- {id:'extract_20',title:'Veteran Runner',metric:'extractions',goal:20,xp:500,item:{kind:'material',key:'equipment_pack',tier:3,amount:1},cash:200},
+ {id:'trade_500',title:'Making a Living',metric:'sellCash',goal:500,xp:250,item:{kind:'material',key:'industrial_pack',tier:1,amount:1}},
+ {id:'extract_20',title:'Veteran Runner',metric:'extractions',goal:20,xp:500,item:{kind:'material',key:'equipment_pack',tier:1,amount:1},cash:200},
 ];
 const ROTATION_MS=24*60*60*1000;
 const ROTATING_CHALLENGES=[
- {title:'Quick Return',metric:'extractions',goal:1,xp:80,cash:25,item:{kind:'material',key:'key',amount:1}},
- {title:'Clear the Street',metric:'extractedRaiderKills',goal:2,xp:130,item:{kind:'material',key:'keycard',tier:2,amount:1}},
- {title:'Supply Search',metric:'chestsSearched',goal:4,xp:100,item:{kind:'consumable',key:'bandage',amount:3}},
- {title:'Rival Watch',metric:'extractedRaiderKills',goal:1,xp:150,cash:45,item:{kind:'material',key:'keycard',tier:1,amount:1}},
- {title:'Unsealed',metric:'packsOpened',goal:2,xp:100,item:{kind:'material',key:'equipment_pack',tier:1,amount:1}},
- {title:'Field Treatment',metric:'healsUsed',goal:3,xp:90,item:{kind:'consumable',key:'medkit',amount:1}},
- {title:'Blocked Passage',metric:'trapsPlaced',goal:2,xp:110,item:{kind:'material',key:'barbed_wire',amount:2}},
- {title:'Trade Route',metric:'sellCash',goal:200,xp:100,item:{kind:'material',key:'keycard',tier:3,amount:1}},
+ {title:'Quick Return',metric:'extractions',goal:2,xp:115,cash:25,item:{kind:'material',key:'key',amount:1}},
+ {title:'Clear the Street',metric:'extractedRaiderKills',goal:3,xp:170,item:{kind:'material',key:'keycard',tier:1,amount:1}},
+ {title:'Supply Search',metric:'chestsSearched',goal:6,xp:135,item:{kind:'consumable',key:'bandage',amount:3}},
+ {title:'Rival Watch',metric:'extractedRaiderKills',goal:2,xp:185,cash:45,item:{kind:'material',key:'keycard',tier:1,amount:1}},
+ {title:'Unsealed',metric:'packsOpened',goal:3,xp:130,item:{kind:'material',key:'equipment_pack',tier:1,amount:1}},
+ {title:'Field Treatment',metric:'healsUsed',goal:4,xp:120,item:{kind:'consumable',key:'medkit',amount:1}},
+ {title:'Blocked Passage',metric:'trapsPlaced',goal:3,xp:145,item:{kind:'material',key:'barbed_wire',amount:2}},
+ {title:'Trade Route',metric:'sellCash',goal:300,xp:135,item:{kind:'material',key:'keycard',tier:1,amount:1}},
 ];
-const METRIC_LABELS={extractions:'Extract successfully',extractedKills:'Kill zombies and extract',extractedRaiderKills:'Kill raiders and extract',chestsSearched:'Search different chests and extract',packsOpened:'Open packs',trapsPlaced:'Place barbed wire and extract',healsUsed:'Use healing items and extract',sellCash:'Earn cash by selling loot'};
+function challengeDescription({ metric, goal }) {
+  const plural = one => goal + ' ' + (goal === 1 ? one : one + 's');
+  switch (metric) {
+    case 'extractions': return 'Extract from ' + plural('raid') + '.';
+    case 'extractedKills': return 'Defeat ' + plural('zombie') + ' and extract.';
+    case 'extractedRaiderKills': return 'Defeat ' + plural('raider') + ' and extract.';
+    case 'chestsSearched': return 'Search ' + plural('different chest') + ' and extract.';
+    case 'packsOpened': return 'Open ' + plural('pack') + '.';
+    case 'trapsPlaced': return 'Place ' + plural('barbed wire trap') + ' and extract.';
+    case 'healsUsed': return 'Use ' + plural('healing item') + ' and extract.';
+    case 'sellCash': return 'Earn ' + goal + ' cash by selling loot.';
+    default: return 'Complete the objective ' + goal + ' times.';
+  }
+}
 export function refreshChallengeRotation(profile,now=Date.now()){
  const date=new Date(now),period=Math.floor(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())/ROTATION_MS),old=profile.challengeRotation;
  if (old?.period === period && old.version === 3 && !old.entries.every(entry => entry.claimed)) {
-   if (old.accessRewards) return false;
+   if (old.challengeBalance === 3) return false;
    old.entries = old.entries.map(entry => {
      const current = ROTATING_CHALLENGES.find(challenge => challenge.title === entry.title);
      if (!current || entry.claimed) return entry;
      return { ...entry, ...current, baseline: current.metric === entry.metric ? entry.baseline : Number(profile[current.metric]) || 0 };
    });
-   old.accessRewards = true;
+   old.challengeBalance = 3;
    return true;
  }
  const round=old?.version===3&&old.period===period?(old.round??0)+1:0;
- profile.challengeRotation={period,round,version:3,accessRewards:true,entries:Array.from({length:3},(_,i)=>{const entry=ROTATING_CHALLENGES[(period*3+round*3+i)%ROTATING_CHALLENGES.length];return {...entry,baseline:Number(profile[entry.metric])||0,claimed:false};})};return true;
+ profile.challengeRotation={period,round,version:3,challengeBalance:3,entries:Array.from({length:3},(_,i)=>{const entry=ROTATING_CHALLENGES[(period*3+round*3+i)%ROTATING_CHALLENGES.length];return {...entry,baseline:Number(profile[entry.metric])||0,claimed:false};})};return true;
 }
 export function challengeProgress(profile,raidKills=0,raidStats={}){
  const rotation=profile.challengeRotation;
  if(!rotation||rotation.version!==3){const next={...profile};refreshChallengeRotation(next);return challengeProgress(next,raidKills,raidStats);}
- return rotation.entries.map((challenge,index)=>({...challenge,id:'rotation-'+rotation.period+'-'+(rotation.round??0)+'-'+index,rotationIndex:index,description:(METRIC_LABELS[challenge.metric]??challenge.metric)+': '+challenge.goal+'.',progress:Math.max(0,Math.min(challenge.goal,(Number(profile[challenge.metric])||0)-(challenge.baseline??0)+(challenge.metric==='extractedKills'?raidKills:Number(raidStats[challenge.metric])||0))),claimed:!!challenge.claimed}));
+ return rotation.entries.map((challenge,index)=>({...challenge,id:'rotation-'+rotation.period+'-'+(rotation.round??0)+'-'+index,rotationIndex:index,description:challengeDescription(challenge),progress:Math.max(0,Math.min(challenge.goal,(Number(profile[challenge.metric])||0)-(challenge.baseline??0)+(challenge.metric==='extractedKills'?raidKills:Number(raidStats[challenge.metric])||0))),claimed:!!challenge.claimed}));
 }
 
 export function claimChallenge(profile,id){
@@ -254,6 +319,66 @@ export class RaidBase {
         player.itemSlots.fill(null);
       });
     });
+    const upgradeDialog = root.querySelector('#raid-base-upgrade');
+    const upgradeConfirm = root.querySelector('#raid-upgrade-confirm');
+    this.pixelLabel(upgradeDialog.querySelector('form button'), 'Cancel');
+    this.pixelLabel(upgradeConfirm, 'UPGRADE');
+    let upgradeStation;
+    for (const button of root.querySelectorAll('[data-base-upgrade]')) {
+      button.addEventListener('click', () => {
+        upgradeStation = button.dataset.baseUpgrade;
+        const tier = baseTier(this.profile, upgradeStation);
+        const next = BASE_UPGRADES[upgradeStation][tier];
+        if (!next) return;
+        const stash = upgradeStation === 'stash';
+        this.pixelLabel(root.querySelector('#raid-upgrade-title'), stash ? 'Expand stash' : 'Upgrade shop to ' + BASE_TIER_LABELS[tier + 1]);
+        this.pixelLabel(root.querySelector('#raid-upgrade-detail'),
+          stash ? 'Add ' + (next.slots - stashLimit(this.profile)) + ' slots for gear and supplies.' : 'These items become available as soon as you upgrade.', 390);
+        const preview = root.querySelector('#raid-upgrade-preview');
+        preview.replaceChildren();
+        if (stash) {
+          const slots = document.createElement('span');
+          slots.className = 'raid-upgrade-capacity';
+          this.pixelLabel(slots, stashLimit(this.profile) + ' to ' + next.slots + ' slots');
+          preview.append(slots);
+        } else {
+          for (const offer of SHOP.filter(offer => offer.shopTier === tier + 1 && !offer.blueprintOnly)) {
+            const card = document.createElement('div');
+            card.className = 'raid-upgrade-item';
+            const icon = document.createElement('img');
+            icon.src = getItemIconSrc(offer.item);
+            const name = getItemDisplayName(offer.item);
+            icon.alt = name;
+            card.title = name;
+            card.append(icon);
+            preview.append(card);
+          }
+        }
+        const level = root.querySelector('#raid-upgrade-level');
+        this.pixelLabel(root.querySelector('#raid-upgrade-required'), 'Requires [');
+        this.pixelLabel(level, 'LVL' + next.level);
+        this.pixelLabel(root.querySelector('#raid-upgrade-plus'), '+');
+        this.pixelLabel(root.querySelector('#raid-upgrade-end'), ']');
+        const eligible = raidLevel(this.profile) >= next.level;
+        const affordable = this.profile.cash >= next.cash;
+        level.classList.toggle('option-unavailable', !eligible);
+        root.querySelector('#raid-upgrade-cost').classList.toggle('option-unavailable', !affordable);
+        this.pixelLabel(root.querySelector('#raid-upgrade-cash'), next.cash.toLocaleString());
+        upgradeConfirm.disabled = !eligible || !affordable;
+        upgradeDialog.showModal();
+      });
+    }
+    upgradeConfirm.addEventListener('click', () => {
+      if (!upgradeStation) return;
+      const success = this.transact(next => {
+        const tier = baseTier(next, upgradeStation);
+        const upgrade = BASE_UPGRADES[upgradeStation][tier];
+        if (!upgrade || raidLevel(next) < upgrade.level || next.cash < upgrade.cash) return 'Upgrade requirements not met.';
+        next.cash -= upgrade.cash;
+        next.baseUpgrades = { ...next.baseUpgrades, [upgradeStation]: tier + 1 };
+      });
+      if (success) upgradeDialog.close();
+    });
     const sort = root.querySelector('#raid-stash-sort');
     this.pixelLabel(sort, 'Sort stash');
     const sortModes = [['cash', 'Cash value'], ['type', 'Type'], ['amount', 'Quantity']];
@@ -298,7 +423,7 @@ export class RaidBase {
       this.itemName ??= document.createElement('div');
       this.itemName.className = 'inv-tooltip visible';
       host.append(this.itemName);
-      this.pixelLabel(this.itemName, slot.dataset.itemName, 240);
+      this.pixelLabel(this.itemName, slot.dataset.itemName, 240, ITEM_TEXT_COLORS[slot.dataset.itemRarity]);
       this.positionItemName(event);
     });
     root.addEventListener('pointermove', (event) => {
@@ -398,8 +523,10 @@ export class RaidBase {
       requestAnimationFrame(()=>{settings.scrollTop=0;});
     });
     settings.addEventListener('close', () => settingsButton.focus({ preventScroll: true }));
-    for (const label of root.querySelectorAll('nav button, #raid-settings-open, .raid-base-overview h2, .raid-base-mission p, .raid-transfer-hint, .raid-station-description, [data-base-panel="craft"] > h2, [data-base-panel="shop"] > h2, #raid-settings :is(h2, legend, label span)')) {
-      this.pixelLabel(label, label.textContent.trim(), label.matches('p') ? 320 : undefined);
+    for (const label of root.querySelectorAll('nav button, #raid-settings-open, #raid-deploy, #raid-deploy-confirm, #raid-deploy-title, .raid-base-overview h2, .raid-base-mission p, .raid-transfer-hint, .raid-station-description, [data-base-panel="craft"] > h2, [data-base-panel="shop"] h2, label[for="raid-map-select"], #raid-settings :is(h2, legend, label span)')) {
+      const text = label.textContent.trim();
+      const uppercase = label.matches('h2, nav button, #raid-settings-open, #raid-deploy, #raid-deploy-confirm');
+      this.pixelLabel(label, uppercase ? text.toUpperCase() : text, label.matches('p') ? 320 : undefined);
     }
     root.addEventListener('click', () => this.startMusic(true));
     root.addEventListener('keydown', () => this.startMusic(true));
@@ -521,10 +648,11 @@ export class RaidBase {
     return true;
   }
 
-  pixelLabel(element, label, width) {
+  pixelLabel(element, label, width, fillColor) {
     element.setAttribute('aria-label', label);
-    if (width) setElementWrappedPixelText(element, label, width, PIXEL_TEXT_SCALE_SM);
-    else setElementPixelText(element, label, PIXEL_TEXT_SCALE_SM);
+    const options = { fillColor: fillColor ?? (element.matches('h2,h3,legend') ? '#e4ce9b' : undefined) };
+    if (width) setElementWrappedPixelText(element, label, width, PIXEL_TEXT_SCALE_SM, options);
+    else setElementPixelText(element, label, PIXEL_TEXT_SCALE_SM, options);
   }
 
   setStatus(message) {
@@ -585,12 +713,19 @@ export class RaidBase {
     const sort = this.root.querySelector('#raid-stash-sort');
     this.pixelLabel(sort, sort.dataset.label || 'Sort stash');
     const profile = this.profile;
+    for (const button of this.root.querySelectorAll('[data-base-upgrade]')) {
+      const station = button.dataset.baseUpgrade;
+      const tier = baseTier(profile, station);
+      const maxed = tier === BASE_UPGRADES[station].length;
+      button.disabled = maxed;
+      this.pixelLabel(button, 'UPGRADE');
+    }
     const level = raidLevel(profile);
     const xpProgress = this.root.querySelector('#raid-xp-progress');
     xpProgress.max = levelCost(level);
     xpProgress.value = profile.xp - levelStart(level);
-    this.pixelLabel(this.root.querySelector('#raid-stats'),
-      `Level ${level}  /  ${profile.xp - levelStart(level)}/${levelCost(level)} XP`);
+    this.pixelLabel(this.root.querySelector('#raid-stats'), 'LEVEL ' + level, undefined, '#e4ce9b');
+    this.pixelLabel(this.root.querySelector('#raid-xp-label'), xpProgress.value + '/' + xpProgress.max + ' XP');
     this.pixelLabel(this.root.querySelector('#raid-extract-count'), `Extracts: ${profile.extractions}`);
     this.pixelLabel(this.root.querySelector('#raid-loss-count'), `Lost raids: ${profile.losses}`);
     this.pixelLabel(this.root.querySelector('#raid-cash'), `${profile.cash.toLocaleString()}`);
@@ -616,7 +751,6 @@ export class RaidBase {
     for (const challenge of challengeProgress(this.profile).filter((entry) => !entry.claimed)) {
       const card = document.createElement('article');
       const title = document.createElement('h3');
-      const goal = challenge.goal;
       this.pixelLabel(title, challenge.title);
       const objective = document.createElement('p');
       this.pixelLabel(objective, challenge.description, 350);
@@ -628,23 +762,18 @@ export class RaidBase {
       rewards.className = 'raid-challenge-rewards';
       const count = document.createElement('span');
       this.pixelLabel(count, `${progress.value}/${progress.max}`);
-      const xpIcon = document.createElement('span');
-      xpIcon.className = 'raid-xp-icon';
-      xpIcon.setAttribute('aria-hidden', 'true');
+      const progressRow = document.createElement('div');
+      progressRow.className = 'raid-challenge-progress';
+      progressRow.append(progress, count);
       const xp = document.createElement('span');
-      this.pixelLabel(xp, `${challenge.xp} XP`);
-      rewards.append(count, xpIcon, xp);
+      this.pixelLabel(xp, '+' + challenge.xp + ' XP', undefined, '#edbd5b');
+      rewards.append(xp);
       if (challenge.item) {
         const icon = document.createElement('img');
         icon.src = getItemIconSrc(challenge.item);
         icon.alt = getItemDisplayName(challenge.item);
         icon.title = icon.alt;
         rewards.append(icon);
-        if (challenge.item.key === 'keycard') {
-          const tier = document.createElement('span');
-          this.pixelLabel(tier, ['I', 'II', 'III'][packTier(challenge.item) - 1]);
-          rewards.append(tier);
-        }
         if (challenge.item.amount > 1) {
           const quantity = document.createElement('span');
           this.pixelLabel(quantity, `x${challenge.item.amount}`);
@@ -652,7 +781,7 @@ export class RaidBase {
         }
       }
       if(challenge.cash){const cash=document.createElement('img');cash.src='assets/items/misc/cash.png';cash.alt='Cash';const amount=document.createElement('span');this.pixelLabel(amount,String(challenge.cash));rewards.append(amount,cash);}
-      card.append(title, objective, progress, rewards);
+      card.append(title, objective, progressRow, rewards);
       if (progress.value >= progress.max) {
         card.append(this.button('Claim reward', () => this.transact((next) => claimChallenge(next, challenge.id))));
       }
@@ -915,8 +1044,8 @@ export class RaidBase {
   renderStash() {
     const { kit, stash } = this.profile;
     const limit = stashLimit(this.profile);
-    this.pixelLabel(this.root.querySelector('#raid-stash-title'), `Stash ${storageLayout(stash, limit, 10).used}/${limit}`);
-    this.pixelLabel(this.stashPanel.querySelector('h2'), 'Loadout');
+    this.pixelLabel(this.root.querySelector('#raid-stash-title'), `STASH ${storageLayout(stash, limit, 10).used}/${limit}`);
+    this.pixelLabel(this.stashPanel.querySelector('h2'), 'LOADOUT');
     const kitGrid = this.root.querySelector('#raid-kit');
     const gearGrid = this.root.querySelector('#raid-gear');
     const stashGrid = this.root.querySelector('#raid-stash');
@@ -997,8 +1126,8 @@ export class RaidBase {
       if (item?.kind !== 'material' || item.key !== 'blueprint') return 'Blueprint is unavailable.';
       const blueprint = resolveBlueprint(item, next.shopBlueprints);
       if (blueprint.key === 'blueprint_old') return 'This blueprint is already studied.';
-      unlocked = SHOP.find(offer => offer.item.kind === 'weapon' && offer.item.key === blueprint.blueprintWeapon)?.item;
-      if (!unlocked) return 'This weapon is unavailable in the shop.';
+      unlocked = SHOP.find(offer => shopUnlockId(offer.item) === blueprintUnlockId(blueprint.blueprintWeapon))?.item;
+      if (!unlocked) return 'This item is unavailable in the shop.';
       slots[index] = item.amount > 1 ? { ...item, amount: item.amount - 1 } : null;
       if (!storeInStash(next, player, [{ ...blueprint, key: 'blueprint_old', amount: 1 }])) {
         return 'Make room in your stash for the studied blueprint.';
@@ -1076,7 +1205,8 @@ export class RaidBase {
   }
 
   addRepairAction(item, actions, getItem, equip = null) {
-    if (itemDurability(item) >= MAX_DURABILITY) return;
+    const repairLimit = 80;
+    if (itemDurability(item) >= repairLimit) return;
     const equipment = item.kind === 'equipment';
     if (!equipment && item.kind !== 'weapon' && item.kind !== 'melee') return;
     const costs = equipment
@@ -1084,12 +1214,12 @@ export class RaidBase {
       : { repair_kit: 1 };
     actions.push(['Repair', () => this.openQuantityDialog('Repair', item, 1, (next, player) => {
       const current = getItem(next, player);
-      if (!current || itemDurability(current) >= MAX_DURABILITY) return 'Item does not need repair.';
+      if (!current || itemDurability(current) >= repairLimit) return 'Item does not need repair.';
       const inventory = stashInventory(next, player);
       if (!inventory.consumeMaterials(costs)) return 'Missing repair materials in stash.';
       next.stash = inventory.itemSlots;
       const repaired = getItem(next, player);
-      repaired.durability = MAX_DURABILITY;
+      repaired.durability = repairLimit;
       if (equip) equip(player, repaired);
     }, costs),!stashInventory(this.profile,new Player()).hasMaterials(costs)]);
   }
@@ -1325,8 +1455,30 @@ export class RaidBase {
       previousCategory = category;
       const unlocked = shopOfferUnlocked(this.profile, offer);
       const price = `${offer.price} Cash`;
+      const requirements = [];
+      if (offer.blueprintOnly) requirements.push(getItemDisplayName(offer.item) + ' Blueprint');
+      else if (baseTier(this.profile, 'shop') < offer.shopTier) requirements.push(`Shop ${BASE_TIER_LABELS[offer.shopTier]}`);
+      const requirement = offer.blueprintOnly ? 'Blueprint' : requirements[0] ?? '';
       const select = (anchor, keepPosition = false) => {
         this.catalogSelection = index;
+        const detail = document.createElement('div');
+        const description = document.createElement('p');
+        description.textContent = getItemDescription(offer.item);
+        detail.append(description);
+        if (!unlocked) {
+          const locked = document.createElement('p');
+          locked.textContent = offer.blueprintOnly ? 'Find and study the ' + requirements[0] + ' to unlock.' : 'Requires ' + requirements.join(' and ');
+          detail.append(locked);
+        }
+        const cost = document.createElement('div');
+        cost.className = 'raid-shop-price';
+        const cash = document.createElement('img');
+        cash.src = 'assets/items/misc/cash.png';
+        cash.alt = 'Cash';
+        const amount = document.createElement('span');
+        this.pixelLabel(amount, offer.price.toLocaleString());
+        cost.append(amount, cash);
+        detail.append(cost);
         this.inspect(offer.item, [['BUY',
         () => {
           if (!this.transact((next, player) => {
@@ -1341,13 +1493,13 @@ export class RaidBase {
               [{ transform: 'scale(1)' }, { transform: 'scale(1.12)', color: '#f5ce86' }, { transform: 'scale(1)' }],
               { duration: 250, easing: 'ease-out' });
           }
-        }, !unlocked || this.profile.cash < offer.price]], price, anchor, { keepPosition });
+        }, !unlocked || this.profile.cash < offer.price]], detail, anchor, { keepPosition });
       };
       const card = document.createElement('div');
       card.className = 'raid-shop-offer';
-      const slot = this.slot(card, offer.item, select, unlocked ? '' : `Lv ${offer.level}`);
+      const slot = this.slot(card, offer.item, select, unlocked ? '' : requirement);
       slot.dataset.locked = String(!unlocked);
-      slot.setAttribute('aria-label', `${getItemDisplayName(offer.item)}, ${price}${unlocked ? '' : `, level ${offer.level} required`}`);
+      slot.setAttribute('aria-label', `${getItemDisplayName(offer.item)}, ${price}${unlocked ? '' : `, ${requirement} required`}`);
       const priceTag = document.createElement('div');
       priceTag.className = 'raid-shop-price';
       priceTag.classList.toggle('option-unavailable',!unlocked);
@@ -1372,7 +1524,9 @@ export class RaidBase {
 
   inspect(item, actions, detail, anchor, { keepPosition = false, showClose = true } = {}) {
     const title = document.createElement('h2');
-    this.pixelLabel(title, getItemDisplayName(item), 260);
+    const rarity = itemTextRarity(item);
+    title.dataset.rarity = rarity;
+    this.pixelLabel(title, getItemDisplayName(item), 260, ITEM_TEXT_COLORS[rarity]);
     const description = detail instanceof HTMLElement ? detail : document.createElement('p');
     if (typeof detail === 'string') this.pixelLabel(description, detail || getItemDescription(item), 250);
     else for (const line of description.querySelectorAll('p')) {
@@ -1522,6 +1676,7 @@ export class RaidBase {
     slot.disabled = !action;
     if (item) {
       const label = getItemDisplayName(item);
+      slot.dataset.itemRarity = itemTextRarity(item);
       slot.dataset.itemName = getItemDisplayName({ ...item, amount: 1 });
       slot.setAttribute('aria-label', label);
       const src = getItemIconSrc(item);
@@ -1533,11 +1688,6 @@ export class RaidBase {
         slot.appendChild(img);
       }
       if ((item.amount ?? 1) > 1 && !badge) badge = String(item.amount);
-      if(isTieredItem(item)){
-        const tier=document.createElement('span');tier.className='inv-pack-tier';
-        tier.append(createPixelTextImg(['','I','II','III'][packTier(item)],PIXEL_TEXT_SCALE_SM,{fillColor:'#e5bc50',outlineColor:[220,112,24]}));
-        slot.append(tier);
-      }
       slot.addEventListener('click', () => action?.(slot));
       if (action) slot.addEventListener('contextmenu', (event) => {
         event.preventDefault();
@@ -1554,7 +1704,7 @@ export class RaidBase {
     if (badge) {
       const tag = document.createElement('span');
       tag.className='raid-item-count';
-      tag.append(createPixelTextImg(badge,PIXEL_TEXT_SCALE_SM,/^\d+$/.test(badge)?{outlineColor:[0,0,0]}:{}));
+      tag.append(createPixelTextImg(badge,PIXEL_TEXT_SCALE_SM,/^\d+$/.test(badge)?{shadow: false, outlineColor:[0,0,0]}:{}));
       slot.appendChild(tag);
     }
     if (item && ['weapon', 'melee', 'equipment'].includes(item.kind) && itemDurability(item) < 100) {

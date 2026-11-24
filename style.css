@@ -3339,7 +3339,8 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
   #overlay #raid-deploy { align-self: start; margin: 2px 0 0; min-height: 40px; }
 
   #raid-base .raid-transfer-hint { display: none; }
-  #raid-base .raid-base-workspace #raid-stash { width: 100%; --raid-stash-gap: 4px; }
+  #raid-base .raid-base-workspace #raid-stash { width: 100%; }
+  #raid-base #raid-stash { --raid-stash-gap: 4px; }
   #raid-base .raid-base-workspace [data-base-panel="stash"] .raid-base-slot img { width: 82%; height: 82%; }
   #raid-base .raid-base-workspace [data-base-panel="stash"] .raid-base-slot span {
     font-size: clamp(10px, 1.7vw, 16px);
@@ -3449,8 +3450,6 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
   border: 1px solid #555344;
   background: #242621;
 }
-#raid-deploy-dialog .raid-loadout-layout { --raid-slot-gap: 3px; }
-#raid-deploy-dialog #raid-stash { --raid-stash-gap: 3px; }
 #raid-deploy-dialog footer { padding: 4px 8px; }
 #overlay #raid-deploy-dialog footer .ui-slice-button {
   min-height: 36px;
@@ -3572,8 +3571,8 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
   #raid-base .raid-base-workspace #raid-stash {
     width: 100%;
     max-width: none;
-    --raid-stash-gap: clamp(3px, .55vw, 9px);
   }
+  #raid-base #raid-stash { --raid-stash-gap: clamp(3px, .55vw, 9px); }
   #raid-base .raid-loadout-layout {
     --raid-slot-gap: clamp(3px, .55vw, 9px);
     --raid-load-cell: min(128px, calc((100cqh - 4 * var(--raid-slot-gap)) / 5),
@@ -3836,7 +3835,7 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
 #raid-base :is(.raid-station-description, .raid-transfer-hint, .raid-base-mission > p:last-of-type,
   #raid-challenges article > p, #raid-deploy-dialog > header > p:not([role="status"]),
   #raid-selection .inv-context-desc) .inv-pixel-text-img {
-  filter: grayscale(1) brightness(.58);
+  --ui-text-tone: grayscale(1) brightness(.72);
   zoom: calc(var(--desktop-ui-scale, 1) * .88);
 }
 #raid-base .raid-base-workspace.raid-catalog-active { overflow-y: auto; }
@@ -4117,9 +4116,9 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 :is(.inv-item-slot,.inv-chest-slot,.inv-equip-slot,.inv-weapon-slot) > .inv-slot-icon:not(.inv-slot-label),
 #raid-base .raid-base-slot > img:not(.raid-gear-placeholder) {
  width:77.777778% !important;height:77.777778% !important;max-width:77.777778% !important;max-height:77.777778% !important;
- filter:drop-shadow(2.777778cqw 2.777778cqw 0 #0004);
+ filter:drop-shadow(5.555556cqw 5.555556cqw 0 #0004);
 }
-.raid-drag-ghost,.inv-drag-ghost > .inv-slot-icon { filter:drop-shadow(.5px .5px 0 #0004); }
+.raid-drag-ghost,.inv-drag-ghost > .inv-slot-icon { filter:drop-shadow(1px 1px 0 #0004); }
 .inv-stack-count, #raid-base .raid-item-count > .inv-pixel-text-img {
  filter:drop-shadow(.6px 0 0 #000) drop-shadow(-.6px 0 0 #000) drop-shadow(0 .6px 0 #000) drop-shadow(0 -.6px 0 #000);
 }
@@ -4158,7 +4157,7 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
 .inv-pack-tier > .inv-pixel-text-img,#raid-base .raid-base-slot .inv-pack-tier > img { filter:brightness(0) saturate(100%) invert(81%) sepia(75%) saturate(541%) hue-rotate(354deg) brightness(98%) contrast(93%) drop-shadow(1px 0 #5c4615) drop-shadow(-1px 0 #5c4615) drop-shadow(0 1px #5c4615) drop-shadow(0 -1px #5c4615); }
 
 /* Plain text everywhere; only quantity and tier bitmaps request their own outlines. */
-:where(body,button,input,select,textarea,label,p,span,h1,h2,h3,h4,div) { -webkit-text-stroke:0 !important;text-shadow:none !important; }
+:where(body,button,input,select,textarea,label,p,span,h1,h2,h3,h4,div) { -webkit-text-stroke:0 !important; }
 .inv-pack-tier > .inv-pixel-text-img,#raid-base .raid-base-slot .inv-pack-tier > img { filter:none !important; }
 /* Real locks fill the slot. Locked shop items keep the normal item padding. */
 #raid-base #raid-shop .raid-base-slot[data-locked="true"] > img:not(.raid-gear-placeholder) {width:77.777778% !important;height:77.777778% !important;max-width:77.777778% !important;max-height:77.777778% !important;}
@@ -4300,8 +4299,8 @@ body.mobile-ui #raid-base .raid-stash-tools h2 .inv-pixel-text-img {max-height:1
 body.mobile-ui #raid-base .raid-stash-tools button {--ui-btn-border:5px;padding:3px 5px;}
 body.mobile-ui #raid-base .raid-stash-tools button .inv-pixel-text-img {height:12px;width:auto;}
 body.mobile-ui #raid-base :is(#raid-kit,#raid-gear) {padding:6px;}
+body.mobile-ui #raid-base .raid-loadout-layout { --raid-slot-gap: 4px; }
 body.mobile-ui #raid-base .raid-base-workspace .raid-loadout-layout {
-  --raid-slot-gap:4px;
   --raid-load-cell:min(58px,calc((100cqh - 12px - 4 * var(--raid-slot-gap)) / 5),calc((100cqw - 24px - 5.25 * var(--raid-slot-gap)) / 6.25));
   overflow:visible;align-content:start;
 }
@@ -4437,3 +4436,324 @@ body.game-active.mobile-ui #pickup-status { bottom: auto; top: calc(100% + 18px)
 @keyframes interact-ready { 0%,100% { outline-color: #efb94c; outline-offset: 2px; } 50% { outline-color: #fff0ab; outline-offset: 5px; } }
 .mb-interact.mb-nearby { outline: 2px solid #efb94c; animation: interact-ready 1s ease-in-out infinite; }
 @media(prefers-reduced-motion:reduce){.mb-interact.mb-nearby{animation:none;}}
+
+
+#raid-base #raid-base-upgrade {
+  width: min(560px, 94vw);
+  max-height: 82dvh;
+  overflow: auto;
+}
+#raid-base-upgrade h2, #raid-base-upgrade p { margin: 0 0 10px; }
+#raid-upgrade-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 6px;
+  margin-block: 10px;
+}
+.raid-upgrade-item, .raid-upgrade-capacity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: #181b17;
+  text-align: center;
+}
+.raid-upgrade-item > img { width: 32px; height: 32px; object-fit: contain; image-rendering: pixelated; }
+.raid-upgrade-requirements { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-block: 10px; }
+.raid-upgrade-requirements .raid-shop-price { margin: 0; }
+#raid-upgrade-cost > img { width: 24px; height: 24px; }
+
+
+/* Share the same hard pixel shadow across the base, raid HUD and inventory cards. */
+body {
+  --ui-text-shadow: 1px 1px 0 rgba(0, 0, 0, .9);
+}
+:is(#overlay, #inventory, #hud, #mobile-controls) {
+  text-shadow: var(--ui-text-shadow);
+}
+:is(#overlay, #inventory, #hud, #mobile-controls) .inv-pixel-text-img:not(.inv-stack-count, .raid-item-count *, .inv-pack-tier *) {
+  filter: var(--ui-text-tone, none);
+}
+:is(#overlay, #inventory, #hud, #mobile-controls) :is(button, label, select, input, p, span, h1, h2, h3, legend) {
+  text-shadow: var(--ui-text-shadow);
+}
+#raid-base-upgrade #raid-upgrade-preview {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+#raid-base-upgrade .raid-upgrade-item {
+  justify-content: flex-start;
+  min-height: 75px;
+  padding: 8px 4px;
+  background: #1b1e19;
+  box-shadow: inset 0 1px #ffffff12, 0 2px #0005;
+}
+#raid-base-upgrade .raid-upgrade-item > img {
+  width: 38px;
+  height: 38px;
+  padding: 5px;
+  background: url('assets/ui/inv_slot.png') center / 100% 100%;
+  box-sizing: border-box;
+}
+#raid-base-upgrade .raid-upgrade-item > span .inv-pixel-text-img { max-width: 100%; }
+#raid-base-upgrade .raid-upgrade-capacity { grid-column: 1 / -1; padding: 9px; }
+#raid-base-upgrade #raid-upgrade-cost > img { width: 28px; height: 28px; }
+
+
+:is(#overlay, #inventory, #hud, #mobile-controls) button:not(.inv-slot-sprite, .raid-base-slot) {
+  --button-shadow-pixel: calc(var(--ui-btn-border, 4px) / var(--ui-btn-slice, 2));
+  box-shadow: var(--button-shadow-pixel) var(--button-shadow-pixel) 0 #0009;
+}
+[data-rarity="epic"] > .inv-pixel-text-img {
+  animation: epic-text-glow 2.8s ease-in-out infinite alternate;
+}
+@keyframes epic-text-glow {
+  from { filter: drop-shadow(0 0 2px #a057da55); }
+  to { filter: drop-shadow(0 0 4px #bd75efaa); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-rarity="epic"] > .inv-pixel-text-img { animation: none; }
+}
+
+
+#raid-base .raid-upgrade-requirements { justify-content: flex-start; flex-wrap: wrap; gap: 3px; }
+#raid-base #raid-upgrade-cost { gap: 4px; }
+#raid-base .raid-base-top nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
+#raid-base .raid-base-top nav button { width: 100%; min-width: 0; margin: 0; }
+#raid-base .raid-quantity-actions > button { flex: 1 1 0; min-width: 0; }
+#raid-base #raid-challenges article {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #2a2e25, #1d211b);
+  box-shadow: inset 0 1px #ffffff14, 0 2px #0005;
+}
+#raid-base #raid-challenges article :is(h3, p) { margin: 0; }
+#raid-base .raid-challenge-progress { display: flex; align-items: center; gap: 8px; }
+#raid-base .raid-challenge-progress progress { flex: 1; min-width: 0; width: 100%; margin: 0; }
+#raid-base .raid-challenge-rewards { gap: 7px; margin: 0; padding-top: 5px; border-top: 1px solid #ffffff14; }
+#raid-base .raid-challenge-rewards > img { width: 25px; height: 25px; }
+
+
+#raid-base #raid-base-upgrade { box-sizing: border-box; max-width: 94vw; }
+#raid-base-upgrade #raid-upgrade-preview {
+  grid-template-columns: repeat(auto-fit, minmax(42px, 48px));
+}
+#raid-base-upgrade .raid-upgrade-item { min-height: 0; padding: 0; background: none; box-shadow: none; }
+#raid-base-upgrade .raid-upgrade-item > img { width: 46px; height: 46px; }
+#raid-base-upgrade:has(.raid-upgrade-capacity) #raid-upgrade-preview { grid-template-columns: 1fr; }
+#raid-base-upgrade .raid-upgrade-requirements { gap: 4px; }
+
+
+/* Keep button shadows visible under the focus and hover outlines. */
+body :is(#overlay, #inventory, #hud, #mobile-controls) button.ui-slice-button:is(:hover,:focus,:focus-visible,:active):not(.raid-base-slot, .inv-slot-sprite),
+#overlay #raid-base .raid-base-mission #raid-deploy,
+#overlay #raid-base .raid-base-mission #raid-deploy:is(:hover,:focus,:focus-visible,:active),
+#raid-deploy-confirm, #raid-deploy-confirm:is(:hover,:focus,:focus-visible) {
+  --button-shadow-pixel: calc(var(--ui-btn-border, 4px) / var(--ui-btn-slice, 2));
+  box-shadow: var(--button-shadow-pixel) var(--button-shadow-pixel) 0 #0008 !important;
+}
+#raid-base .raid-level-progress {
+  width: min(100%, 240px);
+  justify-items: stretch;
+  gap: 5px;
+  padding: 5px 8px;
+  background: #1c211b;
+  border: 1px solid #b6a37530;
+  box-shadow: 2px 2px 0 #0005;
+  box-sizing: border-box;
+}
+.raid-level-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+#raid-xp-label .inv-pixel-text-img { max-width: 100%; height: 12px; object-fit: contain; object-position: left; }
+#raid-base #raid-xp-progress { width: 100%; height: 7px; background: #101510; border: 1px solid #81765855; }
+#raid-xp-progress::-webkit-progress-bar { background: #101510; }
+#raid-xp-progress::-webkit-progress-value { background: linear-gradient(#ebc977, #9b7137); }
+#raid-xp-progress::-moz-progress-bar { background: linear-gradient(#ebc977, #9b7137); }
+#raid-base-upgrade #raid-upgrade-preview { grid-template-columns: repeat(auto-fit, minmax(58px, 62px)); gap: 6px; }
+#raid-base-upgrade .raid-upgrade-item > img { width: 62px; height: 62px; padding: 6px; }
+#raid-base-upgrade #raid-upgrade-cost > img { width: 40px; height: 40px; }
+#raid-base #raid-base-upgrade,
+:is(#raid-base, #inventory) .raid-quantity-dialog {
+  background: linear-gradient(150deg, #303129, #1b211b) !important;
+  border-top: 2px solid #a68b575e;
+}
+#raid-base #raid-base-upgrade h2 { padding-bottom: 8px; border-bottom: 1px solid #b9a16a40; }
+#raid-base .raid-upgrade-requirements { padding: 5px 8px; background: #1419149c; }
+#raid-base #raid-challenges article { border-left: 2px solid #b59b5d70; }
+body.mobile-ui #raid-base .raid-level-progress { padding: 3px 5px; gap: 3px; }
+body.mobile-ui #raid-base #raid-xp-progress { height: 5px; }
+
+
+#raid-base #raid-shop .raid-catalog-heading {
+  border: 0;
+  border-image: none;
+  margin-bottom: 4px;
+}
+#raid-base .raid-base-columns,
+#raid-base .raid-base-columns > .raid-base-section {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+:is(#overlay, #inventory, #hud) img[src$="/cash.png"]:not(.inv-slot-icon) {
+  filter: drop-shadow(1px 1px 0 #0007);
+}
+
+
+#raid-base #raid-shop .raid-catalog-heading,
+:is(#raid-base, #inventory, #overlay) :is(h1,h2,h3):has(+ p:not(:empty)),
+#raid-base .raid-stash-tools:has(+ .raid-station-description:not(:empty)),
+:is(#raid-base, #inventory) .inv-context-title:has(+ .inv-context-desc:not(:empty)) {
+  border: 0;
+  border-image: none;
+  box-shadow: inset 0 -1px #b9a16a40;
+  padding-bottom: 6px;
+}
+#raid-base #raid-shop .raid-catalog-heading { margin-bottom: 4px; }
+
+#raid-deploy-dialog :is(#raid-transfer-all, [data-base-upgrade="stash"], #raid-stash-sort) {
+  display: none !important;
+}
+#raid-base #raid-deploy-dialog .raid-loadout-layout { justify-content: center; align-content: start; }
+#raid-base #raid-deploy-dialog #raid-stash { justify-content: center; align-content: start; }
+#raid-base #raid-deploy-dialog .raid-stash-tools { justify-content: center; }
+
+
+#raid-base #raid-deploy-dialog[open] {
+  height: min(78dvh, 760px);
+  max-height: calc(100dvh - 24px);
+}
+#raid-base #raid-deploy-dialog .raid-base-columns > .raid-base-section {
+  background: var(--field-grid), linear-gradient(145deg, #302b23, #1b221e 75%);
+  padding: 6px;
+}
+body.mobile-ui #raid-base #raid-deploy-dialog[open] {
+  height: 88dvh;
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 12px);
+}
+
+
+/* Keep the card surfaces while clearing the patterned strip between them. */
+#raid-base .raid-base-workspace > .raid-base-columns,
+#raid-base #raid-deploy-dialog .raid-base-columns {
+  background: transparent;
+  box-shadow: none;
+}
+#raid-base :is(.raid-base-workspace, #raid-deploy-dialog) .raid-base-columns > .raid-base-section {
+  background: linear-gradient(145deg, #302b23, #1b221e 75%);
+}
+#raid-base .raid-station-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#raid-base .raid-station-title h2 { margin: 0; }
+#raid-base .raid-base-workspace .raid-base-columns .raid-stash-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: 7px;
+}
+#raid-base .raid-base-workspace :is(#raid-transfer-all, #raid-stash-sort) { margin-inline-start: auto; }
+#overlay #raid-base .raid-stash-tools > button,
+#overlay #raid-base .raid-stash-tools [data-base-upgrade] {
+  --ui-btn-border: 5px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+#overlay #raid-base .raid-stash-tools button .inv-pixel-text-img {
+  width: auto;
+  max-width: 100%;
+  height: 12px;
+}
+:is(#overlay, #inventory, #hud) img[src$="/cash.png"]:not(.inv-slot-icon, .raid-base-slot > img) {
+  filter: url(#cash-pixel-shadow);
+}
+
+
+/* Cover the base workspace texture in the strip between the two cards. */
+#raid-base .raid-base-workspace > .raid-base-columns,
+#raid-base #raid-deploy-dialog .raid-base-columns {
+  background: #1b211d !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+
+/* Common card rhythm for titles, actions, descriptions and the first slot row. */
+#raid-base {
+  --base-card-inset: clamp(8px, 1vw, 16px);
+  --base-card-gap: 8px;
+  --base-card-divider: #b9a16a40;
+}
+#raid-base .raid-base-workspace > .raid-base-columns > .raid-base-section,
+#raid-base .raid-base-workspace > [data-base-panel="shop"] {
+  box-sizing: border-box;
+  padding: var(--base-card-inset);
+}
+#raid-base :is(.raid-base-workspace, #raid-deploy-dialog) .raid-stash-tools {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  min-height: 42px;
+  margin: 0;
+  padding: 6px 0;
+  align-items: center;
+  box-shadow: inset 0 -1px var(--base-card-divider);
+}
+#raid-base .raid-stash-tools h2 {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+#overlay #raid-base .raid-stash-tools button {
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  margin-block: 0;
+}
+#raid-base .raid-stash-tools + .raid-station-description {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  margin: 0;
+  padding-block: var(--base-card-gap);
+}
+#raid-base .raid-base-workspace .raid-base-columns .raid-stash-tools + .raid-station-description {
+  min-height: calc(16px + 33px * var(--desktop-ui-scale, 1));
+}
+#raid-base .raid-base-columns :is(.raid-loadout-layout, #raid-stash) {
+  margin-block-start: 0;
+  padding-block-start: 0;
+  align-content: start;
+}
+#raid-base .raid-base-columns :is(#raid-kit, #raid-gear) {
+  padding-block-start: 0;
+  margin-block-start: 0;
+}
+#raid-base #raid-deploy-dialog .raid-base-columns > .raid-base-section { padding: 6px; }
+#raid-base #raid-deploy-dialog .raid-stash-tools { margin-bottom: var(--base-card-gap); }
+body.mobile-ui #raid-base {
+  --base-card-inset: 6px;
+  --base-card-gap: 5px;
+}
+body.mobile-ui #raid-base :is(.raid-base-workspace, #raid-deploy-dialog) .raid-stash-tools {
+  min-height: 36px;
+  padding-block: 4px;
+  margin-bottom: var(--base-card-gap);
+}
+
+
+#raid-base #raid-deploy-dialog :is(.raid-loadout-layout, #raid-stash) {
+  border: 0;
+  box-shadow: none;
+}
+#raid-base .raid-base-workspace .raid-base-columns :is(.raid-loadout-layout, #raid-stash) {
+  justify-content: center;
+  margin-inline: auto;
+}
+#overlay #raid-base .raid-stash-tools [data-base-upgrade] {
+  height: 36px;
+  min-height: 36px;
+  padding-inline: 12px;
+}
+#overlay #raid-base .raid-stash-tools [data-base-upgrade] .inv-pixel-text-img { height: 14px; }

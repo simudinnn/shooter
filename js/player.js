@@ -1,4 +1,4 @@
-import { resolveBlueprint } from './blueprints.js';
+import { resolveBlueprint, DISPLAY_ONLY_GUNS } from './blueprints.js';
 import { REMOVED_MATERIAL_KEYS } from './materials.js';
 import { isAccessItem } from './doorAccess.js';
 import { storageLayout, canEquipHand } from './itemFootprint.js';
@@ -1058,10 +1058,10 @@ export class Player {
       return { ok: false, remainder: item };
     }
     if (item.kind === 'weapon') {
-      if (!WEAPONS[item.key]) return { ok: false, remainder: item };
+      if (!WEAPONS[item.key] && !DISPLAY_ONLY_GUNS[item.key]) return { ok: false, remainder: item };
       const idx = this.findStorageSlot(item);
       if (idx < 0) return { ok: false, remainder: item };
-      this.itemSlots[idx] = this._normalizeWeaponItem(item);
+      this.itemSlots[idx] = DISPLAY_ONLY_GUNS[item.key] ? { ...item } : this._normalizeWeaponItem(item);
       return { ok: true, remainder: null };
     }
     if (item.kind === 'melee') {
@@ -1202,7 +1202,7 @@ export class Player {
     for (let i = 0; i < this.itemSlots.length; i++) {
       if (!this.isItemSlotUnlocked(i)) continue;
       const s = this.itemSlots[i];
-      if (s?.kind === 'weapon') list.push({ type: 'gun', key: s.key, slot: i });
+      if (s?.kind === 'weapon' && WEAPONS[s.key]) list.push({ type: 'gun', key: s.key, slot: i });
       if (s?.kind === 'melee') list.push({ type: 'melee', key: s.key, slot: i });
     }
     return list;
@@ -1731,12 +1731,12 @@ export class Player {
     if (vest) {
       const resisted = Math.min(itemDurability(vest), remaining * (VEST_RESISTANCE[vest.key] ?? 0));
       remaining -= resisted;
-      vest.durability = Math.max(0, itemDurability(vest) - resisted * 0.5);
+      vest.durability = Math.max(0, itemDurability(vest) - resisted * 1.15);
       if (vest.durability === 0) this.equipmentSlots[0] = null;
     }
     const backpack = this.equipmentSlots[1];
     if (backpack) {
-      backpack.durability = Math.max(0, itemDurability(backpack) - remaining * 0.125);
+      backpack.durability = Math.max(0, itemDurability(backpack) - remaining * 0.35);
       if (backpack.durability === 0) this.equipmentSlots[1] = null;
     }
     this.health = Math.max(0, this.health - remaining);

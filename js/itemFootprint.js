@@ -1,7 +1,9 @@
+import { DISPLAY_ONLY_GUNS } from './blueprints.js';
+
 /** Inventory dimensions are independent of the held weapon sprite. */
 export function itemWidth(item) { return 1; }
 export function itemSize(item) { const width=itemWidth(item); return item?.rotated && width>1 ? {width:1,height:width} : {width,height:1}; }
-export function canEquipHand(index,item) { return !item || ['weapon','melee'].includes(item.kind); }
+export function canEquipHand(index,item) { return !item || (['weapon','melee'].includes(item.kind) && !(item.kind === 'weapon' && DISPLAY_ONLY_GUNS[item.key])); }
 export function styleItemSlot(slot,item,forcedWidth=null) {
  const {width,height}=itemSize(item);
  slot.classList.toggle('inventory-wide-item',width>1||height>1);

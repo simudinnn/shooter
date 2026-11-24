@@ -10,7 +10,7 @@ const MILITARY_AMMO = ['pistol_box', 'rifle_box', 'shotgun_box', 'sniper_box'];
 const EQUIPMENT_BY_TIER = [
   ['backpack_1', 'vest', 'hunting_vest'],
   ['backpack2', 'hunting_vest', 'police_vest'],
-  ['backpack3', 'police_vest', 'military_vest'],
+  ['backpack2', 'hunting_vest', 'police_vest'],
 ];
 const ARCHIVE_BY_TIER = [
   ['phone', 'phone', 'jewlery'],
@@ -36,7 +36,7 @@ export function containerLoot(item) {
   switch (item.key) {
     case 'equipment_pack':
       rewards = [
-        { kind: 'equipment', key: pick(EQUIPMENT_BY_TIER[tier - 1]), durability: 78 + Math.floor(Math.random() * 23) },
+        { kind: 'equipment', key: tier === 3 && Math.random() < 0.15 ? pick(['backpack3', 'military_vest']) : pick(EQUIPMENT_BY_TIER[tier - 1]), durability: 78 + Math.floor(Math.random() * 23) },
         { kind: 'consumable', key: 'medkit', amount: tier === 3 ? 2 : 1 },
       ];
       break;
