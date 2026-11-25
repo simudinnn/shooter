@@ -207,7 +207,8 @@ export function renderWrappedPixelTextCanvas(text, maxWidth, scale = PIXEL_TEXT_
   ctx.imageSmoothingEnabled = false;
   lines.forEach((line, i) => {
     const y = i * lineHeight;
-    drawGlyphRun(ctx,line,scale,img,1,y+1);
+    const left = options.align === 'center' ? Math.floor((width - measurePixelText(line, scale).width) / 2) : 0;
+    drawGlyphRun(ctx, line, scale, img, left + 1, y + 1);
   });
   return finishText(canvas, scale, options);
 }

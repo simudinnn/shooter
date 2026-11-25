@@ -27,6 +27,28 @@ export function storageLayout(items,capacity,columns) {
 }
 export function applyStorageLayout(grid,items,capacity,columns,unlockedCapacity=capacity){
  const {positions}=storageLayout(items,unlockedCapacity,columns);
- for(let i=unlockedCapacity;i<capacity;i++)if(!items[i])positions.set(i,{cell:i,width:1,height:1});
- Array.from(grid.children).forEach((slot,index)=>{const p=positions.get(index);slot.hidden=!p;if(!p)return;slot.dataset.storageCell=p.cell;slot.style.gridColumn=`${p.cell%columns+1} / span ${p.width}`;slot.style.gridRow=`${Math.floor(p.cell/columns)+1} / span ${p.height}`;styleItemSlot(slot,items[index]);});
+ // Existing overflow items keep their positions. Lock icons fill the remaining cells.
+ const occupied=new Set(Array.from(positions.values(),({cell,width,height})=>
+  Array.from({length:width*height},(_,n)=>cell+Math.floor(n/width)*columns+n%width)).flat());
+ let lockedCell=unlockedCapacity;
+ for(let i=unlockedCapacity;i<capacity;i++){
+  if(items[i])continue;
+  while(occupied.has(lockedCell))lockedCell++;
+  positions.set(i,{cell:lockedCell++,width:1,height:1});
+ }
+ Array.from(grid.children).forEach((slot, index) => {
+  const position = positions.get(index);
+  if (slot.hidden !== !position) slot.hidden = !position;
+  if (!position) return;
+  const { cell, width, height } = position;
+  const column = `${cell % columns + 1} / span ${width}`;
+  const row = `${Math.floor(cell / columns) + 1} / span ${height}`;
+  if (slot.dataset.storageCell !== String(cell)) slot.dataset.storageCell = cell;
+  if (slot.style.gridColumn !== column) slot.style.gridColumn = column;
+  if (slot.style.gridRow !== row) slot.style.gridRow = row;
+  if (slot.style.getPropertyValue('--item-width') !== String(width) ||
+      slot.style.getPropertyValue('--item-height') !== String(height)) {
+   styleItemSlot(slot, items[index]);
+  }
+ });
 }

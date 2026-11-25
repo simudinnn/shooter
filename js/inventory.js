@@ -787,6 +787,10 @@ export class InventoryUI {
     el.addEventListener('pointerleave', (e) => this._onContextMenuPointerLeave(e));
     document.body.appendChild(el);
     this._contextMenuEl = el;
+    this._contextMenuResizeObserver = new ResizeObserver(() => {
+      if (this._isContextMenuOpen()) this._positionContextMenu(this._contextAnchorEl);
+    });
+    this._contextMenuResizeObserver.observe(el);
   }
 
   _onContextMenuPointerLeave(e) {

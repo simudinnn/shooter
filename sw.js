@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v620';
+const CACHE = 'robot-ruins-v657';
 
 function buildingKitSprites() {
   return [
@@ -90,6 +90,7 @@ const WORLD_SPRITES = worldSprites();
 const SHELL = [
   './',
   './index.html',
+  './maps/raid-map.json',
   './style.css',
   './manifest.webmanifest',
   './js/font-load.js',

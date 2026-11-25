@@ -612,18 +612,15 @@ class Game {
 
   async _deployRaid() {
     if (this._deploying || this.running) return;
-    const mapFile = document.getElementById('raid-map-select').value;
     let raidMap = null;
     this._deploying = true;
     try {
-      if (mapFile) {
-        const response = await fetch('./maps/' + encodeURIComponent(mapFile), { cache: 'no-store' });
-        if (!response.ok) throw new Error('Map file could not be loaded.');
-        raidMap = parseRaidMap(await response.json());
-      }
+      const response = await fetch('./maps/raid-map.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Map file could not be loaded.');
+      raidMap = parseRaidMap(await response.json());
     } catch (error) {
       this._deploying = false;
-      this.raidBase.show(this.raidProfile, 'Could not read custom map. ' + error.message);
+      this.raidBase.show(this.raidProfile, 'Could not load Raid map. ' + error.message);
       return;
     }
     const previous = this.raidProfile;
@@ -4223,17 +4220,6 @@ class Game {
     this._scheduleFrame();
   }
 }
-
-const raidMapSelect = document.getElementById('raid-map-select');
-const raidMapStatus = document.getElementById('raid-map-status');
-const raidMapOptions=[{value:'',label:'Procedural map'}];let raidMapIndex=0;
-const showRaidMap=()=>{const option=raidMapOptions[raidMapIndex];raidMapSelect.value=option.value;setElementPixelText(raidMapSelect,option.label,PIXEL_TEXT_SCALE_SM);raidMapSelect.setAttribute('aria-label','Raid map: '+option.label);};
-raidMapSelect.addEventListener('click',()=>{raidMapIndex=(raidMapIndex+1)%raidMapOptions.length;showRaidMap();});
-showRaidMap();raidMapSelect.disabled=true;
-fetch('./maps/catalog.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw Error('Map list unavailable.');return response.json();}).then(maps=>{
- for(const name of maps){const title=name.replace(/\.json$/i,'').replace(/[-_]+/g,' ');raidMapOptions.push({value:name,label:title.charAt(0).toUpperCase()+title.slice(1)});}
- showRaidMap();
-}).catch(()=>{raidMapStatus.textContent='Map list unavailable. Procedural map is available.';}).finally(()=>{raidMapSelect.disabled=false;});
 
 try {
   window.game = new Game();

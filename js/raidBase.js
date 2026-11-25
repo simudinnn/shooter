@@ -12,7 +12,7 @@ import { capturePlayerState } from './saveGame.js';
 import { getItemDescription, getItemDisplayName, getItemIconSrc, itemTextRarity, ITEM_TEXT_COLORS } from './loot.js';
 import { INV_LOCK_SRC } from './inventory.js';
 import { equipmentSlotFor, itemDurability, MAX_DURABILITY } from './equipment.js';
-import { createPixelTextImg, setElementPixelText, setElementWrappedPixelText, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
+import { createPixelTextImg, setElementPixelText, setElementWrappedPixelText, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { applyRecycleYields, canCraftRecipe, canRecycleItem, craftRecipe, getCraftableRecipes, getRecycleYields, recycleBatchSize } from './crafting.js';
 
 export const EXTRACT_RADIUS = 5;
@@ -58,6 +58,7 @@ export function raidLevel(profile) {
   return level;
 }
 
+const STASH_COLUMNS = 8;
 const BASE_TIER_LABELS = ['', 'I', 'II', 'III'];
 const BASE_UPGRADES = {
   stash: [
@@ -387,15 +388,42 @@ export class RaidBase {
     sort.addEventListener('click', () => {
       const nextIndex = (sortIndex + 1) % sortModes.length;
       const [mode, label] = sortModes[nextIndex];
-      if (!this.transact((next) => {
-        const amount = (item) => item.amount ?? 1;
-        const value = (item) => amount(item) * getSellPrice(item);
-        next.stash = next.stash.filter(Boolean).map(item=>{const entry={...item};delete entry.storageCell;return entry;}).sort((a, b) => {
-          if (mode === 'cash') return value(b) - value(a);
-          if (mode === 'amount') return amount(b) - amount(a);
-          return a.kind.localeCompare(b.kind) || getItemDisplayName(a).localeCompare(getItemDisplayName(b));
-        });
-      })) return;
+      const next = structuredClone(this.profile);
+      const grid = this.root.querySelector('#raid-stash');
+      const entries = next.stash.flatMap((item, index) => item ? [{ item, slot: grid.children[index] }] : []);
+      const amount = (item) => item.amount ?? 1;
+      const value = (item) => amount(item) * getSellPrice(item);
+      entries.sort(({item: a}, {item: b}) => {
+        if (mode === 'cash') return value(b) - value(a);
+        if (mode === 'amount') return amount(b) - amount(a);
+        return a.kind.localeCompare(b.kind) || getItemDisplayName(a).localeCompare(getItemDisplayName(b));
+      });
+      next.stash = entries.map(({item}) => {
+        delete item.storageCell;
+        return item;
+      });
+      if (!this.save(next)) {
+        this.setStatus('Could not save the change.');
+        return;
+      }
+      this.profile = next;
+      this.closeSelection();
+      this.batchSelection?.clear();
+      this._quickTap = null;
+      entries.forEach(({slot}, index) => {
+        const current = grid.children[index];
+        if (slot === current) return;
+        if (grid.moveBefore) grid.moveBefore(slot, current);
+        else grid.insertBefore(slot, current);
+      });
+      entries.forEach(({item, slot}, index) => {
+        this.slotPositions.get(slot).index = index;
+        slot.dataset.renderSignature = JSON.stringify([item, false]);
+      });
+      Array.from(grid.children).slice(entries.length).forEach((slot, index) => {
+        this.slotPositions.get(slot).index = entries.length + index;
+      });
+      this.renderStash({ stashOnly: true });
       sortIndex = nextIndex;
       sort.dataset.label = 'Sort: ' + label;
       this.pixelLabel(sort, sort.dataset.label);
@@ -447,17 +475,24 @@ export class RaidBase {
     this._stashCellObserver = new ResizeObserver(() => this._scheduleStashCellSync());
     this._stashCellObserver.observe(root.querySelector('.raid-loadout-layout'));
     this._stashCellObserver.observe(root.querySelector('#raid-stash'));
+    this._stashCellObserver.observe(this.workspace);
+    this._stashCellObserver.observe(root.querySelector('.raid-deploy-review'));
     const repositionSelection = (event) => {
       if (event?.target === this.selection) return;
       if (this.selectionAnchor?.isConnected && !this.selection.classList.contains('hidden')) {
         this.positionSelection(this.selectionAnchor);
       }
     };
+    this._selectionResizeObserver = new ResizeObserver(() => repositionSelection());
+    this._selectionResizeObserver.observe(this.selection);
     root.addEventListener('scroll', repositionSelection, { capture: true, passive: true });
     window.addEventListener('resize', repositionSelection, { passive: true });
     window.visualViewport?.addEventListener('resize', repositionSelection, { passive: true });
     window.visualViewport?.addEventListener('scroll', repositionSelection, { passive: true });
     this.deployDialog = root.querySelector('#raid-deploy-dialog');
+    this.deployDialog.addEventListener('animationend', (event) => {
+      if (event.target === this.deployDialog) repositionSelection();
+    });
     this.station = 'deploy';
     this.catalogSelection = null;
     this.playUi = playUi;
@@ -521,7 +556,7 @@ export class RaidBase {
       requestAnimationFrame(()=>{settings.scrollTop=0;});
     });
     settings.addEventListener('close', () => settingsButton.focus({ preventScroll: true }));
-    for (const label of root.querySelectorAll('nav button, #raid-settings-open, #raid-deploy, #raid-deploy-confirm, #raid-deploy-title, .raid-base-overview h2, .raid-base-mission p, .raid-transfer-hint, .raid-station-description, [data-base-panel="craft"] > h2, [data-base-panel="shop"] h2, label[for="raid-map-select"], #raid-settings :is(h2, legend, label span)')) {
+    for (const label of root.querySelectorAll('nav button, #raid-settings-open, #raid-deploy, #raid-deploy-confirm, #raid-deploy-title, .raid-base-overview h2, .raid-base-mission p, .raid-transfer-hint, .raid-station-description, [data-base-panel="craft"] > h2, [data-base-panel="shop"] h2, #raid-settings :is(h2, legend, label span)')) {
       const text = label.textContent.trim();
       const uppercase = label.matches('h2, nav button, #raid-settings-open, #raid-deploy, #raid-deploy-confirm');
       this.pixelLabel(label, uppercase ? text.toUpperCase() : text, label.matches('p') ? 320 : undefined);
@@ -643,7 +678,9 @@ export class RaidBase {
   pixelLabel(element, label, width, fillColor) {
     element.setAttribute('aria-label', label);
     const options = { fillColor: fillColor ?? (element.matches('h2,h3,legend') ? '#e4ce9b' : undefined) };
-    if (width) setElementWrappedPixelText(element, label, width, PIXEL_TEXT_SCALE_SM, options);
+    if (element.matches('.raid-base-mission > p:last-of-type')) options.align = 'center';
+    if (element.matches('button')) setElementPixelText(element, label, PIXEL_TEXT_SCALE, options);
+    else if (width) setElementWrappedPixelText(element, label, width, PIXEL_TEXT_SCALE_SM, options);
     else setElementPixelText(element, label, PIXEL_TEXT_SCALE_SM, options);
   }
 
@@ -659,7 +696,7 @@ export class RaidBase {
     this.statusAnimation.onfinish = () => this.pixelLabel(notice, '');
   }
 
-  transact(change, reportError = (message) => this.setStatus(message)) {
+  transact(change, reportError = (message) => this.setStatus(message), slotsOnly = false) {
     this.refreshChallenges();
     const next = structuredClone(this.profile);
     const player = new Player();
@@ -693,7 +730,11 @@ export class RaidBase {
     }
     const scrollTop = this.workspace.scrollTop;
     this.workspace.scrollTo({ top: scrollTop, behavior: 'instant' });
-    this.show(next);
+    if (slotsOnly) {
+      this.profile = next;
+      this.closeSelection();
+      this.renderStash();
+    } else this.show(next);
     this.workspace.scrollTo({ top: scrollTop, behavior: 'instant' });
     return true;
   }
@@ -827,7 +868,7 @@ export class RaidBase {
   _moveBatch(to){
     if(to.key&&to.key!=='itemSlots'){this.setStatus('Drop a group into stash or inventory.');return;}
     const selected=[...this.batchSelection.values()];
-    const moved=this.transact((next,player)=>{const result=moveStacks({stash:next.stash,kit:player.itemSlots},selected,{container:to.source==='stash'?'stash':'kit',index:to.index},{stash:stashLimit(next),kit:player.inventoryCapacity});if(!result)return 'Not enough room for the selected items.';next.stash=result.stash;player.itemSlots=result.kit;});
+    const moved=this.transact((next,player)=>{const result=moveStacks({stash:next.stash,kit:player.itemSlots},selected,{container:to.source==='stash'?'stash':'kit',index:to.index},{stash:stashLimit(next),kit:player.inventoryCapacity});if(!result)return 'Not enough room for the selected items.';next.stash=result.stash;player.itemSlots=result.kit;}, undefined, true);
     if(moved){this.batchSelection.clear();this._syncBatchSelection();}
   }
   _sellBatch(){
@@ -858,7 +899,7 @@ export class RaidBase {
       if (key === 'itemSlots') loadout.itemSlots[index] = null;
       const deposit = [item, ...loadout.drainLockedInventory()];
       if (!storeInStash(next, loadout, deposit)) return 'Not enough stash space.';
-    });
+    }, undefined, true);
   }
 
   rearrangeSlots(from, to) {
@@ -866,7 +907,7 @@ export class RaidBase {
       if(from.rotated!=null && (!from.key || from.key==='itemSlots')) this.transact((next,player)=>{
         const item=from.source==='stash'?next.stash[from.index]:player.itemSlots[from.index];
         if(item)item.rotated=from.rotated;
-      });
+      }, undefined, true);
       return;
     }
     this.transact((next, player) => {
@@ -915,14 +956,14 @@ export class RaidBase {
       if(storageLayout(player.itemSlots,player.inventoryCapacity,5).overflow) return 'Not enough adjacent space for this item.';
       const overflow = player.drainLockedInventory();
       if (overflow.length && !storeInStash(next, player, overflow)) return 'Not enough stash space.';
-    });
+    }, undefined, true);
   }
 
   bindTransfer(slot, source, key, index) {
-    const transfer = () => this.transferItem(source, key, index);
+    const transfer = () => this.transferItem(source, key, this.slotPositions.get(slot).index);
     slot.addEventListener('click', event => {
       if (!document.body.classList.contains('mobile-ui') || this._suppressSlotClick === slot) return;
-      const tapKey = source + ':' + key + ':' + index, now = performance.now();
+      const tapKey = source + ':' + key + ':' + this.slotPositions.get(slot).index, now = performance.now();
       const doubleTap = this._quickTap?.key === tapKey && now - this._quickTap.time < 400;
       this._quickTap = doubleTap ? null : { key: tapKey, time: now };
       if (doubleTap) { event.preventDefault(); event.stopImmediatePropagation(); this.closeSelection(); transfer(); }
@@ -977,7 +1018,7 @@ export class RaidBase {
       const commit = event.type === 'pointerup' && moved;
       cleanup();
       if (moved) this._suppressSlotClick = slot;
-      if (!commit) return;
+      if (!commit || destinationSlot?.dataset.locked === 'true') return;
       if(destination&&this.batchSelection?.size>1&&this.batchSelection.has((source==='stash'?'stash':'kit')+':'+index))this._moveBatch(destination);
       else if (destination) this.rearrangeSlots({ source, key, index, rotated }, destination);
       else if(target.contains(hovered)&&this.batchSelection?.size>1&&this.batchSelection.has((source==='stash'?'stash':'kit')+':'+index))this._moveBatch({source:source==='stash'?'kit':'stash',key:source==='stash'?'itemSlots':null,index:0});
@@ -987,6 +1028,7 @@ export class RaidBase {
       this._suppressSlotClick = null;
       if (event.button !== 0 || event.shiftKey || drag) return;
       event.preventDefault();
+      index = this.slotPositions.get(slot).index;
       slot.focus({ preventScroll: true });
       const listeners = new AbortController();
       drag = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, listeners };
@@ -1022,59 +1064,77 @@ export class RaidBase {
   }
 
   _syncStashCellSize() {
-    const layout = this.root.querySelector('.raid-loadout-layout');
-    const gear = this.root.querySelector('#raid-gear');
     const kit = this.root.querySelector('#raid-kit');
     const stash = this.root.querySelector('#raid-stash');
-    if (!layout.clientWidth || !layout.clientHeight || !stash.clientWidth || !kit.children.length) return;
+    const loadout = kit.parentElement;
+    if (!kit.getClientRects().length || !kit.children.length) return;
+    const mobile = document.body.classList.contains('mobile-ui');
 
-    const mobile = document.body.classList.contains('mobile-ui') || matchMedia('(pointer: coarse)').matches;
-    const fit = (width, height, count, gap, leftColumn = 0, minRows = 1) => {
-      let best = { columns: 1, cell: 1 };
-      for (let columns = 1; columns <= count; columns++) {
-        const rows = Math.max(minRows, Math.ceil(count / columns));
-        const across = columns + leftColumn;
-        const cell = Math.floor(Math.min(mobile ? 64 : 128, (width - (across - 1) * gap) / across,
-          (height - (rows - 1) * gap) / rows));
-        if (cell > best.cell) best = { columns, cell };
-      }
-      return best;
+    const kitColumns = 5;
+    const stashRows = BASE_UPGRADES.stash.at(-1).slots / STASH_COLUMNS;
+    const review = this.deployDialog.open;
+    const container = this.stashPanel.parentElement;
+    const compactMobile = mobile && matchMedia('(max-width: 440px), (orientation: landscape) and (max-height: 450px)').matches;
+    const slotGap = mobile ? (compactMobile ? 5 : 8) : Math.min(16, Math.max(8, window.innerHeight * 0.011));
+    const gap = review ? Math.floor(slotGap * 0.85) : slotGap;
+    const frame = (node, first, second) => {
+      const style = getComputedStyle(node);
+      return parseFloat(style[first]) + parseFloat(style[second]);
     };
-    const expand = (fitted, width, height, count, gap, left = 0, minRows = 1) => {
-      const columns = fitted.columns + left;
-      const rows = Math.max(minRows, Math.ceil(count / fitted.columns));
-      return Math.floor(Math.min(fitted.cell + 4, (width - (columns - 1) * gap) / columns,
-        (height - (rows - 1) * gap) / rows));
+    const horizontalFrame = (node) => frame(node, 'paddingLeft', 'paddingRight') + frame(node, 'borderLeftWidth', 'borderRightWidth');
+    const verticalFrame = (node) => frame(node, 'paddingTop', 'paddingBottom') + frame(node, 'borderTopWidth', 'borderBottomWidth');
+    const cardHeader = (grid) => {
+      const card = grid.parentElement;
+      const headings = Array.from(card.children).filter(node => node !== grid && node.offsetHeight);
+      return verticalFrame(card) + verticalFrame(grid) + headings.reduce((height, node) =>
+        height + node.offsetHeight + frame(node, 'marginTop', 'marginBottom'), 0);
     };
-    const gap = parseFloat(getComputedStyle(kit).columnGap) || 0;
-    const fitted = fit(layout.clientWidth - 12, layout.clientHeight - 8, kit.children.length,
-      gap, 1, gear.children.length);
-    fitted.cell = expand(fitted, layout.clientWidth - 2, layout.clientHeight - 2,
-      kit.children.length, gap, 1, gear.children.length);
-    const gearScale = 1.15;
-    const gearRows = gear.children.length;
-    const availableWidth = layout.clientWidth - 2 - fitted.columns * gap;
-    fitted.cell = Math.min(fitted.cell, Math.floor(availableWidth / (fitted.columns + gearScale)),
-      Math.floor((layout.clientHeight - 2 - (gearRows - 1) * gap) / (gearRows * gearScale)));
-    layout.style.setProperty('--raid-fitted-cell', Math.max(1, fitted.cell) + 'px');
-    fitted.cell = Math.max(1, fitted.cell);
-    kit.style.gridTemplateColumns = 'repeat(' + fitted.columns + ', ' + fitted.cell + 'px)';
+    const availableWidth = container.clientWidth - frame(container, 'paddingLeft', 'paddingRight');
+    const panelStyle = getComputedStyle(this.stashPanel);
+    const cardGap = parseFloat(panelStyle.columnGap) || 0;
+    const rowGap = parseFloat(panelStyle.rowGap) || 0;
+    const sideBySide = availableWidth >= 620 || matchMedia('(orientation: landscape)').matches;
+    const cardFrame = Math.max(
+      horizontalFrame(loadout) + horizontalFrame(loadout.parentElement),
+      horizontalFrame(stash) + horizontalFrame(stash.parentElement),
+    );
+    const maxCardWidth = sideBySide ? (availableWidth - cardGap) / 2 : availableWidth;
+    const headerHeight = cardHeader(loadout);
+    const stashHeaderHeight = cardHeader(stash);
+    let availableHeight = container.clientHeight - frame(container, 'paddingTop', 'paddingBottom');
+    if (review) {
+      const dialog = this.deployDialog;
+      const header = dialog.querySelector(':scope > header').offsetHeight;
+      const footer = dialog.querySelector(':scope > footer').offsetHeight;
+      const chrome = header + footer;
+      availableHeight = parseFloat(getComputedStyle(dialog).maxHeight) - chrome -
+        verticalFrame(dialog) - verticalFrame(container);
+    }
+    const gridBudget = sideBySide
+      ? availableHeight - Math.max(headerHeight, stashHeaderHeight)
+      : (availableHeight - headerHeight - stashHeaderHeight - rowGap) / 2;
+    const cell = Math.max(1, Math.floor(Math.min(
+      mobile ? 56 * (review ? 0.88 : 1) : Infinity,
+      (maxCardWidth - cardFrame - (STASH_COLUMNS - 1) * gap) / STASH_COLUMNS,
+      (gridBudget * (!review && !mobile ? 0.9 : 1) - (stashRows - 1) * gap - 2) / stashRows,
+    )));
+    const gridHeight = stashRows * cell + (stashRows - 1) * gap;
+    const kitCell = (gridHeight - 4 * gap) / 5;
+    const gearCell = (gridHeight - 3 * gap) / 4;
+    const cardWidth = Math.ceil(STASH_COLUMNS * cell + (STASH_COLUMNS - 1) * gap + cardFrame);
+    this.stashPanel.style.width = (sideBySide ? 2 * cardWidth + cardGap : cardWidth) + 'px';
+    this.stashPanel.style.gridTemplateColumns = `repeat(${sideBySide ? 2 : 1}, minmax(0, 1fr))`;
+    this.stashPanel.style.setProperty('--preset-gear-slot', gearCell + 'px');
+    this.stashPanel.style.setProperty('--preset-gap', gap + 'px');
+
+    kit.style.gridTemplateColumns = 'repeat(' + kitColumns + ', ' + kitCell + 'px)';
     kit.style.gridTemplateRows = 'none';
-    kit.style.gridAutoRows = fitted.cell + 'px';
-    const player = new Player();
-    player.applySaveData(this.profile.kit);
-    applyStorageLayout(kit, this.profile.kit.itemSlots, kit.children.length, fitted.columns, player.inventoryCapacity);
-
-    const stashGap = parseFloat(getComputedStyle(stash).columnGap) || 0;
-    const result = fit(stash.clientWidth - 12, stash.clientHeight - 8, stash.children.length, stashGap);
-    const cell = Math.max(18, expand(result, stash.clientWidth - 2, stash.clientHeight - 2, stash.children.length, stashGap));
-    const columns = Math.max(1, Math.min(result.columns, Math.floor((stash.clientWidth - 2 + stashGap) / (cell + stashGap))));
+    kit.style.gridAutoRows = kitCell + 'px';
     stash.style.setProperty('--raid-stash-cell', cell + 'px');
-    stash.style.gridTemplateColumns = 'repeat(' + columns + ', ' + cell + 'px)';
-    applyStorageLayout(stash, this.profile.stash, stash.children.length, columns);
+    stash.style.gridTemplateColumns = 'repeat(' + STASH_COLUMNS + ', ' + cell + 'px)';
   }
 
-  renderStash() {
+  renderStash({ stashOnly = false } = {}) {
     const { kit, stash } = this.profile;
     const limit = stashLimit(this.profile);
     this.pixelLabel(this.root.querySelector('#raid-stash-title'), `STASH ${storageLayout(stash, limit, 10).used}/${limit}`);
@@ -1085,7 +1145,7 @@ export class RaidBase {
     const stashScroll = stashGrid.scrollTop;
     const player = new Player();
     player.applySaveData(kit);
-    for (const key of ['equipmentSlots', 'handSlots', 'itemSlots']) {
+    for (const key of stashOnly ? [] : ['equipmentSlots', 'handSlots', 'itemSlots']) {
       kit[key].forEach((entry, index) => {
         const locked = key === 'itemSlots' && !player.isItemSlotUnlocked(index);
         const item = locked ? null : entry;
@@ -1108,44 +1168,51 @@ export class RaidBase {
         if (item) this.bindTransfer(slot, 'kit', key, index);
       });
     }
-    for (let i = 0; i < Math.max(limit, stash.length); i++) {
+    const visibleSlots = Math.max(BASE_UPGRADES.stash.at(-1).slots, stash.length);
+    for (let i = 0; i < visibleSlots; i++) {
       const item = stash[i];
-      const signature = JSON.stringify(item ?? null);
+      const locked = i >= limit && !item;
+      const signature = JSON.stringify([item ?? null, locked]);
       const previous = stashGrid.children[i];
       if (previous?.dataset.renderSignature === signature) continue;
       const slot = this.slot(stashGrid, item, item ? (anchor) => {
+        const index = this.slotPositions.get(anchor).index;
         const actions = [];
-        if(itemWidth(item)>1) actions.push(['Rotate',()=>this.transact(next=>{const entry=next.stash[i];entry.rotated=!entry.rotated;})]);
+        if(itemWidth(item)>1) actions.push(['Rotate',()=>this.transact(next=>{const entry=next.stash[index];entry.rotated=!entry.rotated;})]);
         const detail = document.createElement('div');
         const description = document.createElement('p');
         description.textContent = getItemDescription(item);
         detail.append(description);
-        if (item.kind === 'material' && item.key === 'blueprint') actions.push(['Study', () => this.studyBlueprint('stash', i)]);
-        if (isContainer(item)) actions.push(['Open',()=>this.openStoredContainer('stash',i)]);
-        this.addRepairAction(item, actions, (next) => next.stash[i]);
-        this.addRecycleAction(item, actions, (next, player, quantity) => recycleAtBase(next, player, i, quantity));
+        if (item.kind === 'material' && item.key === 'blueprint') actions.push(['Study', () => this.studyBlueprint('stash', index)]);
+        if (isContainer(item)) actions.push(['Open',()=>this.openStoredContainer('stash',index)]);
+        this.addRepairAction(item, actions, (next) => next.stash[index]);
+        this.addRecycleAction(item, actions, (next, player, quantity) => recycleAtBase(next, player, index, quantity));
         this.addSplitAction(item, actions, (next, amount) => {
           const empty = Array.from({ length: stashLimit(next) }).findIndex((_, index) => !next.stash[index]);
           if (empty < 0) return 'Stash is full.';
-          const source = next.stash[i];
+          const source = next.stash[index];
           next.stash[empty] = { ...source, amount };
-          next.stash[i] = { ...source, amount: source.amount - amount };
+          next.stash[index] = { ...source, amount: source.amount - amount };
         });
         this.addSellAction(item, actions, (next, _player, quantity) => {
-          const current = next.stash[i];
+          const current = next.stash[index];
           const remaining = (current.amount ?? 1) - quantity;
-          next.stash[i] = remaining ? { ...current, amount: remaining } : null;
+          next.stash[index] = remaining ? { ...current, amount: remaining } : null;
         });
         this.inspect(item, actions, detail, anchor, { showClose: false });
-      } : null);
+      } : null, '', locked ? INV_LOCK_SRC : null);
+      if (locked) {
+        slot.dataset.locked = 'true';
+        slot.setAttribute('aria-label', 'Locked stash slot');
+      }
       if (previous) previous.replaceWith(slot);
       slot.dataset.renderSignature = signature;
       this.slotPositions.set(slot, { source: 'stash', key: null, index: i });
       if (item) this.bindTransfer(slot, 'stash', null, i);
     }
-    while (stashGrid.childElementCount > Math.max(limit, stash.length)) stashGrid.lastElementChild.remove();
-    applyStorageLayout(stashGrid, stash, Math.max(limit, stash.length), 10);
-    applyStorageLayout(kitGrid, kit.itemSlots, kit.itemSlots.length, 5, player.inventoryCapacity);
+    while (stashGrid.childElementCount > visibleSlots) stashGrid.lastElementChild.remove();
+    applyStorageLayout(stashGrid, stash, visibleSlots, STASH_COLUMNS, limit);
+    if (!stashOnly) applyStorageLayout(kitGrid, kit.itemSlots, kit.itemSlots.length, 5, player.inventoryCapacity);
     stashGrid.scrollTop = stashScroll;
     this._scheduleStashCellSync();
     this._syncBatchSelection();
@@ -1607,33 +1674,35 @@ export class RaidBase {
   }
 
   positionSelection(anchor) {
-    const touch = matchMedia('(hover: none) and (pointer: coarse)').matches;
+    const touch = document.body.classList.contains('mobile-ui') || matchMedia('(pointer: coarse)').matches;
+    const selection = this.selection;
     const rect = anchor.getBoundingClientRect();
-    const zoom = this.selection.currentCSSZoom || (this.deployDialog.open ? Number(getComputedStyle(this.deployDialog).zoom) || 1 : 1);
+    const zoom = selection.currentCSSZoom || 1;
     const viewport = window.visualViewport;
-    const maxX = viewport?.width ?? window.innerWidth;
-    const maxY = viewport?.height ?? window.innerHeight;
-    if (touch) {
-      const bounds = (this.deployDialog.open ? this.deployDialog : this.root.querySelector('.raid-base-frame')).getBoundingClientRect();
-      const leftEdge = Math.max(bounds.left, viewport?.offsetLeft ?? 0) + 8;
-      const topEdge = Math.max(bounds.top, viewport?.offsetTop ?? 0) + 32;
-      const rightEdge = Math.min(bounds.right, (viewport?.offsetLeft ?? 0) + maxX) - 8;
-      const bottomEdge = Math.min(bounds.bottom, (viewport?.offsetTop ?? 0) + maxY) - 8;
-      this.selection.style.maxWidth = `${(rightEdge - leftEdge) / zoom}px`;
-      this.selection.style.maxHeight = `${(bottomEdge - topEdge) / zoom}px`;
-      const box = this.selection.getBoundingClientRect();
-      const x = rect.right + box.width + 5 <= rightEdge ? rect.right + 5 : rect.left - box.width - 5;
-      this.selection.style.left = `${(Math.max(leftEdge, Math.min(x, rightEdge - box.width))) / zoom}px`;
-      this.selection.style.top = `${(Math.max(topEdge, Math.min(rect.top + 16, bottomEdge - box.height))) / zoom}px`;
-      return;
-    }
-    this.selection.style.maxWidth = `${(maxX - 16) / zoom}px`;
-    this.selection.style.maxHeight = `${(maxY - 16) / zoom}px`;
-    const { width, height } = this.selection.getBoundingClientRect();
-    const left = rect.right + width + 8 <= maxX ? rect.right + 5 : rect.left - width - 5;
-    this.selection.style.left = `${(Math.max(8, Math.min(left, maxX - width - 8))) / zoom}px`;
-    this.selection.style.top = `${(Math.max(8, Math.min(rect.top, maxY - height - 8))) / zoom}px`;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportRight = viewportLeft + (viewport?.width ?? window.innerWidth);
+    const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+    const frame = this.deployDialog.open ? this.deployDialog : this.root.querySelector('.raid-base-frame');
+    const bounds = touch ? frame.getBoundingClientRect() : null;
+    const leftEdge = Math.max(viewportLeft, bounds?.left ?? viewportLeft) + 8;
+    const topEdge = Math.max(viewportTop, bounds?.top ?? viewportTop) + 8;
+    const rightEdge = Math.min(viewportRight, bounds?.right ?? viewportRight) - 8;
+    const bottomEdge = Math.min(viewportBottom, bounds?.bottom ?? viewportBottom) - 8;
+
+    selection.style.maxWidth = Math.max(0, (rightEdge - leftEdge) / zoom) + 'px';
+    selection.style.maxHeight = Math.max(0, (bottomEdge - topEdge) / zoom) + 'px';
+    // An animated dialog can establish the containing block for fixed descendants.
+    selection.style.left = '0px';
+    selection.style.top = '0px';
+    const box = selection.getBoundingClientRect();
+    const preferredX = rect.right + box.width + 5 <= rightEdge ? rect.right + 5 : rect.left - box.width - 5;
+    const x = Math.max(leftEdge, Math.min(preferredX, rightEdge - box.width));
+    const y = Math.max(topEdge, Math.min(rect.top + (touch ? 16 : 0), bottomEdge - box.height));
+    selection.style.left = (x - box.left) / zoom + 'px';
+    selection.style.top = (y - box.top) / zoom + 'px';
   }
+
 
   positionItemName({ clientX, clientY }) {
     const { offsetWidth: width, offsetHeight: height } = this.itemName;

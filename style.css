@@ -3664,10 +3664,7 @@ body.mobile-ui #raid-performance { bottom: auto; top: max(60px, env(safe-area-in
   position: relative;
   isolation: isolate;
   border-color: #957345;
-  background:
-    repeating-linear-gradient(0deg, #b6a66a12 0 1px, transparent 1px 24px),
-    repeating-linear-gradient(90deg, #b6a66a12 0 1px, transparent 1px 24px),
-    radial-gradient(ellipse at 50% 70%, #53412c, #222823 62%, #181e1c);
+  background: var(--raid-card-background);
 }
 #raid-base .raid-base-mission::after {
   content: "";
@@ -4049,20 +4046,6 @@ body.game-active :is(#hud-time, #health-bar-wrap, #interact-prompt, #raid-extrac
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-#raid-base .raid-map-controls {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-#overlay #raid-base .raid-map-controls .ui-slice-button {
-  padding: 8px 12px;
-}
-#raid-base #raid-map-status {
-  max-inline-size: 100%;
-  overflow-wrap: anywhere;
-}
 /* Preserve source pixels in the high-resolution framebuffer. */
 #game-canvas { image-rendering: pixelated; }
 
@@ -4197,8 +4180,6 @@ button.ui-slice-button::after {inset:calc(-1 * var(--ui-btn-border));border-widt
 #overlay #raid-base .raid-base-mission #raid-deploy,
 #overlay #raid-base .raid-base-mission #raid-deploy:is(:hover,:focus,:focus-visible,:active) {outline:none !important;box-shadow:none !important;filter:none !important;animation:none;}
 #raid-deploy::after,#raid-deploy-now::after {display:none !important;}
-#raid-map-select {min-width:150px !important;max-width:280px;min-height:36px;padding:5px 12px;font-size:16px;}
-#raid-map-select .inv-pixel-text-img {max-height:18px;object-fit:contain;}
 
 #raid-deploy-confirm,#raid-deploy-confirm:is(:hover,:focus,:focus-visible) {box-shadow:none !important;outline:none !important;filter:none !important;}
 #raid-deploy-confirm::after {display:none !important;}
@@ -4289,7 +4270,6 @@ body.mobile-ui #raid-base .raid-base-overview > .raid-base-mission {
 }
 body.mobile-ui #raid-base .raid-base-mission > * {max-width:100%;margin:0;}
 body.mobile-ui #raid-base .raid-base-mission::before,body.mobile-ui #raid-base .raid-base-mission::after {display:none;}
-body.mobile-ui #raid-base .raid-map-controls {display:flex;flex-wrap:wrap;justify-content:center;gap:5px;}
 body.mobile-ui #raid-base .raid-base-mission #raid-deploy {align-self:center;margin:0;}
 body.mobile-ui #raid-base .raid-station-description,body.mobile-ui #raid-base .raid-transfer-hint {display:none;}
 body.mobile-ui #raid-base .raid-base-columns {grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;}
@@ -4573,7 +4553,7 @@ body :is(#overlay, #inventory, #hud, #mobile-controls) button.ui-slice-button:is
 #raid-base-upgrade #raid-upgrade-cost > img { width: 40px; height: 40px; }
 #raid-base #raid-base-upgrade,
 :is(#raid-base, #inventory) .raid-quantity-dialog {
-  background: linear-gradient(150deg, #303129, #1b211b) !important;
+  background: var(--ui-panel-bg) !important;
   border-top: 2px solid #a68b575e;
 }
 #raid-base #raid-base-upgrade h2 { padding-bottom: 8px; border-bottom: 1px solid #b9a16a40; }
@@ -4667,7 +4647,7 @@ body.mobile-ui #raid-base #raid-deploy-dialog[open] {
 }
 
 
-/* Cover the base workspace texture in the strip between the two cards. */
+/* Keep the gaps between cards clear of textures. */
 #raid-base .raid-base-workspace > .raid-base-columns,
 #raid-base #raid-deploy-dialog .raid-base-columns {
   background: #1b211d !important;
@@ -4837,14 +4817,571 @@ body.mobile-ui #raid-base #raid-deploy-dialog[open] {
 }
 
 
-/* Enlarge the desktop pair as a unit so the slot grids keep their proportions. */
-@media (min-width: 1100px) and (min-height: 560px) {
-  body:not(.mobile-ui) #raid-base .raid-base-workspace > [data-base-panel="stash"] {
-    width: min(88dvw, 1520px);
-    zoom: 1.1;
+
+
+/* Fixed safe-zone presets. Smaller viewports scroll instead of shrinking slots. */
+#raid-base [data-base-panel="stash"] {
+  --preset-slot: 40px;
+  --preset-gear-slot: 46px;
+  --preset-kit-columns: 5;
+  --preset-stash-columns: 8;
+  --preset-gap: 4px;
+  --preset-card-pair: 680px;
+  --preset-card-height: 390px;
+}
+@media (min-width: 1000px) and (min-height: 620px) {
+  #raid-base [data-base-panel="stash"] {
+    --preset-slot: 56px;
+    --preset-gear-slot: 64px;
+    --preset-gap: 6px;
+    --preset-card-pair: 960px;
+    --preset-card-height: 490px;
   }
-  body:not(.mobile-ui) #raid-base #raid-deploy-dialog[open] {
-    width: min(calc((100dvw - 32px) / 1.1), 1600px);
-    zoom: 1.1;
+}
+@media (min-width: 1540px) and (min-height: 850px) {
+  #raid-base [data-base-panel="stash"] {
+    --preset-slot: 72px;
+    --preset-gear-slot: 82px;
+    --preset-gap: 7px;
+    --preset-card-pair: 1240px;
+    --preset-card-height: 580px;
   }
+}
+body.mobile-ui #raid-base [data-base-panel="stash"] {
+  --preset-slot: 46px;
+  --preset-gear-slot: 52px;
+  --preset-kit-columns: 4;
+  --preset-stash-columns: 6;
+  --preset-gap: 4px;
+  --preset-card-pair: 600px;
+  --preset-card-height: 340px;
+}
+@media (orientation: portrait), (max-width: 620px) {
+  body.mobile-ui #raid-base [data-base-panel="stash"] {
+    --preset-kit-columns: 4;
+    --preset-stash-columns: 6;
+    --preset-card-pair: 360px;
+  }
+}
+@media (max-width: 365px) {
+  body.mobile-ui #raid-base [data-base-panel="stash"] {
+    --preset-slot: 44px;
+    --preset-gear-slot: 50px;
+    --preset-stash-columns: 5;
+    --preset-card-pair: 308px;
+  }
+}
+#raid-base .raid-base-workspace > [data-base-panel="stash"],
+#raid-base #raid-deploy-dialog .raid-deploy-review > [data-base-panel="stash"] {
+  width: min(100%, var(--preset-card-pair));
+  height: var(--preset-card-height);
+  margin-inline: auto;
+  grid-template-columns: 43fr 57fr;
+  grid-template-rows: minmax(0, 1fr);
+}
+#raid-base [data-base-panel="stash"] .raid-loadout-layout {
+  --raid-slot-gap: var(--preset-gap);
+  min-height: 0;
+  height: auto;
+  overflow: auto;
+  justify-content: safe center;
+}
+#raid-base [data-base-panel="stash"] .raid-loadout-layout #raid-gear { --raid-gear-cell: var(--preset-gear-slot); }
+#raid-base [data-base-panel="stash"] #raid-stash {
+  --raid-stash-gap: var(--preset-gap);
+  justify-content: safe center;
+  padding-inline: 0;
+  scrollbar-width: thin;
+}
+#raid-base #raid-deploy-dialog .raid-deploy-review { overflow: auto; }
+#raid-base .raid-base-workspace:has(> [data-base-panel="stash"]:not(.hidden)) { overflow: auto; }
+body.mobile-ui #raid-base [data-base-panel="stash"] .raid-stash-tools h2 .inv-pixel-text-img { height: 17px; }
+body.mobile-ui #raid-base [data-base-panel="stash"] .raid-stash-tools button .inv-pixel-text-img { height: 13px; }
+body.mobile-ui #raid-base [data-base-panel="stash"] .raid-base-slot > img:not(.raid-gear-placeholder) {
+  width: 83.3333% !important;
+  height: 83.3333% !important;
+}
+@media (orientation: portrait), (max-width: 620px) {
+  #raid-base .raid-base-workspace > [data-base-panel="stash"],
+  #raid-base #raid-deploy-dialog .raid-deploy-review > [data-base-panel="stash"] {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 350px 425px;
+  }
+}
+
+@media (orientation: landscape) and (min-width: 621px) {
+  body.mobile-ui #raid-base .raid-base-workspace > [data-base-panel="stash"],
+  body.mobile-ui #raid-base #raid-deploy-dialog .raid-deploy-review > [data-base-panel="stash"] {
+    grid-template-columns: 46fr 54fr;
+  }
+}
+
+
+/* Pick a fixed slot preset from the space actually available to the pair. */
+#raid-base :is(.raid-base-workspace, .raid-deploy-review) { container: loadout-space / inline-size; }
+body:not(.mobile-ui) #raid-base [data-base-panel="stash"] {
+  --preset-slot: 42px;
+  --preset-gear-slot: 48px;
+  --preset-kit-columns: 4;
+  --preset-stash-columns: 7;
+  --preset-gap: 4px;
+  --preset-card-pair: 680px;
+  --preset-card-height: 465px;
+}
+@container loadout-space (min-width: 900px) {
+  body:not(.mobile-ui) #raid-base [data-base-panel="stash"] {
+    --preset-slot: 52px;
+    --preset-gear-slot: 60px;
+    --preset-kit-columns: 5;
+    --preset-stash-columns: 8;
+    --preset-card-pair: 900px;
+    --preset-card-height: 470px;
+  }
+}
+@container loadout-space (min-width: 1100px) {
+  body:not(.mobile-ui) #raid-base [data-base-panel="stash"] {
+    --preset-slot: 64px;
+    --preset-gear-slot: 74px;
+    --preset-gap: 6px;
+    --preset-card-pair: 1100px;
+    --preset-card-height: 560px;
+  }
+}
+@container loadout-space (min-width: 1420px) {
+  body:not(.mobile-ui) #raid-base [data-base-panel="stash"] {
+    --preset-slot: 82px;
+    --preset-gear-slot: 94px;
+    --preset-gap: 7px;
+    --preset-card-pair: 1420px;
+    --preset-card-height: 680px;
+  }
+}
+@container loadout-space (max-width: 679px) {
+  #raid-base .raid-base-workspace > [data-base-panel="stash"],
+  #raid-base #raid-deploy-dialog .raid-deploy-review > [data-base-panel="stash"] {
+    --preset-stash-columns: 5;
+    --preset-card-pair: 480px;
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 370px 490px;
+  }
+}
+#raid-base [data-base-panel="stash"] .raid-loadout-layout { overflow-x: hidden; }
+#raid-base #raid-deploy-dialog .raid-deploy-review { overflow-y: auto; overflow-x: hidden; }
+body.mobile-ui #raid-base #raid-deploy-dialog[open] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 91dvh;
+}
+body.mobile-ui #raid-base #raid-deploy-dialog > header { grid-area: 1 / 1; min-width: 0; padding: 5px 8px; }
+body.mobile-ui #raid-base #raid-deploy-dialog > header :is(h2, p) { margin: 0; }
+body.mobile-ui #raid-base #raid-deploy-dialog > header p:not([role="status"]) { display: none; }
+body.mobile-ui #raid-base #raid-deploy-status:empty { display: none; }
+body.mobile-ui #raid-base #raid-deploy-dialog > .raid-deploy-review { grid-area: 2 / 1 / 3 / -1; }
+body.mobile-ui #raid-base #raid-deploy-dialog > footer {
+  grid-area: 3 / 1;
+  position: static;
+  display: flex;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 4px;
+  border: 0;
+}
+body.mobile-ui #overlay #raid-deploy-dialog footer .ui-slice-button {
+  --ui-btn-border: 4px;
+  min-height: 26px;
+  min-width: 0;
+  margin: 0;
+  padding: 3px 5px;
+}
+body.mobile-ui #raid-deploy-dialog footer .inv-pixel-text-img { height: 11px; width: auto; zoom: 1; }
+
+@media (orientation: landscape) {
+  @container loadout-space (min-width: 570px) {
+    body.mobile-ui #raid-base .raid-base-workspace > [data-base-panel="stash"],
+    body.mobile-ui #raid-base #raid-deploy-dialog .raid-deploy-review > [data-base-panel="stash"] {
+      --preset-stash-columns: 6;
+      --preset-card-pair: 600px;
+      height: 450px;
+      grid-template-columns: 48fr 52fr;
+      grid-template-rows: minmax(0, 1fr);
+    }
+  }
+}
+
+
+/* Match storage slots to the shop while letting the cards grow with their contents. */
+body:is(.mobile-ui, :not(.mobile-ui)) #raid-base .raid-base-workspace > [data-base-panel="stash"],
+body:is(.mobile-ui, :not(.mobile-ui)) #raid-base #raid-deploy-dialog .raid-deploy-review > [data-base-panel="stash"] {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  grid-template-rows: none;
+  justify-content: safe center;
+}
+#raid-base :is(.raid-base-workspace, .raid-deploy-review) > [data-base-panel="stash"] :is(.raid-loadout-layout, #raid-stash) {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  justify-content: safe center;
+}
+#raid-base [data-base-panel="stash"] .raid-loadout-layout {
+  container-type: inline-size;
+  grid-template-rows: auto;
+}
+#raid-base [data-base-panel="stash"] :is(#raid-gear, #raid-kit) {
+  padding: 0;
+  gap: var(--preset-gap);
+}
+#raid-base [data-base-panel="stash"] #raid-stash { gap: var(--preset-gap); }
+#raid-base #raid-deploy-dialog[open] {
+  height: fit-content;
+  max-height: calc(100dvh - 24px);
+}
+#raid-base #raid-deploy-dialog .raid-deploy-review {
+  flex: 0 1 auto;
+  overflow: auto;
+}
+body.mobile-ui #raid-base #raid-deploy-dialog[open] {
+  height: fit-content;
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 12px);
+}
+
+@media (min-width: 1600px) {
+  body:not(.mobile-ui) #raid-base #raid-deploy-dialog {
+    width: min(calc(100% - 24px), 1800px);
+  }
+}
+/* Use the same atlas scale as Back and let action buttons fit their labels. */
+#overlay #raid-base button.ui-slice-button:has(> .inv-pixel-text-img):not(.raid-base-slot) {
+  min-inline-size: max-content;
+}
+#overlay #raid-base .raid-stash-tools button.ui-slice-button {
+  height: auto;
+}
+#overlay #raid-base button.ui-slice-button:not(.raid-base-slot) > .inv-pixel-text-img {
+  flex-shrink: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+}
+body.mobile-ui #overlay #raid-base button.ui-slice-button:not(.raid-base-slot) > .inv-pixel-text-img {
+  height: 14px;
+  zoom: 1;
+}
+/* Keep a visible gutter around labels without changing the button boxes. */
+:is(#overlay, #inventory, #hud, #mobile-controls)
+  button:is(.ui-slice-button, .inv-context-btn):not(.raid-base-slot, .inv-slot-sprite) > .inv-pixel-text-img {
+  flex-shrink: 0;
+}
+
+:root {
+  --raid-card-background:
+    repeating-linear-gradient(0deg, #b6a66a12 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(90deg, #b6a66a12 0 1px, transparent 1px 24px),
+    radial-gradient(ellipse at 50% 70%, #53412c, #222823 62%, #181e1c);
+}
+
+#raid-base :is(.raid-base-mission, .raid-base-section) {
+  background: var(--raid-card-background) !important;
+}
+#overlay #raid-base .raid-base-top {
+  min-height: 0;
+  padding-block: 4px;
+}
+#overlay #raid-base :is(.raid-base-top button, .raid-stash-tools [data-base-upgrade]).ui-slice-button {
+  min-height: 28px;
+  height: auto;
+  padding: 3px 8px;
+}
+#overlay #raid-base :is(.raid-base-top button, .raid-stash-tools [data-base-upgrade]).ui-slice-button > .inv-pixel-text-img {
+  height: 15px;
+  zoom: 1;
+  scale: 1;
+}
+body.mobile-ui #overlay #raid-base :is(.raid-base-top button, .raid-stash-tools [data-base-upgrade]).ui-slice-button > .inv-pixel-text-img {
+  height: 12px;
+}
+
+:is(#overlay, #inventory) :is(dialog, .inv-context-menu, .menu-frame)
+  button:is(.ui-slice-button, .inv-context-btn):not(.raid-base-slot, .inv-slot-sprite) > .inv-pixel-text-img {
+  zoom: min(1.85, calc(var(--desktop-ui-scale, 1) * 1.42)) !important;
+}
+:is(#overlay, #inventory) :is(dialog, .inv-context-menu, .menu-frame)
+  :is(h2, p, .inv-context-title, .inv-context-desc, .raid-upgrade-requirements, .raid-recycle-preview, .pack-rewards-dialog li)
+  .inv-pixel-text-img:not(button *) {
+  zoom: calc(var(--desktop-ui-scale, 1) * 1.15);
+}
+:is(#raid-base, #inventory) .raid-quantity-dialog .raid-recycle-preview img:not(.inv-pixel-text-img) {
+  width: clamp(42px, 12vw, 64px);
+  height: clamp(42px, 12vw, 64px);
+  flex-shrink: 0;
+}
+#raid-base #raid-base-upgrade #raid-upgrade-preview {
+  grid-template-columns: repeat(auto-fit, minmax(56px, 72px));
+}
+#raid-base #raid-base-upgrade:has(.raid-upgrade-capacity) #raid-upgrade-preview {
+  grid-template-columns: 1fr;
+}
+#raid-base-upgrade .raid-upgrade-item > img {
+  width: 72px;
+  height: 72px;
+  max-width: 100%;
+}
+#raid-base-upgrade #raid-upgrade-cost > img { width: 46px; height: 46px; }
+.pack-rewards-dialog li > img { width: 42px; height: 42px; }
+#raid-base #raid-selection button .raid-shop-price-icon {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+}
+#overlay #raid-base :is(.raid-base-top button, .raid-stash-tools :is(button, [data-base-upgrade])).ui-slice-button > .inv-pixel-text-img {
+  zoom: 1.15;
+}
+#overlay #raid-base #raid-deploy > .inv-pixel-text-img {
+  zoom: calc(var(--desktop-ui-scale, 1) * 1.2);
+}
+#raid-base .raid-base-mission > p:last-of-type {
+  align-self: center;
+  justify-self: center;
+  text-align: center;
+}
+#overlay #raid-base .raid-stash-tools :is(#raid-transfer-all, #raid-stash-sort, [data-base-upgrade]).ui-slice-button {
+  --ui-btn-border: 5px;
+  box-sizing: border-box;
+  inline-size: 116px;
+  min-inline-size: max-content;
+  block-size: 31px;
+  min-block-size: 0;
+  padding: 3px 8px;
+}
+#overlay #raid-base .raid-stash-tools :is(#raid-transfer-all, #raid-stash-sort, [data-base-upgrade]).ui-slice-button > .inv-pixel-text-img {
+  height: 15px;
+  max-inline-size: none;
+  object-fit: contain;
+  zoom: 1.15;
+}
+body.mobile-ui #overlay #raid-base .raid-stash-tools :is(#raid-transfer-all, #raid-stash-sort, [data-base-upgrade]).ui-slice-button {
+  inline-size: 100px;
+  block-size: 28px;
+}
+body.mobile-ui #overlay #raid-base .raid-stash-tools :is(#raid-transfer-all, #raid-stash-sort, [data-base-upgrade]).ui-slice-button > .inv-pixel-text-img {
+  height: 12px;
+}
+/* Intrinsic label width includes its zoom so button borders stay outside the text. */
+:is(#overlay, #inventory, #hud, #mobile-controls)
+  button:is(.ui-slice-button, .inv-context-btn):not(.raid-base-slot, .inv-slot-sprite):has(> .inv-pixel-text-img) {
+  min-inline-size: max-content;
+}
+#raid-base #raid-deploy-dialog footer { flex-wrap: wrap; }
+
+#overlay #raid-base #raid-deploy-dialog footer .ui-slice-button { padding-inline: 8px; }
+
+#raid-base #raid-deploy-dialog :is(.raid-loadout-layout, #raid-stash) {
+  background: transparent;
+}
+#raid-base .raid-base-overview > .raid-base-mission {
+  border-color: transparent;
+  border-image: none;
+  outline: none;
+  box-shadow: none;
+}
+#overlay #raid-base .raid-base-top :is(nav button, #raid-settings-open).ui-slice-button {
+  padding-inline: 15px;
+}
+body.mobile-ui #overlay #raid-base .raid-base-top :is(nav button, #raid-settings-open).ui-slice-button {
+  padding-inline: 11px;
+}
+#overlay #raid-base .raid-base-top :is(nav button, #raid-settings-open).ui-slice-button > .inv-pixel-text-img {
+  scale: 1.2;
+}
+/* Keep tooltips within measured bounds throughout their opening animation. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes tooltip-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .inv-context-menu:not(.hidden) { animation-name: tooltip-fade-in; }
+}
+.inv-context-menu { box-sizing: border-box; }
+:is(.inv-context-menu, .raid-quantity-dialog[data-action="sell"], .raid-quantity-dialog[data-action="split"], #raid-base-upgrade)
+  button:is(.ui-slice-button, .inv-context-btn) > .inv-pixel-text-img {
+  scale: 1.1;
+}
+/* Keep the touch layout intact while using the available desktop height. */
+@media (min-width: 900px) and (orientation: landscape) {
+  body:not(.mobile-ui) #raid-base {
+    --desktop-base-unit: clamp(1, calc(100dvh / 690px), 2);
+    --desktop-ui-scale: var(--desktop-base-unit);
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-workspace {
+    padding: clamp(10px, 1.5dvh, 24px) clamp(14px, 2vw, 42px);
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-workspace > .raid-base-overview:not(.hidden) {
+    display: grid;
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    grid-template: minmax(0, 1fr) / repeat(2, minmax(0, 1fr));
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-overview > .raid-base-section {
+    grid-area: 1 / 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-overview > .raid-base-mission {
+    grid-area: 1 / 2;
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    align-items: center;
+    justify-content: center;
+    max-height: none;
+    gap: clamp(8px, 1.4dvh, 20px);
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-mission > p:first-child { display: block; }
+  body:not(.mobile-ui) #raid-base #raid-challenges {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(min-content, 1fr);
+    gap: clamp(8px, 1.25dvh, 16px);
+    min-height: 0;
+    overflow-y: auto;
+  }
+  body:not(.mobile-ui) #raid-base #raid-challenges article {
+    padding: clamp(10px, 1.7dvh, 22px);
+    align-content: center;
+    gap: clamp(6px, 1dvh, 14px);
+  }
+  body:not(.mobile-ui) #overlay #raid-base .raid-base-mission #raid-deploy {
+    min-width: min(100%, clamp(190px, 35dvh, 360px));
+    min-height: clamp(48px, 7dvh, 82px);
+    margin: 0;
+  }
+  body:not(.mobile-ui) #overlay #raid-base .raid-base-top :is(nav button, #raid-settings-open).ui-slice-button {
+    min-height: clamp(36px, 5.5dvh, 68px);
+    padding-inline: clamp(14px, 2dvh, 28px);
+  }
+  body:not(.mobile-ui) #overlay #raid-base .raid-base-top :is(nav button, #raid-settings-open).ui-slice-button > .inv-pixel-text-img {
+    height: clamp(15px, 2.2dvh, 30px);
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-workspace > [data-base-panel="shop"] {
+    min-height: 100%;
+    max-width: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  body:not(.mobile-ui) #raid-base .raid-catalog-active #raid-shop {
+    --desktop-shop-cell: clamp(58px, 9dvh, 130px);
+    grid-template-columns: repeat(auto-fill, minmax(0, var(--desktop-shop-cell)));
+    gap: clamp(8px, 1.1dvh, 16px);
+  }
+  body:not(.mobile-ui) #raid-base #raid-shop .raid-base-slot {
+    width: 100%;
+    max-width: none;
+  }
+  body:not(.mobile-ui) #overlay #raid-base .raid-stash-tools :is(#raid-transfer-all, #raid-stash-sort, [data-base-upgrade]).ui-slice-button {
+    inline-size: clamp(116px, 15dvh, 190px);
+    block-size: clamp(31px, 4.4dvh, 52px);
+  }
+  body:not(.mobile-ui) #overlay #raid-base .raid-stash-tools :is(#raid-transfer-all, #raid-stash-sort, [data-base-upgrade]).ui-slice-button > .inv-pixel-text-img {
+    height: clamp(15px, 1.9dvh, 25px);
+  }
+  body:not(.mobile-ui) :is(#raid-base, #inventory) .raid-quantity-dialog {
+    width: min(92vw, clamp(420px, 51dvh, 680px));
+  }
+  body:not(.mobile-ui) #raid-base #raid-deploy-dialog {
+    width: min(calc(100% - 32px), 2600px);
+  }
+}
+
+/* Enlarge numeric previews without changing mobile panel layout. */
+.raid-quantity-dialog:is([data-action="sell"], [data-action="split"])
+  .raid-recycle-preview .inv-pixel-text-img,
+#raid-base-upgrade :is(.raid-upgrade-capacity, .raid-upgrade-requirements) .inv-pixel-text-img {
+  scale: 1.2;
+}
+@media (min-width: 900px) and (orientation: landscape) {
+  body:not(.mobile-ui) #raid-base .raid-base-workspace > .raid-base-overview:not(.hidden) {
+    max-width: min(100%, 230dvh);
+    grid-template-rows: fit-content(100%);
+    align-content: safe center;
+    align-items: stretch;
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-overview > :is(.raid-base-section, .raid-base-mission) {
+    align-self: stretch;
+    height: auto;
+    max-height: none;
+  }
+  body:not(.mobile-ui) #raid-base .raid-base-overview .inv-pixel-text-img:not(button *) {
+    zoom: calc(var(--desktop-base-unit, 1) * 1.18);
+  }
+}
+body:not(.mobile-ui) #raid-base .raid-level-heading {
+  flex-wrap: nowrap;
+}
+body:not(.mobile-ui) #raid-base #raid-stats .inv-pixel-text-img {
+  height: 14px;
+  zoom: 1;
+}
+body:not(.mobile-ui) #raid-base #raid-xp-label .inv-pixel-text-img {
+  zoom: 1;
+}
+body:not(.mobile-ui) #overlay #raid-base .raid-stash-tools :is(#raid-transfer-all, #raid-stash-sort).ui-slice-button > .inv-pixel-text-img {
+  scale: 1.12;
+}
+body:not(.mobile-ui) :is(dialog, .inv-context-menu, .menu-frame, #raid-base-upgrade)
+  button:is(.ui-slice-button, .inv-context-btn):not(.raid-base-slot, .inv-slot-sprite) > .inv-pixel-text-img {
+  scale: 0.96;
+}
+
+:is(#raid-base, #inventory) .raid-quantity-dialog:is([data-action="sell"], [data-action="split"]) input[type="range"]::-webkit-slider-runnable-track {
+  height: 18px;
+  border-width: 2px 1px;
+}
+:is(#raid-base, #inventory) .raid-quantity-dialog:is([data-action="sell"], [data-action="split"]) input[type="range"]::-moz-range-track {
+  height: 14px;
+  border-width: 2px 1px;
+}
+:is(#raid-base, #inventory) .raid-quantity-dialog:is([data-action="sell"], [data-action="split"]) input[type="range"]::-moz-range-progress {
+  height: 14px;
+}
+:is(#raid-base, #inventory) .raid-quantity-dialog:is([data-action="sell"], [data-action="split"]) input[type="range"]::-webkit-slider-thumb {
+  height: 30px;
+  margin-top: -8px;
+}
+:is(#raid-base, #inventory) .raid-quantity-dialog:is([data-action="sell"], [data-action="split"]) input[type="range"]::-moz-range-thumb {
+  height: 30px;
+}
+body:not(.mobile-ui) #raid-base .raid-level-progress {
+  width: min(100%, clamp(250px, 26dvh, 340px));
+  gap: 7px;
+  padding: 8px 11px;
+}
+body:not(.mobile-ui) #raid-base #raid-stats .inv-pixel-text-img {
+  height: clamp(17px, 1.9dvh, 22px);
+}
+body:not(.mobile-ui) #raid-base #raid-xp-label .inv-pixel-text-img {
+  height: clamp(14px, 1.6dvh, 19px);
+}
+body:not(.mobile-ui) #raid-base #raid-xp-progress {
+  height: 9px;
+}
+
+body.mobile-ui #raid-base .raid-base-mission > :is(h2, p) > .inv-pixel-text-img {
+  zoom: 1.26;
+}
+body.mobile-ui #overlay #raid-base .raid-base-mission #raid-deploy {
+  min-inline-size: min(100%, clamp(180px, 46%, 270px));
+  min-block-size: clamp(48px, 11dvh, 64px);
+}
+body.mobile-ui #overlay #raid-base #raid-deploy > .inv-pixel-text-img {
+  height: 25px;
+  zoom: 1;
+}
+body.mobile-ui #raid-base #raid-cash .inv-pixel-text-img {
+  height: 17px;
 }
