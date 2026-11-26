@@ -203,6 +203,7 @@ export class AuthoredRaidWorld extends World {
     this.bounds = { minX: 0, minZ: 0, maxX: map.width * TILE, maxZ: map.height * TILE };
     this.mapProps = [];
     this.mapPropChunks = new Map();
+    this.mapTreeChunks = new Map();
     this.mapLightRevision = 0;
     this.mapChests = [];
     this.mapHatches = [];
@@ -531,6 +532,11 @@ export class AuthoredRaidWorld extends World {
     let bucket = this.mapPropChunks.get(key);
     if (!bucket) this.mapPropChunks.set(key, bucket = []);
     bucket.push(prop);
+    if (tree) {
+      let trees = this.mapTreeChunks.get(key);
+      if (!trees) this.mapTreeChunks.set(key, trees = []);
+      trees.push(prop);
+    }
     if (isRoofAsset(asset)) {
       prop.roofCell = { x: entry.x, y: entry.y };
       prop.roofOnly = [];
@@ -614,11 +620,12 @@ export class AuthoredRaidWorld extends World {
     }
   }
 
-  *mapPropsInView(view, pad) {
+  *mapPropsInView(view, pad, treesOnly = false) {
+    const chunks = treesOnly ? this.mapTreeChunks : this.mapPropChunks;
     const span = CHUNK_TILES * TILE;
     for (let z = Math.floor((view.minZ - pad) / span); z <= Math.floor((view.maxZ + pad) / span); z++) {
       for (let x = Math.floor((view.minX - pad) / span); x <= Math.floor((view.maxX + pad) / span); x++) {
-        const bucket = this.mapPropChunks.get(this._chunkKey(x, z));
+        const bucket = chunks.get(this._chunkKey(x, z));
         if (bucket) yield* bucket;
       }
     }

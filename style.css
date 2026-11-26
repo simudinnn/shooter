@@ -5385,3 +5385,98 @@ body.mobile-ui #overlay #raid-base #raid-deploy > .inv-pixel-text-img {
 body.mobile-ui #raid-base #raid-cash .inv-pixel-text-img {
   height: 17px;
 }
+#raid-base #raid-shop .raid-featured-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+body:not(.mobile-ui) #raid-base .raid-challenge-rewards > img:not(.inv-pixel-text-img) {
+  width: clamp(36px, 4.4dvh, 58px);
+  height: clamp(36px, 4.4dvh, 58px);
+}
+#raid-pause-challenges article + article { margin-top: 8px; }
+#raid-pause-challenges .raid-pause-objective { margin-bottom: 4px; }
+#raid-pause-challenges progress {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  background: #121711;
+}
+#raid-pause-challenges progress::-webkit-progress-bar { background: #121711; }
+#raid-pause-challenges progress::-webkit-progress-value { background: #e2c576; }
+#raid-pause-challenges progress::-moz-progress-bar { background: #e2c576; }
+
+#armor-bar-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 20px;
+  margin-top: 3px;
+  overflow: hidden;
+  background: #202831;
+  border: 1px solid #617382;
+}
+#armor-bar-wrap.hidden { display: none; }
+#armor-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(#8095a6, #455c70);
+}
+#armor-text { position: relative; }
+body:not(.mobile-ui) #raid-base #raid-base-upgrade {
+  width: min(760px, 94vw);
+  max-height: 90dvh;
+  padding: clamp(16px, 2.5vw, 30px);
+}
+body:not(.mobile-ui) #raid-base #raid-base-upgrade #raid-upgrade-preview:has(.raid-upgrade-item) {
+  --upgrade-preview-slot: clamp(80px, 9vw, 106px);
+  grid-template-columns: repeat(auto-fit, minmax(0, var(--upgrade-preview-slot)));
+  gap: 10px;
+}
+body:not(.mobile-ui) #raid-base #raid-base-upgrade .raid-upgrade-item > img {
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  padding: 7px;
+}
+body:not(.mobile-ui) #raid-base #raid-base-upgrade #raid-upgrade-cost > img {
+  width: 54px;
+  height: 54px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  #raid-base .raid-item-name.visible { animation-name: tooltip-fade-in; }
+}
+body:not(.mobile-ui) #raid-base #raid-base-upgrade .raid-upgrade-requirements .inv-pixel-text-img {
+  zoom: var(--desktop-ui-scale, 1);
+  scale: 1;
+}
+#pause-menu #raid-pause-challenges article {
+  padding: 8px 10px 10px;
+  background: linear-gradient(135deg, #2c3028, #1c211b);
+  border: 1px solid #b59b5d44;
+  border-inline-start: 2px solid #ad8851;
+  box-shadow: 0 2px 0 #0005;
+}
+#pause-menu #raid-pause-challenges article > p:first-child {
+  margin-top: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #b59b5d35;
+}
+body.mobile-ui #overlay #pause-menu .menu-btn-stack > button.ui-slice-button {
+  --ui-btn-border: 5px;
+  align-self: center;
+  width: min(100%, 220px);
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 10px;
+}
+body.mobile-ui #overlay #pause-menu .menu-btn-stack > button.ui-slice-button > .inv-pixel-text-img {
+  width: auto;
+  max-width: 100%;
+  height: 15px;
+  zoom: 1;
+}

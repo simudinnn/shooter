@@ -10,7 +10,17 @@ export const AMMO_TYPES = {
   sniper: { name: 'Sniper ammo', sprite: 'sniper_ammo' },
 };
 
-export const AMMO_TYPE_KEYS = Object.keys(AMMO_TYPES);
+export const SPECIAL_AMMO = {
+  pistol_hollowtip: { base: 'pistol', name: 'Pistol Hollow Tip', sprite: 'pistol_ammo_hollowtip', box: 'pistol_box_hollowtip', price: 360, amount: 20 },
+  rifle_ap: { base: 'rifle', name: 'Rifle Armor Piercing', sprite: 'rifle_ammo_ap', box: 'rifle_box_ap', price: 460, amount: 24 },
+  shotgun_dragonbreath: { base: 'shotgun', name: "Shotgun Dragon's Breath", sprite: 'shotgun_ammo_dragonbreath', box: 'shotgun_box_dragonbreath', price: 480, amount: 12 },
+  sniper_explosive: { base: 'sniper', name: 'Sniper Explosive', sprite: 'sniper_ammo_explosive', box: 'sniper_box_explosive', price: 620, amount: 8 },
+};
+Object.assign(AMMO_TYPES, SPECIAL_AMMO);
+export const SPECIAL_AMMO_BOXES = Object.fromEntries(Object.entries(SPECIAL_AMMO).map(([type, ammo]) => [ammo.box, { ...ammo, type }]));
+export const ammoFamily = type => SPECIAL_AMMO[type]?.base ?? type;
+
+export const AMMO_TYPE_KEYS = Object.keys(AMMO_TYPES).filter(type => !SPECIAL_AMMO[type]);
 
 /** Which inventory ammo each gun draws from when reloading. */
 export const WEAPON_AMMO_TYPE = {

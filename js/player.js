@@ -5,7 +5,7 @@ import { storageLayout, canEquipHand } from './itemFootprint.js';
 import { customWeapons } from './customContent.js';
 import { PLAYER_RADIUS, BULLET_RADIUS } from './world.js';
 import { getSheetPlayDuration, gunAimTransform, gunPivotHoldOffset, getIncrementalReloadSpec, getIncrementalReloadFrame, getReloadAnimFrame, REVOLVER_RELOAD_CASING_EJECT_FRAME, spriteFeetOffset, CHAR_NATIVE_PX, CHARACTER_SIZE_RATIO } from './sprites.js';
-import { AMMO_STACK_MAX, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
+import { AMMO_STACK_MAX, ammoFamily, getWeaponAmmoType, BANDAGE_STACK_MAX } from './ammo.js';
 import { MATERIAL_STACK_MAX, materialStackMax, mergeMaterialStacks, normalizeMaterialItem } from './materials.js';
 import {
   CONSUMABLE_STACK_MAX,
@@ -246,6 +246,20 @@ export const MELEE_WEAPONS = {
   },
 };
 
+MELEE_WEAPONS.metal_bat = {
+  ...MELEE_WEAPONS.wooden_bat,
+  name: 'Metal Bat',
+  damage: 40,
+  sprite: 'metal_bat',
+};
+
+MELEE_WEAPONS.nailed_bat = { ...MELEE_WEAPONS.wooden_bat, name: 'Nailed Bat', damage: 34, sprite: 'nailed_bat' };
+MELEE_WEAPONS.machete = { ...MELEE_WEAPONS.knife, name: 'Machete', damage: 48, range: 3, sprite: 'machete' };
+
+MELEE_WEAPONS.axe = { ...MELEE_WEAPONS.fire_axe, name: 'Axe', damage: 46, range: 3, sprite: 'axe' };
+MELEE_WEAPONS.shovel = { ...MELEE_WEAPONS.wooden_bat, name: 'Shovel', damage: 30, range: 3.4, swingDuration: 0.32, sprite: 'shovel' };
+MELEE_WEAPONS.broom = { ...MELEE_WEAPONS.wooden_bat, name: 'Broom', damage: 18, range: 3.4, sprite: 'broom' };
+
 export const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
 
 /** Default when main hand has no gun — not storable in inventory. */
@@ -334,6 +348,8 @@ export class Player {
     this.gunKick = 0;
     this.invulnTimer = 0;
     this.shield = 0;
+    this.armor = 0;
+    this.adrenaline = null;
     this.powerUps = { speed: { until: 0 }, damage: { mult: 1.5, until: 0 } };
     this.itemSlots = Array(ITEM_STORAGE_SIZE).fill(null);
     this.equipmentSlots = Array(EQUIPMENT_SLOT_COUNT).fill(null);
@@ -358,6 +374,8 @@ export class Player {
     this.health = data.health;
     this.maxHealth = data.maxHealth ?? 100;
     this.shield = data.shield ?? 0;
+    this.armor = data.armor ?? 0;
+    this.adrenaline = null;
     this.alive = data.alive !== false;
     this.itemSlots = data.itemSlots.map((s) => (s && !(s.kind==='material'&&REMOVED_MATERIAL_KEYS.includes(s.key)) ? { ...s } : null));
     this.equipmentSlots = Array(EQUIPMENT_SLOT_COUNT).fill(null);
@@ -415,7 +433,7 @@ export class Player {
 
   _weaponItemFromEquipped() {
     if (!this.weaponKey || !this.weapon) return null;
-    return { ...this.handSlots[this.activeHandSlot], kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo };
+    return { ...this.handSlots[this.activeHandSlot], kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo, loadedAmmoType: this.weapon.loadedAmmoType };
   }
 
   /** @deprecated equipped gun ammo is kept on this.weapon until slot swap */
@@ -469,7 +487,7 @@ export class Player {
   _persistActiveHand() {
     const i = this.activeHandSlot;
     if (this.weaponSlot === 'gun' && this.weaponKey && this.weapon) {
-      this.handSlots[i] = { ...this.handSlots[i], kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo ?? 0 };
+      this.handSlots[i] = { ...this.handSlots[i], kind: 'weapon', key: this.weaponKey, ammo: this.weapon.ammo ?? 0, loadedAmmoType: this.weapon.loadedAmmoType };
     } else if (this.weaponSlot === 'melee' && this.meleeKey) {
       this.handSlots[i] = { ...this.handSlots[i], kind: 'melee', key: this.meleeKey };
     } else {
@@ -488,7 +506,7 @@ export class Player {
     }
     if (item.kind === 'weapon' && WEAPONS[item.key]) {
       this.weaponKey = item.key;
-      this.weapon = this._buildWeaponRuntime(item.key, item.ammo ?? WEAPONS[item.key].magSize);
+      this.weapon = this._buildWeaponRuntime(item.key, item.ammo ?? WEAPONS[item.key].magSize, item.loadedAmmoType);
       this.weaponSlot = 'gun';
       return;
     }
@@ -507,7 +525,7 @@ export class Player {
     if(isAccessItem(item))return {...item};
     if (!item) return null;
     if (item.kind === 'weapon') {
-      return { ...item, ammo: index === this.activeHandSlot ? (this.weapon?.ammo ?? item.ammo ?? 0) : (item.ammo ?? 0) };
+      return { ...item, loadedAmmoType: index === this.activeHandSlot ? this.weapon?.loadedAmmoType ?? item.loadedAmmoType : item.loadedAmmoType, ammo: index === this.activeHandSlot ? (this.weapon?.ammo ?? item.ammo ?? 0) : (item.ammo ?? 0) };
     }
     if (item.kind === 'melee') return { ...item, durability: itemDurability(item) };
     return null;
@@ -633,12 +651,13 @@ export class Player {
     this.equipmentSlots[equipmentIndex] = { ...normalized };
   }
 
-  _buildWeaponRuntime(key, ammo = null) {
+  _buildWeaponRuntime(key, ammo = null, loadedAmmoType = null) {
     const cfg = WEAPONS[key];
     if (!cfg) return null;
     return {
       ...cfg,
       ammo: ammo != null ? ammo : cfg.magSize,
+      loadedAmmoType: ammoFamily(loadedAmmoType) === getWeaponAmmoType(key) ? loadedAmmoType : getWeaponAmmoType(key),
       lastShot: this.weapon?.lastShot ?? 0,
       reloading: false,
       reloadStart: 0,
@@ -800,7 +819,7 @@ export class Player {
     }
     const inMag = Math.max(0, Math.floor(item.ammo ?? 0));
     if (inMag <= 0) return { ok: false, taken: 0 };
-    const ammoType = getWeaponAmmoType(item.key);
+    const ammoType = item.loadedAmmoType ?? getWeaponAmmoType(item.key);
     const stored = this.addAmmoToInventory(ammoType, inMag);
     if (stored <= 0) return { ok: false, taken: 0 };
     item.ammo = inMag - stored;
@@ -829,7 +848,13 @@ export class Player {
   }
 
   getCurrentAmmoType() {
-    return getWeaponAmmoType(this.weaponKey);
+    return this.weapon?.loadedAmmoType ?? getWeaponAmmoType(this.weaponKey);
+  }
+
+  getPreferredAmmoType() {
+    const family = getWeaponAmmoType(this.weaponKey);
+    return this.itemSlots.find((item, index) => this.isItemSlotUnlocked(index) &&
+      item?.kind === 'ammo' && item.amount > 0 && ammoFamily(item.ammoType) === family)?.ammoType;
   }
 
   countInventoryAmmo(ammoType) {
@@ -846,7 +871,7 @@ export class Player {
 
   getReserveAmmo() {
     if (!this.weaponKey) return 0;
-    return this.countInventoryAmmo(this.getCurrentAmmoType());
+    return this.countInventoryAmmo(this.weapon?.reloading || this.weapon?.ammo ? this.getCurrentAmmoType() : this.getPreferredAmmoType());
   }
 
   consumeAmmo(ammoType, amount) {
@@ -1448,8 +1473,19 @@ export class Player {
     return 'Full resupply';
   }
 
+  updateAdrenaline(time) {
+    const effect = this.adrenaline;
+    if (!effect || !this.alive) return;
+    while (effect.ticks > 0 && time >= effect.nextTick) {
+      this.heal(5);
+      effect.nextTick++;
+      effect.ticks--;
+    }
+    if (!effect.ticks) this.adrenaline = null;
+  }
+
   getSpeedMult(time) {
-    return time < this.powerUps.speed.until ? 1.35 : 1;
+    return (time < this.powerUps.speed.until ? 1.35 : 1) * (time < (this.adrenaline?.speedUntil ?? 0) ? 1.25 : 1);
   }
 
   getDamageMult(time) {
@@ -1532,7 +1568,17 @@ export class Player {
       }
       return false;
     }
-    if (w.ammo === w.magSize || this.getReserveAmmo() <= 0) return false;
+    const preferred = this.getPreferredAmmoType();
+    if (!preferred) return false;
+    if (preferred !== w.loadedAmmoType) {
+      const backup = this.itemSlots.map(item => item ? { ...item } : item);
+      if (this.addAmmoToInventory(w.loadedAmmoType, w.ammo) !== w.ammo) {
+        this.itemSlots = backup;
+        return { error: 'No room to unload the current ammo.' };
+      }
+      w.ammo = 0;
+      w.loadedAmmoType = preferred;
+    } else if (w.ammo === w.magSize) return false;
     const aim = gunAimTransform(this.angle, this._flipX ?? false);
     w.reloading = true;
     w.reloadStart = time;
@@ -1717,7 +1763,9 @@ export class Player {
   takeDamage(amount, time, opts = {}) {
     if (!this.alive) return false;
     if (!opts.perBullet && time < this.invulnTimer) return false;
-    let remaining = amount;
+    const armorAbsorbed = Math.min(this.armor, amount);
+    this.armor -= armorAbsorbed;
+    let remaining = amount - armorAbsorbed;
     if (this.shield > 0) {
       const absorbed = Math.min(this.shield, remaining);
       this.shield -= absorbed;
@@ -1813,6 +1861,8 @@ export class BulletPool {
     b.vx = Math.sin(a) * speed;
     b.vz = Math.cos(a) * speed;
     b.damage = weapon.damage;
+    b.ammoEffect = fromPlayer ? weapon.loadedAmmoType : null;
+    b.pierced = null;
     b.life = 2.5;
     b.fromPlayer = fromPlayer;
     b.enemyOwner = null;

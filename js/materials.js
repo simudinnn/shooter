@@ -1,3 +1,4 @@
+import { SPECIAL_AMMO_BOXES } from './ammo.js';
 import { customItems } from './customContent.js';
 export const BASIC_MATERIAL_KEYS = ['battery'];
 export const REMOVED_MATERIAL_KEYS = ["plastic","metal_scrap","fabric","cloth","glass_bottle","adhesive","chemicals","metal_sheet","rope","nails","plank","spring","tape","wires","matches"];
@@ -5,6 +6,8 @@ export const MATERIAL_STACK_MAX = 50;
 export const materialStackMax = item => item?.key === 'cash' ? Number.MAX_SAFE_INTEGER : item?.key?.endsWith('_pack') ? 5 : MATERIAL_STACK_MAX;
 
 export const MATERIAL_KEYS = [
+  ...Object.keys(SPECIAL_AMMO_BOXES),
+  "mine",
   "battery",
   "book",
   "keycard",
@@ -37,7 +40,7 @@ export const MATERIAL_KEYS = [
 ];
 
 const DISPLAY_NAMES = {
-  keycard:'Keycard',key:'Key',laptop:'Laptop',phone:'Phone',barbed_wire:'Barbed Wire',gas_bottle:'Gas Bottle',generator:'Generator',radar:'Pack Radar',
+  mine:'Mine',keycard:'Keycard',key:'Key',laptop:'Laptop',phone:'Phone',barbed_wire:'Barbed Wire',gas_bottle:'Gas Bottle',generator:'Generator',radar:'Pack Radar',
   equipment_pack: 'Equipment Pack',
   military_pack: 'Military Pack',
   archive_pack: 'Archive Pack',
@@ -82,6 +85,7 @@ const DISPLAY_NAMES = {
 };
 
 export function materialSpritePath(key) {
+  if (key === 'mine' || SPECIAL_AMMO_BOXES[key]) return 'assets/items/weapons/' + key + '.png';
   if (['barbed_wire','gas_bottle','generator','radar'].includes(key)) return 'assets/items/tools/'+key+'.png';
   if (key === 'cash') return 'assets/items/misc/cash.png';
   if (key.endsWith('_box')) return 'assets/items/weapons/' + key + '.png';
@@ -89,7 +93,7 @@ export function materialSpritePath(key) {
 }
 
 export function getMaterialDisplayName(key, amount = 1) {
-  const name = customItems[key]?.name ?? DISPLAY_NAMES[key] ?? key;
+  const name = customItems[key]?.name ?? DISPLAY_NAMES[key] ?? (SPECIAL_AMMO_BOXES[key] ? SPECIAL_AMMO_BOXES[key].name + ' Ammo Box' : key);
   return amount > 1 ? `${name} x${amount}` : name;
 }
 

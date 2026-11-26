@@ -1,19 +1,21 @@
 export const CONSUMABLE_STACK_MAX = 10;
 
-export const CONSUMABLE_KEYS = ['bandage', 'apple', 'medkit', 'vaccine'];
+export const CONSUMABLE_KEYS = ['bandage', 'apple', 'medkit', 'vaccine', 'armor_plate'];
 
 const DISPLAY_NAMES = {
   bandage: 'Bandage',
   apple: 'Apple',
   medkit: 'Medkit',
-  vaccine: 'Vaccine',
+  vaccine: 'Adrenaline Shot',
+  armor_plate: 'Armor Plate',
 };
 
 const DESCRIPTIONS = {
   bandage: 'Restores 30 HP when used.',
   apple: 'Restores 15 HP when used.',
   medkit: 'Restores 60 HP when used.',
-  vaccine: 'Boosts recovery. (Effect coming soon.)',
+  vaccine: 'Move 25% faster for 5 seconds and recover 5 HP per second for 10 seconds.',
+  armor_plate: 'Adds up to 50 armor that absorbs damage before health.',
 };
 
 const HEAL_AMOUNT = {

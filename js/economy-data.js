@@ -1,5 +1,8 @@
 export default {
   "shop": [
+    { "item": { "kind": "melee", "key": "broom" }, "price": 40 },
+    { "item": { "kind": "melee", "key": "shovel" }, "price": 90 },
+    { "item": { "kind": "melee", "key": "axe" }, "price": 150 },
     {
       "level": 1,
       "price": 60,
@@ -669,6 +672,10 @@ export default {
     "melee": {
       "knife": 4,
       "wooden_bat": 6,
+      "metal_bat": 45,
+      "axe": 35,
+      "shovel": 20,
+      "broom": 10,
       "crowbar": 10,
       "fire_axe": 25
     },

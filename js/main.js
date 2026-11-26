@@ -198,6 +198,9 @@ class Game {
       confirmMessage: document.getElementById('confirm-message'),
       hud: document.getElementById('hud'),
       healthBar: document.getElementById('health-bar'),
+      armorWrap: document.getElementById('armor-bar-wrap'),
+      armorBar: document.getElementById('armor-bar'),
+      armorText: document.getElementById('armor-text'),
       healthText: document.getElementById('health-text'),
       pickupStatus: document.getElementById('pickup-status'),
       powerupStatus: document.getElementById('powerup-status'),
@@ -277,7 +280,13 @@ class Game {
         description.className = 'raid-pause-objective';
         description.setAttribute('aria-label', challenge.description);
         setElementWrappedPixelText(description, challenge.description, 270, PIXEL_TEXT_SCALE_SM);
-        challenges.append(row, description);
+        const progress = document.createElement('progress');
+        progress.max = challenge.goal;
+        progress.value = challenge.progress;
+        progress.setAttribute('aria-label', challenge.title);
+        const card = document.createElement('article');
+        card.append(row, description, progress);
+        challenges.append(card);
       }
     }
     this.el.pauseMenu?.classList.remove('hidden');
@@ -1343,42 +1352,55 @@ class Game {
     return angle;
   }
 
-  _treeFadeKey(f) {
-    return `${f.x.toFixed(2)},${f.z.toFixed(2)},${f.kind}`;
-  }
-
   _updateTreeFades(dt) {
     if (!this.player?.alive || !this.world) return;
-    const px = this.player.x;
-    const pz = this.player.z;
-    const playerSortZ = this._playerSortZ();
-    const playerRadius = this.player.radius ?? 0.35;
-    const playerBodyH = (CHAR_NATIVE_PX * SPRITE_PLAYER) / PPU;
-    const playerTopZ = pz - playerBodyH * 0.9;
-    const nearTrees = this._cachedYsortFoliage.filter((f) => isTreeFoliage(f.kind));
-
-    const active = new Set();
-    const fadeRate = 7;
-    const step = Math.min(1, fadeRate * dt);
-
-    for (const f of nearTrees) {
-      const key = this._treeFadeKey(f);
-      active.add(key);
-      const target = treeOccludesPlayer(f, px, pz, playerRadius, playerSortZ, {
-        playerTopZ,
-        headRadius: Math.max(0.4, playerRadius * 0.42),
-      }) ? 0.5 : 1;
-      const prev = this._treeFadeAlpha.get(key) ?? 1;
-      this._treeFadeAlpha.set(key, prev + (target - prev) * step);
+    const { x, z, radius = 0.35 } = this.player;
+    const sortZ = this._playerSortZ();
+    const head = {
+      playerTopZ: z - (CHAR_NATIVE_PX * SPRITE_PLAYER) / PPU * 0.9,
+      headRadius: Math.max(0.4, radius * 0.42),
+    };
+    const fades = this._treeFadeAlpha;
+    const markOccluding = (tree, opacity) => {
+      const fade = fades.get(tree);
+      if (fade) fade.occluding = true;
+      else fades.set(tree, { occluding: true, progress: 0, alpha: 1, opacity });
+    };
+    const feetZ = entityFeetZ(this.player);
+    const nearPlayer = { minX: x, maxX: x, minZ: feetZ, maxZ: feetZ };
+    const pixel = TILE / 16;
+    for (const tree of this.world.mapPropsInView?.(nearPlayer, TILE * 4, true) ?? []) {
+      if (!tree.tree || feetZ >= tree.z + TILE * 0.2) continue;
+      const width = (tree.layout?.width ?? tree.image.width) * pixel;
+      const height = (tree.layout?.height ?? tree.image.height) * pixel;
+      const left = tree.layout ? tree.x - TILE / 2 + tree.layout.x * pixel : tree.x - width / 2;
+      const top = tree.layout ? tree.z - TILE / 2 + tree.layout.y * pixel : tree.z + TILE / 2 - height;
+      if (x >= left && x <= left + width && feetZ >= top && feetZ <= top + height) {
+        markOccluding(tree, 0.38);
+      }
     }
-
-    for (const [key, prev] of this._treeFadeAlpha) {
-      if (active.has(key)) continue;
-      const next = prev + (1 - prev) * step;
-      if (next >= 0.995) this._treeFadeAlpha.delete(key);
-      else this._treeFadeAlpha.set(key, next);
+    const step = dt / 0.24;
+    for (const tree of this._cachedYsortFoliage) {
+      if (!isTreeFoliage(tree.kind)) continue;
+      const span = TILE * (tree.drawSize ?? 1);
+      if (Math.abs(tree.x - x) > span * 0.5 + head.headRadius ||
+        head.playerTopZ < tree.z - span - head.headRadius ||
+        head.playerTopZ > tree.z + head.headRadius) continue;
+      if (!treeOccludesPlayer(tree, x, z, radius, sortZ, head)) continue;
+      markOccluding(tree, 0.5);
+    }
+    for (const [tree, fade] of fades) {
+      const progress = Math.max(0, Math.min(1, fade.progress + (fade.occluding ? step : -step)));
+      if (!fade.occluding && progress === 0) {
+        fades.delete(tree);
+        continue;
+      }
+      fade.progress = progress;
+      fade.alpha = 1 - (1 - fade.opacity) * progress * progress * (3 - 2 * progress);
+      fade.occluding = false;
     }
   }
+
 
   /** World Z at sprite feet — used for depth sort vs foliage bases. */
   _feetSortZ(wx, wz, nativePx, scale) {
@@ -1421,6 +1443,7 @@ class Game {
       raidMap=parseRaidMap(generateStructureMap(structures,{seed:getWorldSeed()}));
       raidMap.generatedFromStructures=true;
     }
+    this._treeFadeAlpha.clear();
     this.world = raidMap ? new AuthoredRaidWorld(raidMap, { bakeShadows: BAKED_SHADOWS }) : new World();
     this.world.shopBlueprints = this.raidProfile?.shopBlueprints ?? [];
     this.world.setSpriteBank(this.sprites);
@@ -1473,7 +1496,7 @@ class Game {
       this.player = new Player();
       const spawn = this.world.getPlayerSpawn();
       if (raidKit) {
-        this.player.applySaveData({ ...raidKit, x: spawn.x, z: spawn.z, health: 100, maxHealth: 100, shield: 0, alive: true, powerUps: {} });
+        this.player.applySaveData({ ...raidKit, x: spawn.x, z: spawn.z, health: 100, maxHealth: 100, shield: 0, armor: 0, alive: true, powerUps: {} });
       }
       this.player.x = spawn.x;
       this.player.z = spawn.z;
@@ -1632,7 +1655,7 @@ class Game {
       this._cachedYsortFoliage = [];
     }
 
-    this._updateTreeFades(dt);
+
 
     if (!inventoryOpen) {
       if (!this._isSpawnRevealActive()) {
@@ -1812,6 +1835,8 @@ class Game {
 
     if (inventoryOpen) this._updateCameraFollow(dt);
     if (!this._isSpawnRevealActive()) {
+    this.player.updateAdrenaline(time);
+    this._updateTreeFades(dt);
     const reloadResult = this.player.updateReload(time);
     if (reloadResult?.ejectCasings > 0) {
       const cfg = WEAPONS[this.player.weaponKey];
@@ -1879,6 +1904,15 @@ class Game {
           || !hasCombatSight(this.world, robot, raider)) continue;
         target = raider;
         targetRange = distance;
+      }
+      if (robot.burn?.ticks && time >= robot.burn.nextTick) {
+        const burn = robot.burn;
+        while (robot.alive && burn.ticks > 0 && time >= burn.nextTick) {
+          burn.nextTick += 0.5;
+          burn.ticks--;
+          this._damageRobot(robot, 4, burn.x, burn.z);
+        }
+        if (!robot.alive) continue;
       }
       robot.combatTarget = target;
       robot.update(dt, target, this.world, this.robots, (r) => {
@@ -2057,8 +2091,8 @@ class Game {
       this.heldThrowable={index,key};this.items?.setPickupMsg('Choose clear ground within two tiles.');return;
     }
     this.player.itemSlots[index]=(item.amount??1)>1?{...item,amount:item.amount-1}:null;
-    this.placedTools.push({key,x:target.x,z:target.z,cooldowns:new WeakMap()});
-    if(key==='barbed_wire')this.player.raidStats.trapsPlaced=(this.player.raidStats.trapsPlaced??0)+1;
+    this.placedTools.push({key,x:target.x,z:target.z,cooldowns:new WeakMap(), armedAt: performance.now() / 1000 + 0.75});
+    if(key==='barbed_wire'||key==='mine')this.player.raidStats.trapsPlaced=(this.player.raidStats.trapsPlaced??0)+1;
     this.audio?.inventoryPlace();
   }
 
@@ -2067,16 +2101,23 @@ class Game {
     const blocked=(x,z,nx,nz)=>this.world.segmentBlocked(x,z,nx,nz,0.1,false,null,{solidTrace:true});
     this.audio.explosion(this._soundOffset(tool,tool.z));
     this.particles.push(...createExplosion(tool.x,tool.z),...createExplosion(tool.x,tool.z),...createRobotSmoke(tool.x,tool.z,1.5));
-    this._damagePlayerFromThrowable(tool,TILE*2,85,time,blocked);
-    for(const npc of this.robots)if(npc.alive&&Math.hypot(npc.x-tool.x,npcCollisionZ(npc)-tool.z)<TILE*2&&!blocked(tool.x,tool.z,npc.x,npcCollisionZ(npc)))this._damageRobot(npc,85,tool.x,tool.z);
+    const radius = tool.radius ?? TILE * 2;
+    const damage = tool.damage ?? 85;
+    this._damagePlayerFromThrowable(tool,radius,damage,time,blocked);
+    for(const npc of this.robots)if(npc.alive&&Math.hypot(npc.x-tool.x,npcCollisionZ(npc)-tool.z)<radius&&!blocked(tool.x,tool.z,npc.x,npcCollisionZ(npc)))this._damageRobot(npc,damage,tool.x,tool.z);
     for(const other of this.placedTools)if(!other.done&&other.key==='gas_bottle'&&Math.hypot(other.x-tool.x,other.z-tool.z)<TILE*2&&!blocked(tool.x,tool.z,other.x,other.z))this._explodeGasBottle(other,time);
   }
 
   _updatePlacedTools(dt,time) {
-    const actors=this.placedTools.some(tool=>tool.key==='barbed_wire'&&!tool.done)?[this.player,...this.robots]:[];
+    const actors=this.placedTools.some(tool=>['barbed_wire','mine'].includes(tool.key)&&!tool.done)?[this.player,...this.robots]:[];
     for(const actor of actors){
       if(!actor.alive)continue;
       const previous=this._toolPositions.get(actor),z=npcCollisionZ(actor);
+      const mine = this.placedTools.find(tool => tool.key === 'mine' && !tool.done && time >= tool.armedAt &&
+        (previous ? segmentDistance(tool.x, tool.z, previous.x, previous.z, actor.x, z) : Math.hypot(tool.x - actor.x, tool.z - z)) < TILE * 0.26 &&
+        !this.world.segmentBlocked(tool.x, tool.z, actor.x, z, 0.1, false, null, { solidTrace: true }));
+      if (mine) this._explodeGasBottle(mine, time);
+      if (!actor.alive) continue;
       if(previous&&Math.hypot(actor.x-previous.x,z-previous.z)<TILE*3){
         const wire=this.placedTools.find(tool=>tool.key==='barbed_wire'&&!tool.done&&segmentDistance(tool.x,tool.z,previous.x,previous.z,actor.x,z)<TILE*0.45&&!this.world.segmentBlocked(tool.x,tool.z,actor.x,z,0.1,false,null,{solidTrace:true}));
         if(wire&&Math.hypot(actor.x-previous.x,z-previous.z)>0.015){
@@ -2625,6 +2666,7 @@ class Game {
     if (this.player.isMeleeActive()) return;
     const result = this.player.startReload(time);
     if (!result) return;
+    if (result.error) { this.items.setPickupMsg(result.error, { error: true }); return; }
     if (result.cancelled) return;
     this.audio.reload();
     if (result.casingReload) {
@@ -2762,7 +2804,7 @@ class Game {
       origin.x, origin.z, target.x, target === this.player ? entityFeetZ(target) : npcCollisionZ(target), 0.06, false, null, { feetTrace: true });
     if (bullet.fromPlayer || bullet.enemyOwner) {
       for (const robot of this.robots) {
-        if (!robot.alive) continue;
+        if (!robot.alive || bullet.pierced === robot) continue;
         if (!bullet.fromPlayer && (robot === bullet.enemyOwner
           || (bullet.enemyOwner.type !== 'raider' && robot.type !== 'raider'))) continue;
         const dx = bullet.x - robot.x;
@@ -2772,7 +2814,22 @@ class Game {
           if (blocked(robot)) continue;
           const fromX = bullet.x - bullet.vx * 0.02;
           const fromZ = bullet.z - bullet.vz * 0.02;
-          this._damageRobot(robot, bullet.damage, fromX, fromZ, bullet, bullet.fromPlayer);
+          const effect = bullet.ammoEffect;
+          const firstPierce = effect === 'rifle_ap' && !bullet.pierced;
+          if (effect === 'pistol_hollowtip') robot.ammoSlowUntil = time + 2;
+          if (effect === 'shotgun_dragonbreath') {
+            robot.burn ??= { ticks: 0 };
+            if (!robot.burn.ticks) robot.burn = { ticks: 4, nextTick: time + 0.5, x: fromX, z: fromZ };
+          }
+          const multiplier = effect === 'pistol_hollowtip' || firstPierce ? 1.25 : 1;
+          this._damageRobot(robot, bullet.damage * multiplier, fromX, fromZ, bullet, bullet.fromPlayer);
+          if (firstPierce) {
+            bullet.pierced = robot;
+            bullet.active = true;
+          }
+          if (effect === 'sniper_explosive') {
+            this._explodeGasBottle({ x: robot.x, z: npcCollisionZ(robot), radius: TILE, damage: 35 }, time);
+          }
           return;
         }
       }
@@ -3069,7 +3126,54 @@ class Game {
     ctx.globalAlpha = 1;
   }
 
-  _draw() {
+  _drawContactShadows(ctx, shadows, camera, tilePx, gridOrigin) {
+    const pixelScale = tilePx / 16;
+    const layer = this._characterShadowLayer ??= document.createElement('canvas');
+    const step = Math.max(1, tilePx >> 4);
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const { x, feetY, rx, ry } of shadows) {
+      const width = Math.max(3 * step, rx) + step;
+      const height = Math.max(2 * step, ry) + step;
+      left = Math.min(left, x - width);
+      top = Math.min(top, feetY - height);
+      right = Math.max(right, x + width);
+      bottom = Math.max(bottom, feetY + height);
+    }
+    if (right <= 0 || bottom <= 0 || left >= INTERNAL_W || top >= INTERNAL_H) return;
+    const align = (value, origin) => origin + Math.floor((value - origin) / pixelScale) * pixelScale;
+    const x = align(Math.max(0, left), camera.x);
+    const y = align(Math.max(0, top), camera.y);
+    const scale = this.renderScale;
+    const width = Math.ceil((Math.min(INTERNAL_W, right) - x) * scale);
+    const height = Math.ceil((Math.min(INTERNAL_H, bottom) - y) * scale);
+    if (layer.width < width) layer.width = Math.ceil(width / 64) * 64;
+    if (layer.height < height) layer.height = Math.ceil(height / 64) * 64;
+    const mask = layer.getContext('2d');
+    mask.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
+    mask.clearRect(x, y, width / scale, height / scale);
+    mask.imageSmoothingEnabled = false;
+    mask.globalCompositeOperation = 'source-over';
+    for (const shadow of shadows) {
+      drawPixelEllipseShadow(mask, shadow.x, shadow.feetY, shadow.rx, shadow.ry, tilePx, gridOrigin, true);
+    }
+    mask.globalCompositeOperation = 'destination-out';
+    const bounds = {
+      minX: (x - camera.x) / PPU,
+      maxX: (x + width / scale - camera.x) / PPU,
+      minZ: (y - camera.y) / PPU,
+      maxZ: (y + height / scale - camera.y) / PPU,
+    };
+    this.world.eraseBakedShadowOverlap?.(mask, bounds, (wx, wz) => ({
+      x: camera.x + wx * PPU, y: camera.y + wz * PPU,
+    }), pixelScale);
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.drawImage(layer, 0, 0, width, height, x, y, width / scale, height / scale);
+    ctx.restore();
+  }
+
+
+  _draw(now = performance.now()) {
     if (!this.running || !this.player) return;
     if (this.paused) {
       this._hideGameCursor();
@@ -3077,6 +3181,8 @@ class Game {
     }
 
     let ctx = this.ctx;
+    const drawShadows = shadowsEnabled();
+    const drawTime = now / 1000;
     const nightFactor = this.dayNight?.getNightFactor() ?? 0;
     this._syncCamPixels();
     ctx.resetTransform();
@@ -3143,7 +3249,7 @@ class Game {
     const playerZ = this.player.z;
     const floorPixel = TILE / BUILDING_ART_PX;
     let lightView, lightKey, shadowMask, drawShadowMask;
-    if (DYNAMIC_SHADOWS && shadowsEnabled()) {
+    if (DYNAMIC_SHADOWS && drawShadows) {
       lightView = {
         minX: Math.floor(viewMinX / TILE) * TILE,
         maxX: Math.ceil(viewMaxX / TILE) * TILE,
@@ -3208,7 +3314,7 @@ class Game {
       const point = worldToScreen(item.x, item.z);
       this.sprites.drawGroundItem(ctx, item.key, point.x, point.y, 18, -item.lift);
     }
-    const bakedShade = (x, z) => shadowsEnabled() && BAKED_SHADOWS && this.world.isInBakedShadow?.(x, z);
+    const bakedShade = (x, z) => drawShadows && BAKED_SHADOWS && this.world.isInBakedShadow?.(x, z);
     const lit = (x, z) => pointInWallLight(this._wallLight, x, z);
     const lightPath = this._wallLight && makeWallLightPath(this._wallLight, worldToScreen);
     const drawList = this._drawListScratch;
@@ -3220,13 +3326,14 @@ class Game {
     const shadowGridOrigin = worldToScreen(0, 0);
     const characterShadows = [];
     const addCharacterShadow = (point, nativeSize, spriteScale, rx = CHARACTER_SHADOW_RX, ry = CHARACTER_SHADOW_RY) => {
+      if (!drawShadows) return;
       const feetY = point.y + spriteFeetOffset(nativeSize, spriteScale);
       characterShadows.push({ x: point.x, feetY, rx, ry });
     };
     const roofDraws = [];
     const edgeGrassDraws = [];
 
-    const roofTime = performance.now();
+    const roofTime = now;
     const room = this.world.indoorRoomAt?.(playerX, entityFeetZ(this.player));
     const roofOnly = this.world.roofOnlyAt?.(playerX, entityFeetZ(this.player));
     if (this._roofFade?.world !== this.world) {
@@ -3276,7 +3383,7 @@ class Game {
         }
       }
     }
-    const visibleProps = [...(this.world.mapPropsInView?.(view, TILE * 4) ?? [])];
+    const visibleProps = this.world.mapPropsInView?.(view, TILE * 4) ?? [];
     const shadeSpriteAcrossRoom = (x, bottomZ, draw) => {
       if (!roomPath || shadeRoomAt(Math.floor(x / TILE), Math.floor(bottomZ / TILE)) === protectedRoom) return;
       ctx.save();
@@ -3335,14 +3442,9 @@ class Game {
             const x = snap(left), y = snap(top);
             ctx.drawImage(image, x, y, snap(left + width) - x, snap(top + height) - y);
           } else {
-            const playerFeet = prop.tree ? worldToScreen(playerX, entityFeetZ(this.player)) : null;
-            const behindTree = playerFeet && entityFeetZ(this.player) < prop.z + TILE * 0.2
-              && playerFeet.x >= left && playerFeet.x <= left + width
-              && playerFeet.y >= top && playerFeet.y <= top + height;
-            if (behindTree) {
-              ctx.save();
-              ctx.globalAlpha *= 0.38;
-            }
+            const fade = this._treeFadeAlpha.get(prop)?.alpha ?? 1;
+            const previousAlpha = ctx.globalAlpha;
+            if (fade < 1) ctx.globalAlpha *= fade;
             ctx.drawImage(image, left, top, width, height);
             if (prop.ySort) {
               const bottomZ = prop.z + (top + height - p.y) / PPU;
@@ -3350,7 +3452,7 @@ class Game {
                 ctx.drawImage(this.sprites.getBakedShadeBitmap(ctx, prop.image), left, top, width, height);
               });
             }
-            if (behindTree) ctx.restore();
+            if (fade < 1) ctx.globalAlpha = previousAlpha;
           }
           if (prop.corner) {
             const edge = prop.corner;
@@ -3371,7 +3473,7 @@ class Game {
           sortBias: piece.sortBias ?? SORT_ENTITY,
           receivesShadow: true,
           shadowSource: piece,
-          shadowBounds: shadowBounds(piece.x, piece.z, tilePx * 2),
+          shadowBounds: shadowMask ? shadowBounds(piece.x, piece.z, tilePx * 2) : null,
           draw: () => drawDecorPiece(ctx, this.sprites, piece, tilePx, worldToScreen),
         });
       }
@@ -3385,14 +3487,14 @@ class Game {
         sortBias: SORT_WALL_BACK,
         receivesShadow: true,
         shadowSource: f,
-        shadowBounds: shadowBounds(f.x, f.z, tilePx * (f.drawSize ?? 1) + 2),
+        shadowBounds: shadowMask ? shadowBounds(f.x, f.z, tilePx * (f.drawSize ?? 1) + 2) : null,
         draw: () => {
           const s = this._worldToScreen(f.x, f.z);
           const size = tilePx * (f.drawSize ?? 1);
           const tint = f.tintKey ? unpackTintGradient(f.tintKey) : null;
-          const fadeAlpha = this._treeFadeAlpha.get(this._treeFadeKey(f)) ?? 1;
+          const fadeAlpha = this._treeFadeAlpha.get(f)?.alpha ?? 1;
           const prevAlpha = ctx.globalAlpha;
-          if (isTreeFoliage(f.kind) && fadeAlpha < 0.999) ctx.globalAlpha = prevAlpha * fadeAlpha;
+          if (fadeAlpha < 1) ctx.globalAlpha = prevAlpha * fadeAlpha;
           this.sprites.ensureSprite(f.sprite);
           if (isTreeFoliage(f.kind)) {
             this.sprites.drawPropSprite(ctx, f.sprite, s.x, s.y, size, {
@@ -3403,14 +3505,14 @@ class Game {
             const drawY = s.y - size;
             this.sprites.drawTile(ctx, f.sprite, drawX, drawY, size, tint, f.flipX ?? false);
           }
-          ctx.globalAlpha = prevAlpha;
+          if (fadeAlpha < 1) ctx.globalAlpha = prevAlpha;
         },
       });
     }
     for (const corpse of this.corpses?.corpses ?? []) {
       if (!inView(corpse.x, corpse.z, TILE * 2) || !lit(corpse.x, this.corpses.sortZ(corpse))) continue;
       const corpseScale = CORPSE_DRAW_SCALE * (getEnemyDrawScale(corpse.type) / getEnemyDrawScale('spider'));
-      const fall = Math.min(1, Math.max(0, (performance.now() / 1000 - corpse.spawnTime) / 0.12));
+      const fall = Math.min(1, Math.max(0, (drawTime - corpse.spawnTime) / 0.12));
       // SpriteBank mirrors the rotation when flipX is set.
       const angle = -Math.PI / 4 * (1 - fall * fall);
       const s = this._corpseScreenPos(corpse);
@@ -3462,7 +3564,7 @@ class Game {
       drawList.push({ z: chest.ySort === false ? -Infinity : chest.z + 0.02, sortBias: SORT_ENTITY + (chest.plane ?? 0) * 0.01, receivesShadow: true, bakedShade: bakedShade(chest.x, chest.z),
         shadowLift: chest.spriteHeight ? Math.round(chest.spriteHeight * SPRITE_CHEST / 2) : 0,
         shadowSplit: chestScreen.y + ((chest.spriteHeight ?? 0) / 2 - CHEST_DRAW_PIVOT.ny) * SPRITE_CHEST,
-        shadowBounds: shadowBounds(chest.x, chest.z, tilePx * 2), draw: () => {
+        shadowBounds: shadowMask ? shadowBounds(chest.x, chest.z, tilePx * 2) : null, draw: () => {
         const s = this._chestScreenPos(chest);
         const drawChest = () => this.sprites.draw(
           ctx,
@@ -3549,7 +3651,6 @@ class Game {
           scout ? 12 : CHARACTER_SHADOW_RX, scout ? 4 : CHARACTER_SHADOW_RY);
       }
       drawList.push({ z: robotSortZ, sortBias: SORT_ENTITY, bakedShade: bakedShade(robot.x, npcCollisionZ(robot)), draw: () => {
-        const drawTime = performance.now() / 1000;
         const emerge = robot.getEmergeT();
         const shake = robot.getEmergeShake();
         const s = this._entityToScreen(robot.x, robot.z);
@@ -3611,38 +3712,15 @@ class Game {
         ctx.globalAlpha = 1;
       }});
     }
-    const drawTime = performance.now() / 1000;
     const playerSheet = getPlayerSheet(this.player);
     const playerFlip = getPlayerFlipX(this.player);
     const playerBounce = (getPlayerBounceY(this.player, drawTime));
     const idleBreath = (this._weaponBreathY ?? 0);
     const playerAnim = getPlayerAnim(this.player, drawTime);
     addCharacterShadow(this._entityToScreen(playerX, playerZ), CHAR_NATIVE_PX, SPRITE_PLAYER);
-    const pixelScale = tilePx / 16;
-    const layer = this._characterShadowLayer ??= document.createElement('canvas');
-    // Match the rounded ground-chunk pixel grid even while the camera is moving.
-    const phase = (value) => ((value % pixelScale) + pixelScale) % pixelScale - pixelScale;
-    const maskX = phase(camT.x);
-    const maskY = phase(camT.y);
-    const shadowScale = this.renderScale;
-    const width = Math.ceil((INTERNAL_W - maskX) * shadowScale);
-    const height = Math.ceil((INTERNAL_H - maskY) * shadowScale);
-    if (layer.width !== width) layer.width = width;
-    if (layer.height !== height) layer.height = height;
-    const mask = layer.getContext('2d');
-    mask.setTransform(shadowScale, 0, 0, shadowScale, -maskX * shadowScale, -maskY * shadowScale);
-    mask.clearRect(maskX, maskY, width / shadowScale, height / shadowScale);
-    mask.imageSmoothingEnabled = false;
-    mask.globalCompositeOperation = 'source-over';
-    for (const shadow of characterShadows) {
-      drawPixelEllipseShadow(mask, shadow.x, shadow.feetY, shadow.rx, shadow.ry, tilePx, shadowGridOrigin, true);
+    if (characterShadows.length) {
+      this._drawContactShadows(ctx, characterShadows, camT, tilePx, shadowGridOrigin);
     }
-    mask.globalCompositeOperation = 'destination-out';
-    this.world.eraseBakedShadowOverlap?.(mask, view, (x, z) => ({ x: camT.x + x * PPU, y: camT.y + z * PPU }), pixelScale);
-    ctx.save();
-    ctx.globalAlpha = 0.28;
-    if(shadowsEnabled()) ctx.drawImage(layer, maskX, maskY, width / shadowScale, height / shadowScale);
-    ctx.restore();
     const playerShade = bakedShade(playerX, playerZ + this.player.getMoveCollider(PPU).zOff);
     drawList.push({ z: playerSortZ, sortBias: SORT_ENTITY, bakedShade: playerShade, draw: () => {
       const s = this._entityToScreen(this.player.x, this.player.z);
@@ -3847,7 +3925,7 @@ class Game {
       ctx.fill(outside, 'evenodd');
       ctx.restore();
     }
-    this._drawPlayerCooldown(ctx, performance.now() / 1000);
+    this._drawPlayerCooldown(ctx, drawTime);
 
     applyNightOverlay(ctx, INTERNAL_W, INTERNAL_H, nightFactor);
     const bounds = this.world.bounds ?? getWorldBoundsWorld();
@@ -4023,6 +4101,9 @@ class Game {
     }
     const hpPct = (this.player.health / this.player.maxHealth) * 100;
     this.el.healthBar.style.width = `${hpPct}%`;
+    this.el.armorWrap.classList.toggle('hidden', this.player.armor <= 0);
+    this.el.armorBar.style.width = `${2 * this.player.armor}%`;
+    this._setPixelText(this.el.armorText, String(Math.ceil(this.player.armor)), PIXEL_TEXT_SCALE_SM);
     this._setPixelText(
       this.el.healthText,
       String(Math.ceil(this.player.health)) + (this.player.shield > 0 ? ` (+${Math.ceil(this.player.shield)})` : ''),
@@ -4053,7 +4134,7 @@ class Game {
         this.el.ammoCurrent.classList.toggle('ammo-low', gun.ammo === 0);
         this.el.ammoReserve.classList.toggle('ammo-low', reserve <= 0);
         this.el.reloadIndicator.classList.toggle('hidden', !gun.reloading);
-        this._drawAmmoHudIcon(getWeaponAmmoType(this.player.weaponKey));
+        this._drawAmmoHudIcon(this.player.getCurrentAmmoType());
       }
     }
 
@@ -4198,10 +4279,12 @@ class Game {
       this.nextRaidCheckpointAt = now + 3000;
     }
     const renderStart = performance.now();
-    this._draw();
-    const renderMs = performance.now() - renderStart;
+    this._draw(now);
+    const renderEnd = performance.now();
     this._updateHUD();
-    const perf = this._perf ??= { frames: 0, total: 0, peak: 0, npcPeak: 0, updated: now };
+    const perf = this._perf ??= { frames: 0, total: 0, peak: 0, npcPeak: 0, drawTotal: 0, cpuTotal: 0, updated: now };
+    perf.drawTotal += renderEnd - renderStart;
+    perf.cpuTotal += renderStart - updateStart + performance.now() - renderEnd;
     if (frameMs > 0) {
       perf.frames++;
       perf.total += frameMs;
@@ -4213,9 +4296,9 @@ class Game {
     if (now - perf.updated >= 500 && perf.total > 0) {
       document.getElementById('raid-performance').textContent =
         `${Math.round(1000 * perf.frames / perf.total)} FPS · max ${perf.peak.toFixed(0)} ms\n`
-        + `CPU ${(renderStart - updateStart).toFixed(1)} + draw ${renderMs.toFixed(1)} ms\n`
+        + `CPU ${(perf.cpuTotal / perf.frames).toFixed(1)} + draw ${(perf.drawTotal / perf.frames).toFixed(1)} ms avg\n`
         + `NPC max ${perf.npcPeak.toFixed(1)} ms · shadows ${DYNAMIC_SHADOWS ? 'dynamic' : BAKED_SHADOWS && this.world.raidMap ? 'baked' : 'contact'}`;
-      Object.assign(perf, { frames: 0, total: 0, peak: 0, npcPeak: 0, updated: now });
+      Object.assign(perf, { frames: 0, total: 0, peak: 0, npcPeak: 0, drawTotal: 0, cpuTotal: 0, updated: now });
     }
     this._scheduleFrame();
   }

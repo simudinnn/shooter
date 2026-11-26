@@ -250,6 +250,7 @@ export class Robot {
 
   _move(dt, world, player, robots, vx, vz, speedMult = 1, opts = {}) {
     const len = Math.sqrt(vx * vx + vz * vz) || 1;
+    if (performance.now() / 1000 < (this.ammoSlowUntil ?? 0)) speedMult *= 0.65;
     const stepX = (vx / len) * this.speed * speedMult * dt;
     const stepZ = (vz / len) * this.speed * speedMult * dt;
     const prevX = this.x;

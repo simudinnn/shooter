@@ -145,6 +145,7 @@ export function capturePlayerState(player) {
   health: player.health,
   maxHealth: player.maxHealth,
   shield: player.shield ?? 0,
+  armor: player.armor ?? 0,
   alive: !!player.alive,
   weaponKey: player.weaponKey,
   weaponSlot: player.weaponSlot,

@@ -1,3 +1,4 @@
+import { SPECIAL_AMMO_BOXES } from './ammo.js';
 import { showPackRewards } from './packRewards.js';
 import { blueprintOnlyWeapon, resolveBlueprint, DISPLAY_ONLY_GUNS, BLUEPRINT_SUPPLIES, blueprintUnlockId } from './blueprints.js';
 import { bindTouchSelection } from './touchSelection.js';
@@ -15,6 +16,24 @@ import { equipmentSlotFor, itemDurability, MAX_DURABILITY } from './equipment.js
 import { createPixelTextImg, setElementPixelText, setElementWrappedPixelText, PIXEL_TEXT_SCALE, PIXEL_TEXT_SCALE_SM } from './pixelText.js';
 import { applyRecycleYields, canCraftRecipe, canRecycleItem, craftRecipe, getCraftableRecipes, getRecycleYields, recycleBatchSize } from './crafting.js';
 
+function positionCursorOverlay(element, clientX, clientY, centered = false) {
+  const style = element.style;
+  if (!style.left) style.left = '0px';
+  if (!style.top) style.top = '0px';
+  // The modal's opening animation can make it the origin for position: fixed.
+  const box = element.getBoundingClientRect();
+  const zoom = element.currentCSSZoom || 1;
+  const viewport = window.visualViewport;
+  const left = (viewport?.offsetLeft ?? 0) + 8;
+  const top = (viewport?.offsetTop ?? 0) + 8;
+  const right = left + (viewport?.width ?? window.innerWidth) - 16;
+  const x = centered ? clientX : Math.max(left, Math.min(clientX - box.width / 2, right - box.width));
+  const y = centered ? clientY : Math.max(top, clientY - box.height - 12);
+  style.left = parseFloat(style.left) + (x - box.left - (centered ? box.width / 2 : 0)) / zoom + 'px';
+  style.top = parseFloat(style.top) + (y - box.top - (centered ? box.height / 2 : 0)) / zoom + 'px';
+}
+
+
 export const EXTRACT_RADIUS = 5;
 export const EXTRACT_SECONDS = 3;
 const CATALOG_CATEGORIES = [
@@ -28,13 +47,14 @@ const CATALOG_CATEGORIES = [
 ];
 
 const shopUnlockId = item => item.kind + ':' + item.key;
-const shopOfferUnlocked = (profile, offer) => (profile.shopBlueprints ?? []).includes(shopUnlockId(offer.item))
-  || (!offer.blueprintOnly && baseTier(profile, 'shop') >= offer.shopTier);
+const shopOfferUnlocked = (profile, offer) => (!offer.requiresTier || baseTier(profile, 'shop') >= offer.shopTier)
+  && ((profile.shopBlueprints ?? []).includes(shopUnlockId(offer.item))
+  || (!offer.blueprintOnly && baseTier(profile, 'shop') >= offer.shopTier));
 const advancedGear = new Set(['hunting_vest', 'police_vest', 'military_vest', 'backpack2', 'backpack3', 'upgrade_kit', 'grenade']);
 
 function catalogCategory(item) {
   if (item.key === 'machete') return 2;
-  if(item.kind==='material'&&item.key.endsWith('_box'))return 4;
+  if(item.kind==='material'&&(item.key.endsWith('_box') || SPECIAL_AMMO_BOXES[item.key]))return 4;
   return CATALOG_CATEGORIES.findIndex(([, kinds]) => kinds.includes(item.kind));
 }
 
@@ -140,7 +160,7 @@ const SHOP_PRICE_OVERRIDES = {
   rifle_box: 100, shotgun_box: 120, sniper_box: 150,
 };
 
-const SHOP = [...economy.shop, { item: { kind: 'material', key: 'barbed_wire', amount: 1 }, price: 85 }, ...Object.entries(DISPLAY_ONLY_GUNS).map(([key, gun]) => ({
+const SHOP = [...economy.shop, { item: { kind: 'material', key: 'mine', amount: 1 }, price: 180 }, { item: { kind: 'consumable', key: 'armor_plate', amount: 1 }, price: 180 }, { item: { kind: 'melee', key: 'nailed_bat' }, price: 140 }, { item: { kind: 'melee', key: 'machete' }, price: 210 }, { item: { kind: 'material', key: 'barbed_wire', amount: 1 }, price: 85 }, ...Object.entries(DISPLAY_ONLY_GUNS).map(([key, gun]) => ({
   item: { kind: 'weapon', key },
   price: gun.price,
 }))].map(offer => {
@@ -153,6 +173,38 @@ const SHOP = [...economy.shop, { item: { kind: 'material', key: 'barbed_wire', a
     item: weapon ? { ...offer.item, ammo: WEAPONS[offer.item.key]?.magSize ?? 0 } : offer.item,
   };
 });
+
+for (const ammo of Object.values(SPECIAL_AMMO_BOXES)) {
+  SHOP.push({ item: { kind: 'material', key: ammo.box, amount: 1 }, price: ammo.price, shopTier: 3, blueprintOnly: true, requiresTier: true });
+}
+
+const FEATURED_SHOP_COLOR = '#c18af6';
+const FEATURED_SHOP = [
+  ...SHOP.filter(offer => offer.requiresTier),
+  ...['fal', 'm24', 'famas', 'military_vest', 'police_vest', 'backpack3', 'grenade', 'molotov', 'vaccine']
+    .map(key => SHOP.find(offer => offer.item.key === key)),
+  { item: { kind: 'material', key: 'radar', amount: 1 }, price: 480 },
+  { item: { kind: 'material', key: 'key', amount: 1 }, price: 160 },
+  { item: { kind: 'material', key: 'keycard', tier: 2, amount: 1 }, price: 440 },
+  { item: { kind: 'material', key: 'keycard', tier: 3, amount: 1 }, price: 720 },
+  { item: { kind: 'melee', key: 'metal_bat' }, price: 220 },
+].filter(Boolean);
+
+function featuredShopWindow(now = Date.now()) {
+  const start = new Date(now);
+  start.setHours(18, 0, 0, 0);
+  const end = new Date(start);
+  end.setHours(22);
+  if (now < +start) return { endsAt: +start, offers: [] };
+  if (now >= +end) {
+    start.setDate(start.getDate() + 1);
+    return { endsAt: +start, offers: [] };
+  }
+  const day = Math.floor(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()) / 86400000);
+  const offers = Array.from({ length: 3 }, (_, index) => FEATURED_SHOP[(day * 3 + index) % FEATURED_SHOP.length]);
+  return { endsAt: +end, offers };
+}
+
 
 export function normalizeRaidProfile(profile) {
   const { credits, ...saved } = profile;
@@ -186,7 +238,7 @@ export function normalizeRaidProfile(profile) {
     }
     normalized.stashStackVersion = 1;
   }
-  const retained=item=>item?.kind==='material'&&REMOVED_MATERIAL_KEYS.includes(item.key)?null:resolveBlueprint(item, normalized.shopBlueprints);
+  const retained=item=>item?.kind === 'weapon' && item.key === 'machete' ? { ...item, kind: 'melee' } : item?.kind==='material'&&REMOVED_MATERIAL_KEYS.includes(item.key)?null:resolveBlueprint(item, normalized.shopBlueprints);
   normalized.stash=(normalized.stash??[]).map(retained);
   if(normalized.kit){normalized.kit={...normalized.kit};for(const key of ['itemSlots','handSlots'])if(normalized.kit[key])normalized.kit[key]=normalized.kit[key].map(retained);}
   return migrateCash(normalized);
@@ -195,13 +247,13 @@ export function normalizeRaidProfile(profile) {
 const CHALLENGES = [
  {id:'first_extract',title:'First Return',metric:'extractions',goal:1,xp:100,cash:40},
  {id:'robot_hunter',title:'Zombie Hunter',metric:'extractedKills',goal:10,xp:150,item:{kind:'material',key:'military_pack',tier:1,amount:1}},
- {id:'workshop',title:'Return Trip',metric:'extractions',goal:3,xp:150,item:{kind:'consumable',key:'medkit',amount:2}},
+ {id:'workshop',title:'Return Trip',metric:'extractions',goal:3,xp:150,cash:90},
  {id:'extract_5',title:'Reliable Runner',metric:'extractions',goal:5,xp:220,item:{kind:'equipment',key:'backpack_1'},cash:80},
  {id:'search_10',title:'Leave No Drawer',metric:'chestsSearched',goal:10,xp:180,item:{kind:'material',key:'equipment_pack',tier:1,amount:1}},
  {id:'raiders_3',title:'Rival Patrol',metric:'extractedRaiderKills',goal:3,xp:250,item:{kind:'material',key:'military_pack',tier:1,amount:1}},
  {id:'packs_5',title:'Lucky Find',metric:'packsOpened',goal:5,xp:160,item:{kind:'material',key:'archive_pack',tier:1,amount:1}},
- {id:'traps_3',title:'Hold the Line',metric:'trapsPlaced',goal:3,xp:150,item:{kind:'material',key:'barbed_wire',amount:2}},
- {id:'heals_5',title:'Field Medic',metric:'healsUsed',goal:5,xp:140,item:{kind:'consumable',key:'medkit',amount:2}},
+ {id:'traps_3',title:'Hold the Line',metric:'trapsPlaced',goal:3,xp:150,cash:60},
+ {id:'heals_5',title:'Field Medic',metric:'healsUsed',goal:5,xp:140,cash:90},
  {id:'trade_500',title:'Making a Living',metric:'sellCash',goal:500,xp:250,item:{kind:'material',key:'industrial_pack',tier:1,amount:1}},
  {id:'extract_20',title:'Veteran Runner',metric:'extractions',goal:20,xp:500,item:{kind:'material',key:'equipment_pack',tier:1,amount:1},cash:200},
 ];
@@ -212,8 +264,8 @@ const ROTATING_CHALLENGES=[
  {title:'Supply Search',metric:'chestsSearched',goal:6,xp:135,item:{kind:'consumable',key:'bandage',amount:3}},
  {title:'Rival Watch',metric:'extractedRaiderKills',goal:2,xp:185,cash:45,item:{kind:'material',key:'keycard',tier:1,amount:1}},
  {title:'Unsealed',metric:'packsOpened',goal:3,xp:130,item:{kind:'material',key:'equipment_pack',tier:1,amount:1}},
- {title:'Field Treatment',metric:'healsUsed',goal:4,xp:120,item:{kind:'consumable',key:'medkit',amount:1}},
- {title:'Blocked Passage',metric:'trapsPlaced',goal:3,xp:145,item:{kind:'material',key:'barbed_wire',amount:2}},
+ {title:'Field Treatment',metric:'healsUsed',goal:4,xp:120,cash:50},
+ {title:'Blocked Passage',metric:'trapsPlaced',goal:3,xp:145,cash:60},
  {title:'Trade Route',metric:'sellCash',goal:300,xp:135,item:{kind:'material',key:'keycard',tier:1,amount:1}},
 ];
 function challengeDescription({ metric, goal }) {
@@ -233,17 +285,17 @@ function challengeDescription({ metric, goal }) {
 export function refreshChallengeRotation(profile,now=Date.now()){
  const date=new Date(now),period=Math.floor(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())/ROTATION_MS),old=profile.challengeRotation;
  if (old?.period === period && old.version === 3 && !old.entries.every(entry => entry.claimed)) {
-   if (old.challengeBalance === 3) return false;
+   if (old.challengeBalance === 4) return false;
    old.entries = old.entries.map(entry => {
      const current = ROTATING_CHALLENGES.find(challenge => challenge.title === entry.title);
      if (!current || entry.claimed) return entry;
-     return { ...entry, ...current, baseline: current.metric === entry.metric ? entry.baseline : Number(profile[current.metric]) || 0 };
+     return { ...entry, ...current, item: current.item, baseline: current.metric === entry.metric ? entry.baseline : Number(profile[current.metric]) || 0 };
    });
-   old.challengeBalance = 3;
+   old.challengeBalance = 4;
    return true;
  }
  const round=old?.version===3&&old.period===period?(old.round??0)+1:0;
- profile.challengeRotation={period,round,version:3,challengeBalance:3,entries:Array.from({length:3},(_,i)=>{const entry=ROTATING_CHALLENGES[(period*3+round*3+i)%ROTATING_CHALLENGES.length];return {...entry,baseline:Number(profile[entry.metric])||0,claimed:false};})};return true;
+ profile.challengeRotation={period,round,version:3,challengeBalance:4,entries:Array.from({length:3},(_,i)=>{const entry=ROTATING_CHALLENGES[(period*3+round*3+i)%ROTATING_CHALLENGES.length];return {...entry,baseline:Number(profile[entry.metric])||0,claimed:false};})};return true;
 }
 export function challengeProgress(profile,raidKills=0,raidStats={}){
  const rotation=profile.challengeRotation;
@@ -383,7 +435,7 @@ export class RaidBase {
     });
     const sort = root.querySelector('#raid-stash-sort');
     this.pixelLabel(sort, 'Sort stash');
-    const sortModes = [['cash', 'Cash value'], ['type', 'Type'], ['amount', 'Quantity']];
+    const sortModes = [['cash', 'Value'], ['type', 'Type'], ['amount', 'Quantity']];
     let sortIndex = -1;
     sort.addEventListener('click', () => {
       const nextIndex = (sortIndex + 1) % sortModes.length;
@@ -425,7 +477,7 @@ export class RaidBase {
       });
       this.renderStash({ stashOnly: true });
       sortIndex = nextIndex;
-      sort.dataset.label = 'Sort: ' + label;
+      sort.dataset.label = mode === 'cash' ? 'Sort:Value' : 'Sort: ' + label;
       this.pixelLabel(sort, sort.dataset.label);
     });
     const reset = root.querySelector('#raid-reset-dialog');
@@ -446,11 +498,11 @@ export class RaidBase {
     root.addEventListener('pointerover', (event) => {
       const slot = event.target.closest('[data-item-name]');
       if (!slot || slot.contains(event.relatedTarget)
-        || !this.selection.classList.contains('hidden')) return;
+        || !this.selection.classList.contains('hidden') || root.querySelector('.raid-dragging')) return;
       if (event.pointerType !== 'mouse') return;
       const host = slot.closest('dialog[open]') ?? root;
       this.itemName ??= document.createElement('div');
-      this.itemName.className = 'inv-tooltip visible';
+      this.itemName.className = 'inv-tooltip raid-item-name visible';
       host.append(this.itemName);
       this.pixelLabel(this.itemName, slot.dataset.itemName, 240, ITEM_TEXT_COLORS[slot.dataset.itemRarity]);
       this.positionItemName(event);
@@ -609,7 +661,10 @@ export class RaidBase {
     this.profile = profile;
     this.refreshChallenges();
     this.root.classList.remove('hidden');
-    if (entering) this.startMusic();
+    if (entering) {
+      this.startMusic();
+      this.featuredShopTimer = setInterval(() => this.updateFeaturedShopTimers(), 1000);
+    }
     if (entering) this.challengeTimer = setInterval(() => {
       if (this.refreshChallenges() && this.station === 'deploy' && !this.deployDialog.open) this.renderChallenges();
     }, 15_000);
@@ -620,6 +675,7 @@ export class RaidBase {
   hide() {
     this.batchSelection?.clear();if(this.batchBar)this.batchBar.hidden=true;
     clearInterval(this.challengeTimer);
+    clearInterval(this.featuredShopTimer);
     if (this.deployDialog.open) this.deployDialog.close();
     this.closeSelection();
     this.root.classList.add('hidden');
@@ -994,9 +1050,7 @@ export class RaidBase {
           if(drag.rotated&&itemWidth(entry)>1){drag.ghost.style.width=slot.offsetHeight+'px';drag.ghost.style.height=slot.offsetWidth+'px';drag.ghost.style.transform='translate(-50%, -50%) rotate(90deg)';}
           (this.deployDialog.open ? this.deployDialog : this.root).appendChild(drag.ghost);
         }
-        const zoom = drag.ghost.currentCSSZoom || (this.deployDialog.open ? Number(getComputedStyle(this.deployDialog).zoom) || 1 : 1);
-        drag.ghost.style.left = `${event.clientX / zoom}px`;
-        drag.ghost.style.top = `${event.clientY / zoom}px`;
+        positionCursorOverlay(drag.ghost, event.clientX, event.clientY, true);
       }
       target.classList.toggle('raid-drop-target', drag.moved && overTarget(event));
     };
@@ -1560,22 +1614,54 @@ export class RaidBase {
     }
   }
 
+  updateFeaturedShopTimers() {
+    if (this.station !== 'shop' || this.root.classList.contains('hidden')) return;
+    const rotation = featuredShopWindow();
+    if (this.featuredEndsAt !== rotation.endsAt) {
+      if (String(this.catalogSelection).startsWith('featured-')) this.closeSelection();
+      this.renderShop();
+      return;
+    }
+    const seconds = Math.max(0, Math.ceil((rotation.endsAt - Date.now()) / 1000));
+    const clock = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+      .map(value => String(value).padStart(2, '0')).join(':');
+    for (const timer of this.root.querySelectorAll('[data-featured-timer]')) {
+      this.pixelLabel(timer, rotation.offers.length ? clock : 'NEXT IN ' + clock, undefined, FEATURED_SHOP_COLOR);
+    }
+  }
+
   renderShop() {
     const grid = this.root.querySelector('#raid-shop');
     grid.replaceChildren();
     const entries = SHOP.map((offer, index) => ({ offer, index }));
     entries.sort((a,b)=>catalogCategory(a.offer.item)-catalogCategory(b.offer.item)||Number(!shopOfferUnlocked(this.profile,a.offer))-Number(!shopOfferUnlocked(this.profile,b.offer))||a.offer.price-b.offer.price);
+    const rotation = featuredShopWindow();
+    this.featuredEndsAt = rotation.endsAt;
+    const heading = document.createElement('h3');
+    heading.className = 'raid-catalog-heading raid-featured-heading';
+    const title = document.createElement('span');
+    this.pixelLabel(title, 'LIMITED TIME OFFERS', undefined, FEATURED_SHOP_COLOR);
+    const timer = document.createElement('span');
+    timer.className = 'raid-featured-timer';
+    timer.dataset.featuredTimer = '';
+    heading.append(title, timer);
+    grid.append(heading);
+    const featured = rotation.offers.map((offer, index) => ({ offer, index: 'featured-' + index, temporary: true }));
     let previousCategory = null;
-    for (const { offer, index } of entries) {
-      const category = catalogCategory(offer.item);
-      if (category !== previousCategory) this.appendCatalogHeading(grid, category);
-      previousCategory = category;
-      const unlocked = shopOfferUnlocked(this.profile, offer);
+    for (const { offer, index, temporary } of [...featured, ...entries]) {
+      if (!temporary) {
+        const category = catalogCategory(offer.item);
+        if (category !== previousCategory) this.appendCatalogHeading(grid, category);
+        previousCategory = category;
+      }
+      const unlocked = (temporary && !offer.requiresTier) || shopOfferUnlocked(this.profile, offer);
       const price = `${offer.price} Cash`;
+      const blueprintMissing = offer.blueprintOnly && !(this.profile.shopBlueprints ?? []).includes(shopUnlockId(offer.item));
+      const tierMissing = (!offer.blueprintOnly || offer.requiresTier) && baseTier(this.profile, 'shop') < offer.shopTier;
       const requirements = [];
-      if (offer.blueprintOnly) requirements.push(getItemDisplayName(offer.item) + ' Blueprint');
-      else if (baseTier(this.profile, 'shop') < offer.shopTier) requirements.push(`Shop ${BASE_TIER_LABELS[offer.shopTier]}`);
-      const requirement = offer.blueprintOnly ? 'Blueprint' : requirements[0] ?? '';
+      if (blueprintMissing) requirements.push(getItemDisplayName(offer.item) + ' Blueprint');
+      if (tierMissing) requirements.push('Shop ' + BASE_TIER_LABELS[offer.shopTier]);
+      const requirement = blueprintMissing ? 'Blueprint' : requirements[0] ?? '';
       const select = (anchor, keepPosition = false) => {
         this.catalogSelection = index;
         const detail = document.createElement('div');
@@ -1584,7 +1670,7 @@ export class RaidBase {
         detail.append(description);
         if (!unlocked) {
           const locked = document.createElement('p');
-          locked.textContent = offer.blueprintOnly ? 'Find and study the ' + requirements[0] + ' to unlock.' : 'Requires ' + requirements.join(' and ');
+          locked.textContent = 'Requires ' + requirements.join(' and ') + '.';
           detail.append(locked);
         }
         const cost = document.createElement('div');
@@ -1599,7 +1685,10 @@ export class RaidBase {
         this.inspect(offer.item, [['BUY',
         () => {
           if (!this.transact((next, player) => {
-            if (!shopOfferUnlocked(next, offer)) return 'This item is locked.';
+            if (temporary) {
+              if (Date.now() >= rotation.endsAt || featuredShopWindow().endsAt !== rotation.endsAt) return 'This offer has expired.';
+            }
+            if ((!temporary || offer.requiresTier) && !shopOfferUnlocked(next, offer)) return 'This item is locked.';
             if (next.cash < offer.price) return 'Not enough cash.';
             if (!storeInStash(next, player, [offer.item])) return 'Stash is full.';
             next.cash -= offer.price;
@@ -1630,6 +1719,7 @@ export class RaidBase {
       grid.append(card);
       if (index === this.catalogSelection) select(slot, true);
     }
+    this.updateFeaturedShopTimers();
   }
 
   appendCatalogHeading(grid, category) {
@@ -1705,9 +1795,7 @@ export class RaidBase {
 
 
   positionItemName({ clientX, clientY }) {
-    const { offsetWidth: width, offsetHeight: height } = this.itemName;
-    this.itemName.style.left = Math.max(8, Math.min(clientX - width / 2, innerWidth - width - 8)) + 'px';
-    this.itemName.style.top = Math.max(8, clientY - height - 12) + 'px';
+    positionCursorOverlay(this.itemName, clientX, clientY);
   }
 
   hideItemName() {

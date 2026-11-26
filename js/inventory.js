@@ -1332,17 +1332,25 @@ export class InventoryUI {
     const normalized = normalizeConsumableItem(item);
     if (!normalized) return false;
     const heal = getConsumableHealAmount(normalized.key);
-    if (heal <= 0) return false;
-    if (player.health >= player.maxHealth) {
-      this.game.items.setPickupMsg('Already at full health', { error: true });
-      return false;
+    if (normalized.key === 'armor_plate') {
+      if (player.armor >= 50) return false;
+      player.armor = 50;
+    } else if (normalized.key === 'vaccine') {
+      const time = performance.now() / 1000;
+      player.adrenaline = { speedUntil: time + 5, nextTick: time + 1, ticks: 10 };
+    } else {
+      if (heal <= 0) return false;
+      if (player.health >= player.maxHealth) {
+        this.game.items.setPickupMsg('Already at full health', { error: true });
+        return false;
+      }
+      if (!player.heal(heal)) return false;
+      if (player.raidStats) player.raidStats.healsUsed = (player.raidStats.healsUsed ?? 0) + 1;
     }
-    if (!player.heal(heal)) return false;
-    if(player.raidStats)player.raidStats.healsUsed=(player.raidStats.healsUsed??0)+1;
     const left = (normalized.amount ?? 1) - 1;
     if (left <= 0) player.itemSlots[index] = null;
     else player.itemSlots[index] = { kind: 'consumable', key: normalized.key, amount: left };
-    this.game.items.setPickupMsg(`+${heal} HP`);
+    this.game.items.setPickupMsg(heal ? `+${heal} HP` : normalized.key === 'armor_plate' ? 'Armor equipped' : 'Adrenaline active');
     this.game.audio.pickup();
     return true;
   }

@@ -1,3 +1,4 @@
+import { SPECIAL_AMMO } from './ammo.js';
 import { DISPLAY_ONLY_GUNS } from './blueprints.js';
 import { drawOutlinedCanvasText } from './pixelText.js';
 import { customEnemies, customWeapons } from './customContent.js';
@@ -32,7 +33,7 @@ const RAIDER_ASSET_PATHS = Object.fromEntries(
 const GUN_SPRITES = ['glock', 'm16', 'm870', 'm24', 'uzi', 'revolver', 'famas', 'fal'];
 /** Pump / bolt guns use a dedicated mid-fire cycle strip. */
 const GUN_CYCLE_SPRITES = ['m870', 'm24'];
-const MELEE_SPRITES = ['knife', 'fire_axe', 'wooden_bat', 'crowbar'];
+const MELEE_SPRITES = ['knife', 'fire_axe', 'wooden_bat', 'crowbar', 'metal_bat', 'nailed_bat', 'machete', 'axe', 'shovel', 'broom'];
 const UNARMED_SPRITES = ['hand'];
 /** 16×16 inventory / GUI icons — weapon only, no hands (assets/items/weapons/{name}.png). */
 export const ITEM_WEAPON_SPRITES = [...GUN_SPRITES, ...MELEE_SPRITES];
@@ -127,6 +128,7 @@ const CORE_ASSETS = {
   scout_walk: 'assets/enemies/scout_walk.png',
   scout_charge: 'assets/enemies/charge.png',
   ...MATERIAL_ASSET_PATHS,
+  ...Object.fromEntries(Object.values(SPECIAL_AMMO).map(({sprite}) => [sprite, weaponItemSpritePath(sprite)])),
   ...Object.fromEntries(Object.keys(DISPLAY_ONLY_GUNS).map(key => ['item_' + key, weaponItemSpritePath(key)])),
   keycard1: materialSpritePath('keycard1'),
   keycard2: materialSpritePath('keycard2'),
@@ -156,6 +158,8 @@ const CORE_ASSETS = {
   shotgun_ammo: 'assets/items/weapons/shotgun_ammo.png',
   sniper_ammo: 'assets/items/weapons/sniper_ammo.png',
   bandage: 'assets/items/consumable/bandage.png',
+  armor_plate: 'assets/items/consumable/armor_plate.png',
+  vaccine: 'assets/items/consumable/vaccine.png',
   inv_lock: 'assets/items/misc/lock.png',
   bullet: 'assets/items/weapons/bullet.png',
   casing: 'assets/items/particles/casing.png',

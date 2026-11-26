@@ -1,3 +1,4 @@
+import { SPECIAL_AMMO_BOXES } from './ammo.js';
 import { isBlueprint, resolveBlueprint, DISPLAY_ONLY_GUNS, BLUEPRINT_SUPPLIES } from './blueprints.js';
 import { isPack, isTieredItem, packTier, rollPackTier } from './containers.js';
 import { content, contentKey, customWeapons } from './customContent.js';
@@ -210,7 +211,7 @@ const LOOT_ENTRIES = [
 const LOOT_ENTRY_BY_KEY = Object.fromEntries(LOOT_ENTRIES.map((e) => [e.key, e]));
 
 const GUN_KEYS = Object.keys(WEAPONS).filter((key) => !customWeapons[key]);
-const MELEE_KEYS = Object.keys(MELEE_WEAPONS);
+const MELEE_KEYS = Object.keys(MELEE_WEAPONS).filter(key => key !== 'metal_bat');
 
 /** Chest gear category weights (compete with materials + empty). */
 const CHEST_GEAR_WEIGHT = {
@@ -365,6 +366,10 @@ export function rollChestLoot(variant = 'chest_wood') {
         ? resolveBlueprint({ kind: 'material', key: 'blueprint', blueprintWeapon: key, amount: 1 })
         : { kind: 'material', key: 'military_comp', amount: 1 };
     slots[1]={kind:'ammo',ammoType:WEAPONS[key].ammoType??(key==='m24'?'sniper':'rifle'),amount:30};
+    if (Math.random() < 0.08) {
+      const keys = Object.keys(SPECIAL_AMMO_BOXES);
+      slots[1] = { kind: 'material', key: keys[Math.floor(Math.random() * keys.length)], amount: 1 };
+    }
     slots[2]={kind:'material',key:'military_pack',tier:Math.random()<0.12?3:Math.random()<0.55?2:1,amount:1};
     slots[3]=Math.random()<0.5?{kind:'consumable',key:'medkit',amount:1}:{kind:'material',key:Math.random()<0.3?'repair_kit':'electrical_comp',amount:1};
   }
@@ -428,7 +433,14 @@ export function getItemDescription(item) {
   }
   if (item.kind === 'ammo') {
     const normalized = normalizeAmmoItem(item);
-    return normalized ? 'Used to reload compatible weapons.' : '';
+    if (!normalized) return '';
+    const effects = {
+      pistol_hollowtip: 'Deals 25% more damage and slows enemies on hit.',
+      rifle_ap: 'Deals 25% more damage on the first hit, then can hit one more enemy for normal damage.',
+      shotgun_dragonbreath: 'Ignites enemies for 2 seconds.',
+      sniper_explosive: 'Explodes on impact with an enemy.',
+    };
+    return effects[normalized.ammoType] ?? 'Used to reload compatible weapons.';
   }
   if (item.kind === 'bandage' || item.kind === 'consumable') {
     const normalized = normalizeConsumableItem(item);
@@ -446,9 +458,11 @@ export function getItemDescription(item) {
     return getThrowableDescription(normalized.key);
   }
   if (item.kind === 'material') {
-    const tools={barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Use, then click a locked door of this tier or lower. Consumed on unlocking.',key:'Use, then click a locked wooden door. Consumed on unlocking.',laptop:'Valuable electronics to sell to the trader.',phone:'Valuable electronics to sell to the trader.'};
+    const tools={mine:'Place on clear ground. Explodes when stepped on after arming.',barbed_wire:'Place on the ground. Slows moving characters and damages them as they cross.',gas_bottle:'Place on the ground. Explodes when shot.',radar:'Carry to detect packs inside chests within 30 metres.',generator:'Portable generator. Its purpose is not assigned yet.',keycard:'Tier '+packTier(item)+' keycard. Use, then click a locked door of this tier or lower. Consumed on unlocking.',key:'Use, then click a locked wooden door. Consumed on unlocking.',laptop:'Valuable electronics to sell to the trader.',phone:'Valuable electronics to sell to the trader.'};
     if(tools[item.key])return tools[item.key];
     if (isPack(item)) return 'Tier '+packTier(item)+' sealed pack. Open for random loot or sell. Rare weapons and blueprints are not guaranteed.';
+    const specialAmmo = SPECIAL_AMMO_BOXES[item.key];
+    if (specialAmmo) return 'Open for ' + specialAmmo.amount + ' rounds. ' + getItemDescription({ kind: 'ammo', ammoType: specialAmmo.type });
     if (item.key.endsWith('_box')) return 'Sealed ammunition box. Open for ammunition.';
     if (item.key === 'blueprint') return 'Study at base to permanently unlock this item in the shop.';
     if (item.key === 'blueprint_old') return 'Already studied blueprint. Valuable to traders.';
@@ -467,7 +481,7 @@ export function getItemDescription(item) {
 export function getItemIconSrc(item) {
   if (!item) return '';
   if (item.kind === 'weapon') return weaponItemSpritePath(WEAPONS[item.key]?.sprite ?? item.key);
-  if (item.kind === 'melee') return weaponItemSpritePath(MELEE_WEAPONS[item.key]?.sprite ?? item.key);
+  if (item.kind === 'melee') return weaponItemSpritePath(MELEE_WEAPONS[item.key]?.itemSprite ?? MELEE_WEAPONS[item.key]?.sprite ?? item.key);
   if (item.kind === 'ammo') {
     const normalized = normalizeAmmoItem(item);
     return ammoSpritePath(normalized.ammoType);
@@ -497,7 +511,7 @@ export function getItemSpriteName(item) {
     return `item_${sprite}`;
   }
   if (item.kind === 'melee') {
-    const sprite = MELEE_WEAPONS[item.key]?.sprite ?? item.key;
+    const sprite = MELEE_WEAPONS[item.key]?.itemSprite ?? MELEE_WEAPONS[item.key]?.sprite ?? item.key;
     return `item_${sprite}`;
   }
   if (item.kind === 'ammo') {
@@ -528,12 +542,12 @@ export function chestSpriteName(variant) {
 
 
 export function itemTextRarity(item) {
-  if (!item) return 'normal';
+  if (!item) return 'common';
   const key = item.key;
-  if (['fal', 'm24', 'military_vest', 'backpack3', 'blueprint'].includes(key)
+  if (SPECIAL_AMMO_BOXES[key] || Object.values(SPECIAL_AMMO_BOXES).some(ammo => ammo.type === item.ammoType) || ['fal', 'm24', 'military_vest', 'backpack3', 'blueprint'].includes(key)
     || (isTieredItem(item) && packTier(item) === 3)) return 'epic';
   if (['m16', 'famas', 'police_vest', 'backpack2', 'laptop', 'jewlery', 'military_comp', 'blueprint_old'].includes(key)
     || (isTieredItem(item) && packTier(item) === 2)) return 'rare';
-  return 'normal';
+  return 'common';
 }
-export const ITEM_TEXT_COLORS = { rare: '#edbd5b', epic: '#c99afa' };
+export const ITEM_TEXT_COLORS = { common: '#ffffff', rare: '#edbd5b', epic: '#c99afa' };

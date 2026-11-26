@@ -1,3 +1,4 @@
+import { SPECIAL_AMMO_BOXES } from './ammo.js';
 import economy from './economy-data.js';
 
 export const blueprintOnlyWeapon = key => !['glock', 'revolver'].includes(key);
@@ -7,11 +8,12 @@ export const DISPLAY_ONLY_GUNS = {
   sig: { name: 'SIG', price: 350 },
   mp5: { name: 'MP5', price: 480 },
   kar98: { name: 'Kar98', price: 700 },
-  machete: { name: 'Machete', price: 210 },
+
   ar15: { name: 'AR-15', price: 760 },
 };
 
 export const BLUEPRINT_SUPPLIES = {
+  ...Object.fromEntries(Object.values(SPECIAL_AMMO_BOXES).map(ammo => [ammo.box, { kind: 'material', name: ammo.name + ' Ammo Box' }])),
   grenade: { kind: 'throwable', name: 'Grenade' },
   molotov: { kind: 'throwable', name: 'Molotov' },
   barbed_wire: { kind: 'material', name: 'Barbed Wire' },

@@ -1,7 +1,8 @@
+import { SPECIAL_AMMO_BOXES } from './ammo.js';
 import { resolveBlueprint } from './blueprints.js';
 export const isTieredItem=item=>isPack(item)||(item?.kind==='material'&&item.key==='keycard');
 export const isPack=item=>item?.kind==='material'&&item.key?.endsWith('_pack');
-export const isContainer=item=>isPack(item)||(item?.kind==='material'&&['pistol_box','rifle_box','shotgun_box','sniper_box'].includes(item.key));
+export const isContainer=item=>isPack(item)||(item?.kind==='material'&&(['pistol_box','rifle_box','shotgun_box','sniper_box'].includes(item.key)||Object.hasOwn(SPECIAL_AMMO_BOXES,item.key)));
 export const packTier=item=>Math.max(1,Math.min(3,Math.floor(item?.tier??1)));
 export function rollPackTier(){const roll=Math.random();return roll<0.7?1:roll<0.95?2:3;}
 const pick=values=>values[Math.floor(Math.random()*values.length)];
@@ -26,6 +27,8 @@ const INDUSTRIAL_BY_TIER = [
 export function containerLoot(item) {
   if (!isContainer(item)) return [];
   if (!isPack(item)) {
+    const special = SPECIAL_AMMO_BOXES[item.key];
+    if (special) return [{ kind: 'ammo', ammoType: special.type, amount: special.amount }];
     const ammoType = item.key.replace('_box', '');
     return [{ kind: 'ammo', ammoType, amount: { pistol: 48, rifle: 60, shotgun: 24, sniper: 20 }[ammoType] }];
   }

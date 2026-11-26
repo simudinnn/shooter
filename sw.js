@@ -1,4 +1,4 @@
-const CACHE = 'robot-ruins-v657';
+const CACHE = 'robot-ruins-v667';
 
 function buildingKitSprites() {
   return [
@@ -210,6 +210,28 @@ const SHELL = [
 ];
 
 const ASSETS = [
+  './assets/weapons/axe.png',
+  './assets/weapons/shovel.png',
+  './assets/weapons/broom.png',
+  './assets/items/weapons/axe.png',
+  './assets/items/weapons/shovel.png',
+  './assets/items/weapons/broom.png',
+  './assets/weapons/nailed_bat.png',
+  './assets/weapons/metal_bat.png',
+  './assets/weapons/machete.png',
+  './assets/items/consumable/armor_plate.png',
+  './assets/items/weapons/mine.png',
+  './assets/items/weapons/metal_bat.png',
+  './assets/items/weapons/machete.png',
+  './assets/items/weapons/pistol_ammo_hollowtip.png',
+  './assets/items/weapons/nailed_bat.png',
+  './assets/items/weapons/pistol_box_hollowtip.png',
+  './assets/items/weapons/sniper_box_explosive.png',
+  './assets/items/weapons/sniper_ammo_explosive.png',
+  './assets/items/weapons/shotgun_box_dragonbreath.png',
+  './assets/items/weapons/shotgun_ammo_dragonbreath.png',
+  './assets/items/weapons/rifle_box_ap.png',
+  './assets/items/weapons/rifle_ammo_ap.png',
   './js/assetPaths.js',
   './js/blueprints.js',
   './js/packRewards.js',
